@@ -76,7 +76,11 @@ tcc-audiovisual/
 │   ├── audio.js             ← player, captura, FFT, beat via spectral flux
 │   ├── shaders.js           ← templates 1–3 (Spectral anel, Fluxo, Barras)
 │   ├── spectralTD.js        ← template 4: port do .toe
-│   ├── director.js          ← diretor automático (energia → params/cores)
+│   ├── director.js          ← diretor automático (energia, pulso, drop → params/cores)
+│   ├── features.js          ← descritores de áudio (puro, testável)
+│   ├── rhythm.js            ← ataques, BPM, groove (tempo real)
+│   ├── preanalysis.js       ← análise da faixa inteira (batidas, seções, drops)
+│   ├── analysis.worker.js   ← Worker da pré-análise
 │   └── serve.py             ← python serve.py → http://127.0.0.1:5500
 ├── docs/
 │   ├── setup-touchdesigner-mcp.md
@@ -146,28 +150,21 @@ Método antigo (grave acima da média) falhava em hardstyle (grave sustentado). 
 
 ---
 
-## 5. Diretor automático (`director.js`)
+## 5. Diretor automático (`features.js`, `rhythm.js`, `preanalysis.js`, `director.js`)
 
-Liga por padrão. Lê ritmo/grave/volume e conduz parâmetros + cores.
+Agnóstico de fonte (música, voz, instrumento). Detalhes, corpus, números e testes em **`docs/diretor-calibracao.md`**.
 
-**Energia 0–1** = 40% ritmo (kicks/s em 4 s) + 35% grave + 25% nível da seção (piso/teto da própria faixa).
-
-**Aquecimento:** primeiros 25 s limitam a energia (começa ~45% do potencial) para começar calmo e crescer.
-
-**Cores:**
-- Calma → branco `#ffffff` / `#dfe6ff`
-- Agitada → azul
-- Energética → vermelho
-
-**Params interpolados:** speed, intensity, aberr, react, spread, motion, scale, bloom, feedback, punch (zoom de kick).
-
-**Drop:** salto de volume &gt; 0.35 em 2.5 s (só após 8 s de play) → burst + flash + zoom.
-
-**UI:** checkbox “Diretor automático”, barra de energia, label, kicks/s. Com diretor ligado, sliders conduzidos ficam `disabled`.
-
-Teste com *All The Things She Said (Hardstyle)*: ~3 s calma 23%, ~10 s agitada 49%, ~20 s energética 83–95%.
-
----
+- **Modo arquivo (padrão ao abrir música):** a faixa inteira é pré-analisada num Worker (~2-3 s): batidas por
+  programação dinâmica, clareza do pulso, seções, energia, drops e subidas. O diretor lê tudo no instante exato
+  de reprodução (com compensação de latência de saída + slider "Ajuste de sincronia"). Pulsos acertam 98-100% das
+  batidas sintéticas com ~5 ms.
+- **Modo ao vivo (Modo Escuta):** mesma receita em tempo real, calibrada para seguir a pré-análise.
+- **Energia:** volume (LUFS), clareza do pulso, andamento, ruído espectral, densidade, fluxo e dinâmica relativa à
+  própria faixa. Cor em patamares: branco (calma) → azul (agitada) → vermelho (intensa), com flash no drop.
+- **Visual:** forma maior também no calmo, morfose que acelera logo após cada batida, passeio no ritmo de 4 compassos,
+  contração/tremor na subida e explosão no drop.
+- **Ferramentas:** `tools/fetch_corpus.mjs` (corpus CC), `tools/calibrate.mjs --live`, `tools/plot_calibration.py`,
+  `tools/synth_test.mjs`, `tools/simulate.mjs`. Sempre validar no corpus inteiro antes de mudar pesos.
 
 ## 6. História do chat (resumo cronológico)
 

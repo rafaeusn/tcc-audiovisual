@@ -1,7 +1,8 @@
 import { vert, sceneFrag, displayFrag } from './shaders.js?v=3';
 import { AudioEngine } from './audio.js?v=3';
-import { createSpectralTD } from './spectralTD.js?v=3';
+import { createSpectralTD } from './spectralTD.js?v=6';
 import { Director, DIRECTED_KEYS } from './director.js';
+import { Rhythm } from './rhythm.js';
 
 const $ = (id) => document.getElementById(id);
 const showError = (msg) => {
@@ -41,7 +42,7 @@ const schema = [
   { key: 'warp', label: 'Distorção', min: 0, max: 2, value: 0.6 },
   { group: 'Spectral TD', only: [TD] },
   { key: 'react', label: 'Reatividade rápida', min: 0, max: 2, value: 0.5, only: [TD] },
-  { key: 'scale', label: 'Escala base', min: 0.5, max: 3, value: 1.3, only: [TD] },
+  { key: 'scale', label: 'Escala base', min: 0.5, max: 3, value: 1.6, only: [TD] },
   { key: 'spread', label: 'Expansão com a energia', min: 0, max: 2, value: 1, only: [TD] },
   { key: 'motion', label: 'Movimento pela tela', min: 0, max: 2, value: 1, only: [TD] },
   { key: 'punch', label: 'Impacto do kick (zoom)', min: 0, max: 1, value: 0.5, only: [TD] },
@@ -55,6 +56,8 @@ const schema = [
   { key: 'feedback', label: 'Rastro', min: 0, max: 0.98, value: 0.86 },
   { key: 'zoom', label: 'Expansão', min: -3, max: 5, value: 1.5, only: [0, 1, 2] },
   { key: 'rot', label: 'Rotação', min: -3, max: 3, value: 0.4, only: [0, 1, 2] },
+  { group: 'Sincronia' },
+  { key: 'syncOffset', label: 'Ajuste de sincronia (ms)', min: -250, max: 250, value: 0, step: 5 },
   { group: 'Pós-processamento' },
   { key: 'aberr', label: 'Aberração cromática', min: 0, max: 3, value: 1 },
   { key: 'exposure', label: 'Exposição', min: 0.3, max: 4, value: 1.6 },
@@ -271,11 +274,18 @@ gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 const audio = new AudioEngine();
 window.__audio = audio;
 const director = new Director();
+const rhythm = new Rhythm();
+function resetDirector() {
+  director.reset();
+  rhythm.reset();
+  analysisId++; // descarta a pré-análise da fonte anterior
+  analysis = { state: 'idle', progress: 0, timeline: null };
+}
 window.__director = director;
 let autoMode = true;
 
 function updateAutoLock() {
-  for (const key of [...DIRECTED_KEYS, 'colA', 'colB', 'hueCycle']) {
+  for (const key of [...DIRECTED_KEYS, 'sensitivity', 'colA', 'colB', 'hueCycle']) {
     if (inputs[key]) inputs[key].disabled = autoMode;
   }
 }
@@ -293,24 +303,73 @@ function syncDirectorUI(dt) {
   $('energy-fill').style.left = `${director.intensity * 100}%`;
   $('energy-label').textContent = director.label;
   if (!autoMode) return;
-  for (const key of [...DIRECTED_KEYS, 'colA', 'colB']) {
+  for (const key of [...DIRECTED_KEYS, 'sensitivity', 'colA', 'colB']) {
     const input = inputs[key];
     if (!input || !(key in P)) continue;
     input.value = P[key];
     if (input._val) input._val.textContent = (+P[key]).toFixed(2);
   }
-  const warm = Math.round((director.warm ?? 0) * 100);
+  const bpm = director.beatConf > 0.3 && director.bpm ? `${Math.round(director.bpm)} BPM` : 'sem pulso fixo';
+  const mode = analysis.state === 'ready' ? 'sincronizado (pré-análise)'
+    : analysis.state === 'analyzing' || analysis.state === 'decoding' ? `analisando ${Math.round(analysis.progress * 100)}%`
+    : 'ao vivo';
   $('energy-info').textContent =
-    `Ritmo ${director.kickRate.toFixed(1)} kicks/s · energia ${Math.round(director.intensity * 100)}%` +
-    (warm < 100 ? ` · aquecendo ${warm}%` : '') + (director.drop > 0.3 ? ' · DROP' : '');
+    `Energia ${Math.round(director.intensity * 100)}% · ${bpm} · ${mode}` +
+    (director.build > 0.3 ? ' · SUBIDA' : '') + (director.drop > 0.3 ? ' · DROP' : '');
 }
 const fmt = (s) => (isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00');
 const setTrackName = (t) => ($('track-name').textContent = t);
 
+// ---------- Pré-análise (arquivo): a música inteira é analisada num Worker ----------
+// Enquanto analisa, o diretor usa o modo ao vivo; quando termina, troca para a timeline (sincronia exata).
+const analysisWorker = new Worker('./analysis.worker.js', { type: 'module' });
+let analysisId = 0;
+let analysis = { state: 'idle', progress: 0, timeline: null };
+analysisWorker.onmessage = (e) => {
+  const { id, progress, timeline, error } = e.data;
+  if (id !== analysisId) return; // resposta de uma faixa antiga
+  if (error) { analysis = { state: 'error', progress: 0, timeline: null }; console.warn('pré-análise falhou:', error); return; }
+  if (timeline) {
+    analysis = { state: 'ready', progress: 1, timeline };
+    director.setTimeline(timeline);
+    window.__timeline = timeline;
+  } else analysis.progress = progress;
+};
+
+async function analyzeFile(file) {
+  const id = ++analysisId;
+  analysis = { state: 'decoding', progress: 0, timeline: null };
+  director.setTimeline(null);
+  try {
+    const buf = await audio.ctx.decodeAudioData(await file.arrayBuffer());
+    if (id !== analysisId) return;
+    const n = buf.length, ch = buf.numberOfChannels;
+    const pcm = new Float32Array(n);
+    for (let c = 0; c < ch; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < n; i++) pcm[i] += d[i] / ch;
+    }
+    analysis.state = 'analyzing';
+    analysisWorker.postMessage({ id, pcm, sampleRate: buf.sampleRate }, [pcm.buffer]);
+  } catch (err) {
+    if (id === analysisId) analysis = { state: 'error', progress: 0, timeline: null };
+    console.warn('não foi possível decodificar para a pré-análise:', err);
+  }
+}
+
+// Instante da música que está chegando aos ouvidos agora: posição do player menos a latência de saída
+// do áudio, mais ~1 quadro (o quadro desenhado agora aparece no próximo vsync), mais o ajuste manual.
+function mediaTime() {
+  if (audio.source !== 'file' || !audio.ctx) return null;
+  const outLat = (audio.ctx.outputLatency || 0) + (audio.ctx.baseLatency || 0);
+  return audio.el.currentTime - outLat + 1 / 60 + (P.syncOffset || 0) / 1000;
+}
+
 function openFile(file) {
   if (!file || !file.type.startsWith('audio')) return;
   audio.playFile(file);
-  director.reset();
+  resetDirector();
+  analyzeFile(file);
   setTrackName(file.name.replace(/\.[^.]+$/, ''));
   $('btn-play').textContent = 'Pause';
 }
@@ -321,7 +380,7 @@ $('file').addEventListener('change', (e) => openFile(e.target.files[0]));
 $('btn-capture').addEventListener('click', async () => {
   try {
     const label = await audio.capture();
-    director.reset();
+    resetDirector();
     setTrackName(`Modo Escuta: capturando "${label || 'áudio do sistema'}"`);
     $('btn-play').textContent = 'Play';
   } catch (e) {
@@ -332,7 +391,7 @@ audio.onCaptureEnded = () => setTrackName('Captura encerrada.');
 
 $('btn-demo').addEventListener('click', () => {
   audio.startDemo();
-  director.reset();
+  resetDirector();
   setTrackName('Batida de teste (sintetizada, 110 BPM)');
 });
 
@@ -424,7 +483,8 @@ function frame(now) {
   audio.update(dt);
   const b = audio.bands;
   const playing = audio.source === 'file' ? !audio.el.paused : audio.source !== 'none';
-  director.update(dt, b, playing);
+  const strength = playing ? rhythm.push(dt, b) : 0;
+  director.update(dt, b, playing, { strength, band: rhythm.lastBand, groove: rhythm.groove, bpm: rhythm.bpm, density: rhythm.density }, analysis.timeline ? mediaTime() : null);
   if (autoMode) director.apply(P, P.mode === TD);
   syncDirectorUI(dt);
   t += dt * P.speed * (0.6 + b.level * 1.2 + b.beat * 0.6);
@@ -449,7 +509,7 @@ function frame(now) {
   const colB = shiftHue(hexToRgb(P.colB), hue);
 
   if (P.mode === TD) {
-    spectralTD.render({ write, read, dt, time: tdTime, bands: b, P, colA, colB, drop: autoMode ? director.drop : 0 });
+    spectralTD.render({ write, read, dt, time: tdTime, bands: b, P, colA, colB, drop: autoMode ? director.drop : 0, dir: autoMode ? director : null });
   } else {
     renderScene(b, colA, colB);
   }

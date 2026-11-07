@@ -1,0 +1,32 @@
+{
+  "_doc": "Corpus de calibração: só faixas Creative Commons / domínio público (Internet Archive, Musopen, LibriVox). Baixe com: node tools/fetch_corpus.mjs. Os arquivos vão para corpus/ (fora do git). 'expect' = comportamento desejado do diretor.",
+  "tracks": [
+    { "id": "voz-machado", "genre": "voz (fala)", "title": "Um Apólogo (Machado de Assis)", "artist": "LibriVox", "license": "Domínio público",
+      "url": "https://archive.org/download/contos_brasileiros_0807_librivox/contos_brasileiros_14_64kb.mp3",
+      "expect": { "energy": [0.0, 0.35], "beat": false } },
+    { "id": "piano-chopin", "genre": "piano solo", "title": "Waltz in A flat major, Op. 69 No. 1", "artist": "Chopin / Luke Faulkner (Musopen)", "license": "Domínio público",
+      "url": "https://archive.org/download/MusopenChopinWaltzOp69no1/F.%20Chopin%20-%20Waltz%20in%20A%20flat%20major%2C%20Op.%2069%20no.%201%20%28Luke%20Faulkner%29.mp3",
+      "expect": { "energy": [0.05, 0.45], "beat": false } },
+    { "id": "orquestra-beethoven", "genre": "clássica orquestral", "title": "Symphony No. 5, III. Allegro", "artist": "Beethoven (Musopen)", "license": "CC BY-SA 3.0",
+      "url": "https://archive.org/download/Musopen-Libre/SymphonyNo.5InCMinorOp.67-3.Allegro.mp3",
+      "expect": { "energy": [0.05, 0.75], "beat": false } },
+    { "id": "jazz-sax", "genre": "jazz (lento)", "title": "Night on the Docks - Sax", "artist": "Kevin MacLeod", "license": "CC BY 3.0",
+      "url": "https://archive.org/download/Jazz_Sampler-9619/Kevin_MacLeod_-_Night_on_the_Docks_-_Sax.mp3",
+      "expect": { "energy": [0.1, 0.5], "beat": true } },
+    { "id": "folk-pop", "genre": "pop/folk com voz", "title": "Go", "artist": "Josh Woodward", "license": "CC BY 3.0",
+      "url": "https://archive.org/download/JoshWoodwardSelection/06-JoshWoodward-TheSimpleLife-02-Go.mp3",
+      "expect": { "energy": [0.2, 0.7], "beat": true } },
+    { "id": "indie-rock", "genre": "indie rock", "title": "Under Control", "artist": "the Transisters", "license": "CC BY-NC-SA 2.0 DE",
+      "url": "https://archive.org/download/afm022_thetransisters_undercontrol/01_-_the_transisters_-_under_control.mp3",
+      "expect": { "energy": [0.35, 0.85], "beat": true } },
+    { "id": "hiphop", "genre": "hip-hop (jazz hop)", "title": "April Showers", "artist": "ProleteR", "license": "CC BY-NC-ND 3.0",
+      "url": "https://archive.org/download/DWK123/ProleteR_-_01_-_April_Showers.mp3",
+      "expect": { "energy": [0.3, 0.75], "beat": true } },
+    { "id": "rock-industrial", "genre": "rock industrial", "title": "Discipline", "artist": "Nine Inch Nails", "license": "CC BY-NC-SA 3.0 US",
+      "url": "https://archive.org/download/nine_inch_nails_the_slip/04_discipline.mp3",
+      "expect": { "energy": [0.45, 1.0], "beat": true } },
+    { "id": "techno", "genre": "eletrônica (techno/electro)", "title": "Drop It Like It's Not", "artist": "effort", "license": "CC BY-NC-ND 2.5 CA",
+      "url": "https://archive.org/download/quiz050/quiz050-06-effort-drop_it_like_its_not.mp3",
+      "expect": { "energy": [0.3, 1.0], "beat": true } }
+  ]
+}

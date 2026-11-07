@@ -231,60 +231,48 @@ export function createSpectralTD(gl, { makeProgram, makeTarget, freeTarget, hasF
   let mips = [];
 
   const audio = { fast: 0, slow: 0.25 };
-  const motion = { energy: 0, lastBeat: 0, angle: 0, wander: 0, off: [0, 0], vel: [0, 0], section: 0, floor: 1, ceil: 0, loud: 0, spin: 0, spinVel: 0, spinDir: 1 };
+  const motion = { phase: 0, wander: 0, loud: 0, act: 0, gate: 1, vel: [0, 0] };
 
-  // Converte o áudio em espaço: seções altas abrem a nuvem, kicks a lançam pela tela
-  // (mola amortecida, alternando lados), batidas explodem as partículas e agudos dão tremor.
-  function updateMotion(dt, bands, P, aspect) {
-    // Seção: nível de ~1.5 s comparado ao piso e teto da própria música (adapta a cada faixa).
-    motion.section += (audio.fast - motion.section) * (1 - Math.exp(-dt / 1.5));
-    motion.floor = Math.min(motion.section, motion.floor + dt * 0.004);
-    motion.ceil = Math.max(motion.section, motion.ceil - dt * 0.004);
-    const rel = (motion.section - motion.floor) / Math.max(0.08, motion.ceil - motion.floor);
-    const abs = (motion.section - LEVEL_QUIET) / (LEVEL_LOUD - LEVEL_QUIET);
-    const loud = Math.min(1, Math.max(0, 0.4 * abs + 0.6 * rel));
+  // Trajetória suave e quase-aleatória (soma de senos incomensuráveis), em [-1, 1].
+  const path = (p) => (Math.sin(p) + 0.6 * Math.sin(p * 1.73 + 1.3) + 0.4 * Math.sin(p * 2.9 + 2.1)) / 2;
 
-    const punch = 0.6 * bands.flux + 0.4 * bands.beat;
-    const rate = punch > motion.energy ? 14 : 3;
-    motion.energy += (punch - motion.energy) * (1 - Math.exp(-dt * rate));
-
-    if (bands.beat > motion.lastBeat + 0.3 && P.motion > 0) {
-      motion.angle += Math.PI * (0.6 + Math.random() * 0.8);
-      const kick = (1.2 + 2.4 * loud) * P.motion * (0.5 + bands.flux);
-      motion.vel[0] += Math.cos(motion.angle) * kick * Math.min(aspect, 2) * 0.6;
-      motion.vel[1] += Math.sin(motion.angle) * kick * 0.6;
-      motion.spinDir = -motion.spinDir;
-      motion.spinVel += motion.spinDir * (0.8 + 0.8 * loud) * P.motion;
-    }
-    motion.lastBeat = bands.beat;
-
-    const k = 28, c = 4.5;
-    for (let i = 0; i < 2; i++) {
-      motion.vel[i] += (-k * motion.off[i] - c * motion.vel[i]) * dt;
-      motion.off[i] += motion.vel[i] * dt;
-    }
-    motion.spinVel += (-10 * motion.spin - 3 * motion.spinVel) * dt;
-    motion.spin += motion.spinVel * dt;
-
-    motion.wander += dt * (0.3 + loud * 0.7) * P.speed;
-    const A = 0.55 * loud * P.motion;
-    const halfH = CAM[2] * Math.tan((22.5 * Math.PI) / 180) * 0.75;
-    const halfW = halfH * aspect;
-    const clamp = (v, m) => Math.max(-m, Math.min(m, v));
+  // Modelo agnóstico de fonte: volume e atividade espectral (vindos do diretor, ou calculados aqui
+  // quando o diretor está desligado) conduzem a forma. Sem impulsos por batida: tudo é contínuo.
+  function updateMotion(dt, bands, P, dir) {
+    const gate = dir ? dir.gate : 1;
+    const loud = dir ? dir.loud : Math.min(1, bands.level * 1.6);
+    const act = dir ? dir.activity : Math.min(1, 0.5 * bands.flux + bands.level * 0.8);
     motion.loud = loud;
+    motion.act = act;
+    motion.gate = gate;
+
+    const conf = dir ? dir.beatConf || 0 : 0;
+    const bpm = dir && dir.bpm ? dir.bpm : 0;
+    const beatPhase = dir ? dir.beatPhase || 0 : 0;
+    // Morfose: base sempre viva + atividade do áudio; congela só no silêncio. Com batida clara, acelera
+    // logo depois de cada batida e desacelera antes da próxima: a forma "anda no tempo" da música.
+    const lurch = 1 + 0.6 * conf * Math.exp(-6 * beatPhase);
+    motion.phase += dt * (0.45 + 2.0 * act * gate) * P.speed * lurch;
+    // Passeio pela tela: sem batida, ritmo livre; com batida, um ciclo a cada 4 compassos.
+    const freeRate = 0.3 + 0.6 * loud;
+    const lockedRate = bpm ? (2 * Math.PI * (bpm / 60)) / 16 : freeRate;
+    motion.wander += dt * (freeRate + (lockedRate - freeRate) * conf) * P.speed;
+
+    const A = (0.12 + 0.25 * loud) * P.motion * gate;
+    const halfH = CAM[2] * Math.tan((22.5 * Math.PI) / 180) * 0.75;
     return {
       shift: [
-        clamp(motion.off[0] + Math.sin(motion.wander * 0.9) * A * aspect * 0.7, halfW),
-        clamp(motion.off[1] + Math.sin(motion.wander * 1.3 + 1.1) * A * 0.55, halfH),
+        Math.sin(motion.wander * 0.9) * A * 0.9 * halfH,
+        Math.sin(motion.wander * 1.3 + 1.1) * A * 0.6 * halfH,
       ],
       vel: motion.vel,
-      scale: P.scale * (1 + P.spread * (0.7 * loud + 0.5 * motion.energy)),
-      burst: P.spread * bands.beat * (0.2 + 0.4 * bands.flux) * 0.6,
-      jitter: P.spread * bands.high * 0.03 * (0.5 + loud),
-      warp: P.warp * (1 + P.spread * bands.mid * 0.4),
-      flow: P.spread * (0.03 + 0.09 * loud + 0.05 * motion.energy),
-      spin: motion.spin + motion.wander * 0.15 * P.motion,
-      glow: 1 + motion.energy * 0.3 * P.spread,
+      scale: P.scale * (1 + P.spread * (0.5 * loud + 0.4 * act) * gate),
+      burst: P.spread * bands.flux * 0.08 * gate,
+      jitter: P.spread * bands.high * 0.02 * gate,
+      warp: P.warp * (1 + P.spread * bands.mid * 0.3),
+      flow: P.spread * (0.015 + 0.05 * loud),
+      spin: motion.wander * 0.1 * P.motion,
+      glow: 1 + act * 0.2 * P.spread,
     };
   }
 
@@ -312,16 +300,27 @@ export function createSpectralTD(gl, { makeProgram, makeTarget, freeTarget, hasF
     return prog.u;
   }
 
-  function render({ write, read, dt, time, bands, P, colA, colB, drop = 0 }) {
+  function render({ write, read, dt, time, bands, P, colA, colB, drop = 0, dir = null }) {
     if (!hasFloat) return false;
     ensureTargets(write.w, write.h);
 
-    // smsd ("Slow Spectral Density"): média de ~10 s da energia espectral, normalizada.
+    // smsd ("Slow Spectral Density") do original + morfose rápida conduzida pelo áudio.
     audio.fast += (bands.level - audio.fast) * (1 - Math.exp(-dt / 0.25));
     audio.slow += (audio.fast - audio.slow) * (1 - Math.exp(-dt / 5));
+    const m = updateMotion(dt, bands, P, dir);
+    // Pump por ataque (vindo do diretor, já ponderado por força, batida e energia): a forma dá um
+    // estalo na morfose, o brilho e o bloom acompanham. Sem diretor, usa a batida simples.
+    const pulse = dir ? dir.pulse : bands.beat * 0.5;
+    if (dir) { motion.phase += dir.impulse * 0.85 * P.react; dir.impulse = 0; }
+    m.scale *= 1 + 0.07 * pulse;
+    // Subida (antes do drop): a forma se contrai e treme, acumulando tensão; o drop solta tudo.
+    const build = dir ? dir.build || 0 : 0;
+    m.scale *= 1 - 0.12 * build;
+    m.jitter += build * 0.03 + (dir ? P.spread * build * 0.02 : 0);
+    m.glow *= 1 + 0.25 * build;
+    const amp = (0.045 + 0.09 * motion.loud * motion.gate) * P.react;
     const offset = Math.min(0.7, Math.max(0.3,
-      0.49 + (audio.slow - 0.2) * 0.15 * P.intensity + (audio.fast - audio.slow) * 0.08 * P.react + bands.beat * 0.004 * P.react));
-    const m = updateMotion(dt, bands, P, write.w / write.h);
+      0.49 + (audio.slow - 0.2) * 0.15 * P.intensity + path(motion.phase) * amp));
 
     gl.disable(gl.BLEND);
 
@@ -362,7 +361,7 @@ export function createSpectralTD(gl, { makeProgram, makeTarget, freeTarget, hasF
     ];
     const fwd = [-Math.sin(yaw), 0, -Math.cos(yaw)];
     const view = lookAt(eye, [eye[0] + fwd[0], eye[1] + fwd[1], eye[2] + fwd[2]], [0, 1, 0]);
-    const fov = 45 * (1 - (P.punch ?? 0) * bands.beat * 0.1 - drop * 0.15);
+    const fov = 45 * (1 - (P.punch ?? 0) * pulse * 0.1 - drop * 0.15);
     const proj = perspective((fov * Math.PI) / 180, write.w / write.h, 0.1, 100);
     gl.uniformMatrix4fv(u.uMVP, false, mul(proj, view));
     bindTex(0, simTarget.tex);
@@ -371,7 +370,7 @@ export function createSpectralTD(gl, { makeProgram, makeTarget, freeTarget, hasF
     gl.uniform1f(u.uDepth, P.depth);
     gl.uniform3fv(u.uColA, colA);
     gl.uniform3fv(u.uColB, colB);
-    gl.uniform1f(u.uBright, P.bright * m.glow * (1 + bands.beat * 0.3 * P.react + drop * 0.8));
+    gl.uniform1f(u.uBright, P.bright * m.glow * (1 + pulse * 0.5 * P.react + drop * 0.8));
     gl.uniform1f(u.uAlpha, P.accum > 0 ? P.accum : 1);
     gl.drawArrays(gl.POINTS, 0, SIM_RES * SIM_RES);
     gl.disable(gl.BLEND);
@@ -417,7 +416,7 @@ export function createSpectralTD(gl, { makeProgram, makeTarget, freeTarget, hasF
     gl.uniform1i(u.uPoints, 0);
     gl.uniform1i(u.uBloom, 1);
     gl.uniform1i(u.uPrev, 2);
-    gl.uniform1f(u.uBloomInt, P.bloom * 0.45);
+    gl.uniform1f(u.uBloomInt, P.bloom * 0.45 * (1 + 0.4 * pulse + 0.5 * drop));
     gl.uniform1f(u.uFeedback, P.feedback);
     setPre(u);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

@@ -30,3 +30,6 @@ touchdesigner-mcp/*.zip
 *.log
 .tmp/
 temp/
+
+# Corpus de calibração (baixado por tools/fetch_corpus.mjs)
+corpus/

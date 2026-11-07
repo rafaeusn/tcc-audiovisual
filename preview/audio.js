@@ -1,16 +1,12 @@
-const BINS = 256;
-const F_MIN = 30;
-const F_MAX = 16000;
+import { Features, BINS } from './features.js';
 
 export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.sensitivity = 1;
     this.spec = new Uint8Array(BINS * 2);
-    this.bands = { bass: 0, mid: 0, high: 0, level: 0, beat: 0, flux: 0 };
-    this.fluxAvg = null;
-    this.lowFluxAvg = null;
-    this.lastBeat = 0;
+    this.features = new Features();
+    this.bands = this.features.bands;
     this.source = 'none';
     this.captureStream = null;
     this.captureNode = null;
@@ -54,22 +50,9 @@ export class AudioEngine {
       elSrc.connect(this.analyser);
       elSrc.connect(this.out);
 
-      this.buildBinMap();
+      this.features.configure(ctx.sampleRate, this.analyser.fftSize, this.onsetAnalyser.fftSize);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
-  }
-
-  buildBinMap() {
-    const binHz = this.ctx.sampleRate / this.analyser.fftSize;
-    const maxBin = this.analyser.frequencyBinCount - 1;
-    this.binMap = [];
-    for (let i = 0; i < BINS; i++) {
-      const f0 = F_MIN * Math.pow(F_MAX / F_MIN, i / BINS);
-      const f1 = F_MIN * Math.pow(F_MAX / F_MIN, (i + 1) / BINS);
-      const b0 = Math.min(maxBin, Math.floor(f0 / binHz));
-      const b1 = Math.min(maxBin, Math.max(b0 + 1, Math.ceil(f1 / binHz)));
-      this.binMap.push([b0, b1, Math.sqrt(f0 * f1)]);
-    }
   }
 
   setVolume(v) {
@@ -230,59 +213,14 @@ export class AudioEngine {
     if (!this.analyser) return;
     this.analyser.getByteFrequencyData(this.freq);
     this.analyser.getByteTimeDomainData(this.time);
+    this.onsetAnalyser.getByteFrequencyData(this.onsetFreq);
 
-    let bass = 0, mid = 0, high = 0, all = 0;
-    let nb = 0, nm = 0, nh = 0;
-    for (let i = 0; i < BINS; i++) {
-      const [b0, b1, hz] = this.binMap[i];
-      let m = 0;
-      for (let b = b0; b < b1; b++) if (this.freq[b] > m) m = this.freq[b];
-      const tilt = 0.85 + 0.55 * (i / BINS);
-      const v = Math.min(1, Math.pow(m / 255, 1.5) * tilt * this.sensitivity);
-      this.spec[i] = v * 255;
-      all += v;
-      if (hz < 150) { bass += v; nb++; }
-      else if (hz < 2000) { mid += v; nm++; }
-      else if (hz < 12000) { high += v; nh++; }
-    }
+    this.features.sensitivity = this.sensitivity;
+    this.features.update(dt, this.freq, this.onsetFreq, this.time);
+
+    this.spec.set(this.features.spec, 0);
     for (let i = 0; i < BINS; i++) {
       this.spec[BINS + i] = this.time[Math.floor((i / BINS) * this.time.length)];
     }
-
-    const raw = { bass: bass / nb, mid: mid / nm, high: high / nh, level: all / BINS };
-    for (const k of ['bass', 'mid', 'high', 'level']) {
-      const rate = raw[k] > this.bands[k] ? 30 : 7;
-      this.bands[k] += (raw[k] - this.bands[k]) * (1 - Math.exp(-dt * rate));
-    }
-
-    // Ataques por spectral flux: soma dos aumentos de energia entre quadros.
-    // Funciona mesmo com grave sustentado (hardstyle, dubstep), onde "grave acima da média" falha.
-    this.onsetAnalyser.getByteFrequencyData(this.onsetFreq);
-    const binHz = this.ctx.sampleRate / this.onsetAnalyser.fftSize;
-    let fluxLow = 0, fluxAll = 0, nLow = 0, nAll = 0;
-    for (let b = 1; b < this.onsetFreq.length && b * binHz < 10000; b++) {
-      const d = this.onsetFreq[b] - this.onsetPrev[b];
-      this.onsetPrev[b] = this.onsetFreq[b];
-      nAll++;
-      if (b * binHz < 250) nLow++;
-      if (d > 0) {
-        fluxAll += d;
-        if (b * binHz < 250) fluxLow += d;
-      }
-    }
-    const low = fluxLow / (nLow * 255);
-    const flux = 0.6 * low + (0.4 * fluxAll) / (nAll * 255);
-    const k = 1 - Math.exp(-dt * 2.5);
-    this.fluxAvg = (this.fluxAvg ?? flux) + (flux - (this.fluxAvg ?? flux)) * k;
-    this.lowFluxAvg = (this.lowFluxAvg ?? low) + (low - (this.lowFluxAvg ?? low)) * k;
-    this.bands.flux = Math.min(1, flux / (this.fluxAvg * 3 + 1e-4));
-
-    // Kick: só o fluxo dos graves, limiar mais alto e intervalo mínimo de 0.28 s (até ~210 BPM).
-    const now = performance.now() / 1000;
-    if (low > this.lowFluxAvg * 1.8 + 0.01 && now - this.lastBeat > 0.28) {
-      this.bands.beat = 1;
-      this.lastBeat = now;
-    }
-    this.bands.beat *= Math.exp(-dt * 5);
   }
 }
