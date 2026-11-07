@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# Áudio de teste / uploads locais
+preview/test-audio.*
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+
+# Artefatos do TouchDesigner MCP (manter tox + modules)
+touchdesigner-mcp/**/__pycache__/
+touchdesigner-mcp/*.zip
+
+# Logs e temporários
+*.log
+.tmp/
+temp/
