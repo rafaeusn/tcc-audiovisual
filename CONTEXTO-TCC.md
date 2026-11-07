@@ -1,7 +1,16 @@
 # Contexto completo — Player Audiovisual (TCC)
 
-Documento de handoff para continuar o desenvolvimento (ex.: Claude Code Desktop).
+Documento de handoff para continuar o desenvolvimento no **Claude Code Desktop** (ou outro agente).
 Atualizado em 07/11/2026. Responda sempre em **pt-BR**.
+
+**Repositório GitHub:** `https://github.com/rafaeusn/tcc-audiovisual`  
+**Clone local:** `C:\Users\rafae\Desktop\tcc-audiovisual\`
+
+### Como o próximo agente deve começar
+1. Ler este arquivo inteiro + `docs/port-spectral-td.md`.
+2. Rodar a prévia (`preview/serve.py`) e validar template 4 + diretor.
+3. Seguir a seção 7 (próximos passos) — prioridade: scaffold Vite/React/TS migrando `preview/`.
+4. Não reinventar o que já está em `spectralTD.js`, `director.js`, `audio.js`.
 
 ---
 
