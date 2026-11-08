@@ -7,10 +7,11 @@ Atualizado em 07/11/2026. Responda sempre em **pt-BR**.
 **Clone local:** `C:\Users\rafae\Desktop\tcc-audiovisual\`
 
 ### Como o próximo agente deve começar
-1. Ler este arquivo inteiro + `docs/port-spectral-td.md`.
+1. Ler este arquivo inteiro + `docs/plano-v1.md` + `docs/port-spectral-td.md`.
 2. Rodar a prévia (`preview/serve.py`) e validar template 4 + diretor.
-3. Seguir a seção 7 (próximos passos) — prioridade: scaffold Vite/React/TS migrando `preview/`.
-4. Não reinventar o que já está em `spectralTD.js`, `director.js`, `audio.js`.
+3. Seguir o **plano da v1** (`docs/plano-v1.md`): app em Rust + GPUI, Windows, fases 0–6.
+4. Não reinventar o que já está em `spectralTD.js`, `director.js`, `audio.js` nem no protótipo `prototypes/ui-bench`:
+   eles são a base do port e o gabarito dos testes de paridade.
 
 ---
 
@@ -38,7 +39,7 @@ visual sem cópia via camada DirectComposition + skins KDL recarregadas ao vivo 
 ## 2. Decisões de arquitetura já tomadas
 
 ### Plataformas
-- **Agora:** Web/desktop (React + Vite + TypeScript, empacotar depois com Electron/Tauri).
+- **Agora:** desktop Windows, app nativo em **Rust + GPUI** (decidido em 07/11/2026; ver `docs/plano-v1.md`).
 - **Mobile:** futuro (modo Player viável; modo Escuta limitado/impossível no iOS).
 
 ### Fontes de música (híbrido)
@@ -62,12 +63,12 @@ visual sem cópia via camada DirectComposition + skins KDL recarregadas ao vivo 
 - `preview/serve.py` — HTTP local sem cache (`no-store`), porta **5500**.
 - TouchDesigner 2025.33230 + MCP `touchdesigner-mcp-server@2.2.0` (porta **9981**).
 
-### Stack planejada (ainda não)
-- Electron (loopback `setDisplayMediaRequestHandler`) ou Tauri + cpal.
-- React + Vite + TypeScript + Three.js.
-- Supabase (auth, tracks, presets, listens).
-- Análise: AnalyserNode + AudioWorklet; Meyda; essentia.js (BPM/seções).
-- Helper SMTC (Windows) para “tocando agora”.
+### Stack do app (Rust, ver `docs/plano-v1.md`)
+- UI: GPUI 0.2.2 + visual wgpu numa camada DirectComposition (sem cópia) + skins KDL + temas TOML.
+- Áudio: WASAPI loopback do sistema e por processo, `cpal` + `symphonia` no player local.
+- Análise: port de `features/rhythm/preanalysis/director.js` para Rust (`realfft`, `rayon`).
+- SMTC (Windows) para "tocando agora" e controles; SQLite local; módulos da loja em WASM (`wasmtime`).
+- Sem servidor na v1 (Supabase e contas ficam para depois).
 
 ---
 
@@ -190,17 +191,17 @@ Agnóstico de fonte (música, voz, instrumento). Detalhes, corpus, números e te
 
 ## 7. O que falta (próximos passos sugeridos)
 
-Prioridade sugerida para o próximo agente:
+A lista antiga (React/Electron/Supabase) foi substituída pelo **plano da v1** em `docs/plano-v1.md` (08/11/2026):
 
-1. **Scaffold do app real:** Vite + React + TS; migrar a engine da prévia (`spectralTD`, `director`, `audio`) para módulos tipados.
-2. **Electron:** player local + loopback (`setDisplayMediaRequestHandler` / `audio: 'loopback'`).
-3. **Biblioteca local:** scan de pastas + `music-metadata` + SQLite.
-4. **Adaptadores Audius + Jamendo** + interface `SourceAdapter`.
-5. **Importadores:** Last.fm (username), export Spotify JSON, Google Takeout; Matcher.
-6. **Supabase:** auth, tracks, track_presets, listens, stats.
-7. **Mais templates** no TD (GLSL TOP) → port (pipeline MCP).
-8. **Pré-análise** (BPM, beat grid, seções) para presets por música.
-9. **Avaliação TCC:** FPS, latência áudio→visual, taxa do matcher, SUS.
+0. Fundação: workspace `app/`, módulos do protótipo, CI.
+1. Casca da UI: tela padrão (estilo Spotify com o visual no centro), skins KDL v2, comandos, modo edição.
+2. Modo Escuta: captura por processo, SMTC, diretor ao vivo em Rust.
+3. Spectral em wgpu: cores reativas/próprias, modo seguro para fotossensibilidade com medidor de flashes.
+4. Player local: biblioteca SQLite, pré-análise em Rust com cache, sincronia.
+5. Loja: catálogo assinado, temas/skins/layouts/pacotes, perfis de Escuta (Spotify, YT Music…), módulo Last.fm (WASM).
+6. Acabamento e avaliação TCC: instalador, medições, SUS.
+
+Depois da v1: Audius/Jamendo, modo para surdos, mais templates (pipeline TD → MCP), Studio.
 
 ### Não fazer
 - Baixar áudio do YouTube/Spotify (yt-dlp etc.) — viola ToS.
@@ -222,7 +223,7 @@ Prioridade sugerida para o próximo agente:
 - Idioma com o usuário: **sempre pt-BR**.
 - Commits: conventional commits (`feat`, `fix`, `chore`, `docs`…).
 - Não commitar MP3, secrets, `__pycache__`, zip do MCP.
-- Prévia deve continuar rodável com `python serve.py` até o app React existir.
+- Prévia deve continuar rodável com `python serve.py`: ela é a referência (gabarito) dos testes de paridade do app Rust.
 
 ---
 
