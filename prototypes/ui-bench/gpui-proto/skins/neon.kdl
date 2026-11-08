@@ -1,0 +1,50 @@
+// Skin "neon": o visual vira papel de parede da janela inteira e os painéis são de vidro.
+// Mesmo formato da default; só o desenho muda.
+
+app bg="bg" visual="fullscreen"
+
+frame radius=20 bg="surface/0.55" border="accent/0.7" border-width=1 edit-border="accent-2" shadow="all"
+
+header height=32 padding-x=16 size=11 weight="bold" color="accent" font="Consolas" transform="upper"
+
+panel "visual" title="◉ visual"
+
+panel "player" title="agora" {
+    row w="fill" h="fill" padding-top=36 padding-x=18 gap=16 align="center" {
+        box w=64 h=64 radius=32 bg="gradient(accent-2, accent)" border="text/0.4" border-width=2
+        column grow=#true gap=6 {
+            text "{now.title}" size=20 weight="black" color="text" font="Consolas"
+            text "{now.source}" size=11 color="accent" font="Consolas"
+            progress "{progress}" h=2 radius=1 track="text/0.15" fill="accent-2"
+        }
+    }
+}
+
+panel "queue" title="fila" {
+    column w="fill" h="fill" padding-top=40 padding-x=14 gap=2 {
+        each "queue" {
+            row h=34 padding-x=8 gap=8 align="center" radius=6 active="{item.playing}" active-bg="accent/0.18" {
+                text "{item.title}" size=12 color="text" font="Consolas"
+                spacer
+                text "{item.artist}" size=10 color="muted" font="Consolas"
+            }
+        }
+    }
+}
+
+panel "meters" title="espectro" {
+    row w="fill" h="fill" padding-top=40 padding-x=16 padding-bottom=10 gap=6 {
+        bar "{bass}" label="B" fill="accent-2/0.85" track="text/0.06" radius=2
+        bar "{mid}" label="M" fill="accent/0.85" track="text/0.06" radius=2
+        bar "{high}" label="H" fill="#7ee0c3" track="text/0.06" radius=2
+        bar "{level}" label="V" fill="text/0.8" track="text/0.06" radius=2
+        bar "{intensity}" label="E" fill="#ffb454" track="text/0.06" radius=2
+    }
+}
+
+panel "clock" {
+    column w="fill" h="fill" align="center" justify="center" {
+        text "{clock}" size="40%h" weight="black" color="accent" font="Consolas"
+        text "{stats}" size=10 color="text/0.6" font="Consolas"
+    }
+}

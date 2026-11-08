@@ -1,0 +1,17 @@
+{
+  "framework": "gpui 0.2.2",
+  "renderer": "gpui DirectX + wgpu readback: NVIDIA GeForce RTX 2060 (Vulkan)",
+  "audio": "sintético",
+  "window": "1280x800",
+  "startup_ms_first_frame": 880.21484375,
+  "duration_s": 19.9993446,
+  "frames": 2879,
+  "avg_fps": 143.95471739608905,
+  "frame_ms_p50": 6.9427,
+  "frame_ms_p95": 7.1,
+  "frame_ms_p99": 7.2963,
+  "frame_ms_max": 14.3343,
+  "working_set_mb": 208.25390625,
+  "private_mb": 452.046875,
+  "cpu_percent": 34.37612650566559
+}

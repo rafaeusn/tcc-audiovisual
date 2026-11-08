@@ -1,0 +1,17 @@
+{
+  "framework": "gpui 0.2.2",
+  "renderer": "gpui DirectX + camada DirectComposition (zero cópia): NVIDIA GeForce RTX 2060 (Dx12, Mailbox)",
+  "audio": "sintético",
+  "window": "1920x1080",
+  "startup_ms_first_frame": 816.185546875,
+  "duration_s": 19.9996292,
+  "frames": 2880,
+  "avg_fps": 144.00266980949826,
+  "frame_ms_p50": 6.9437,
+  "frame_ms_p95": 7.058,
+  "frame_ms_p99": 7.199,
+  "frame_ms_max": 7.9707003,
+  "working_set_mb": 179.02734375,
+  "private_mb": 398.7890625,
+  "cpu_percent": 24.453578369342967
+}

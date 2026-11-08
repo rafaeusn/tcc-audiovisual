@@ -1,0 +1,14 @@
+# Inspirado nas paletas pastel populares nos "rices" de Hyprland.
+name = "Mocha"
+bg = "#11111b"
+surface = "#1e1e2e"
+surface-2 = "#313244"
+border = "#45475a"
+text = "#cdd6f4"
+muted = "#a6adc8"
+accent = "#cba6f7"
+accent-2 = "#f38ba8"
+radius = 18
+border-width = 2
+anim = 380
+font = "Segoe UI"

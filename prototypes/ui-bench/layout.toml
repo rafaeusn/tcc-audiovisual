@@ -1,0 +1,19 @@
+# Layout dos protótipos. Edite e salve: o protótipo Slint recarrega na hora.
+# Cada [[breakpoint]] vale a partir de uma largura de janela (responsivo).
+gaps_in = 8.0
+gaps_out = 12.0
+
+[[breakpoint]]
+min_width = 0.0
+root = { split = "column", ratio = 0.78, a = { panel = "visual" }, b = { panel = "player" } }
+
+[[breakpoint]]
+min_width = 900.0
+root = { split = "row", ratio = 0.72, a = { split = "column", ratio = 0.82, a = { panel = "visual" }, b = { panel = "player" } }, b = { split = "column", ratio = 0.6, a = { panel = "queue" }, b = { panel = "meters" } } }
+
+[[floating]]
+panel = "clock"
+x = 0.03
+y = 0.04
+w = 0.16
+h = 0.11

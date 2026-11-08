@@ -1,0 +1,486 @@
+// Skin "default" do protótipo Slint.
+//
+// Este arquivo NÃO é compilado junto com o programa: o app lê e compila em tempo de execução (slint-interpreter)
+// e recarrega quando você salva. Qualquer pessoa pode copiar esta pasta, mudar tudo e ter uma skin nova,
+// desde que mantenha o "contrato" abaixo (as propriedades e callbacks do App e o global Theme).
+
+export struct Panel {
+    id: string,
+    kind: string,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    floating: bool,
+}
+
+export struct Div {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    row: bool,
+}
+
+export struct Track {
+    title: string,
+    artist: string,
+    playing: bool,
+}
+
+// Tokens de tema: o app preenche a partir de themes/*.toml (tecla T troca).
+export global Theme {
+    in-out property <color> bg: #0d0f14;
+    in-out property <color> surface: #161a22;
+    in-out property <color> surface-2: #1f2430;
+    in-out property <color> border: #2a3040;
+    in-out property <color> text: #e8ebf2;
+    in-out property <color> muted: #8a93a6;
+    in-out property <color> accent: #6c8cff;
+    in-out property <color> accent-2: #ff5470;
+    in-out property <length> radius: 14px;
+    in-out property <length> border-width: 1px;
+    in-out property <duration> anim: 280ms;
+    in-out property <string> font: "Segoe UI";
+}
+
+component Header inherits Rectangle {
+    in property <string> title;
+    in property <bool> edit;
+    callback drag-moved(length, length);
+    callback drag-ended(length, length);
+    height: 30px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        if edit: Text {
+            text: "⠿";
+            color: Theme.accent;
+            font-size: 15px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: title;
+            color: Theme.muted;
+            font-family: Theme.font;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+            vertical-alignment: center;
+        }
+    }
+
+    if edit: TouchArea {
+        mouse-cursor: grab;
+        moved => {
+            root.drag-moved(self.mouse-x, self.mouse-y);
+        }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.up) {
+                root.drag-ended(self.mouse-x, self.mouse-y);
+            }
+        }
+    }
+}
+
+component Meter inherits VerticalLayout {
+    in property <string> label;
+    in property <float> value;
+    in property <color> color;
+    spacing: 4px;
+    Rectangle {
+        vertical-stretch: 1;
+        border-radius: 6px;
+        background: Theme.surface-2;
+        Rectangle {
+            y: parent.height * (1 - min(1, root.value));
+            height: parent.height * min(1, root.value);
+            border-radius: 6px;
+            background: @linear-gradient(0deg, root.color, root.color.with-alpha(0.55));
+        }
+    }
+
+    Text {
+        text: label;
+        color: Theme.muted;
+        font-size: 11px;
+        horizontal-alignment: center;
+    }
+}
+
+component PanelView inherits Rectangle {
+    in property <Panel> panel;
+    in property <bool> edit;
+    in property <bool> dragging;
+    in property <image> visual;
+    in property <[Track]> queue;
+    in property <string> now-title;
+    in property <string> now-artist;
+    in property <float> progress;
+    in property <float> bass;
+    in property <float> mid;
+    in property <float> high;
+    in property <float> level;
+    in property <float> intensity;
+    in property <string> clock-text;
+    in property <string> stats-text;
+    callback header-moved(length, length);
+    callback header-dropped(length, length);
+    callback floating-moved(length, length, length, length);
+
+    x: panel.x;
+    y: panel.y;
+    width: panel.w;
+    height: panel.h;
+    // Curva "myBezier" padrão do Hyprland. Sem animação enquanto arrasta, para seguir o mouse.
+    animate x, y, width, height {
+        duration: root.dragging ? 0ms : Theme.anim;
+        easing: cubic-bezier(0.05, 0.9, 0.1, 1.05);
+    }
+    border-radius: Theme.radius;
+    background: panel.kind == "visual" ? #000 : Theme.surface;
+    border-width: root.edit ? 2px : Theme.border-width;
+    border-color: root.edit ? Theme.accent : Theme.border;
+    clip: true;
+    drop-shadow-blur: panel.floating ? 24px : 0px;
+    drop-shadow-color: #0008;
+
+    if panel.kind == "visual": Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.visual;
+        image-fit: cover;
+    }
+
+    if panel.kind == "player": VerticalLayout {
+        padding: 16px;
+        padding-top: 34px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 14px;
+            Rectangle {
+                width: 52px;
+                height: 52px;
+                border-radius: 10px;
+                background: @linear-gradient(135deg, Theme.accent, Theme.accent-2);
+            }
+
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: root.now-title;
+                    color: Theme.text;
+                    font-family: Theme.font;
+                    font-size: 16px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: root.now-artist;
+                    color: Theme.muted;
+                    font-family: Theme.font;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.surface-2;
+            Rectangle {
+                x: 0;
+                width: parent.width * root.progress;
+                border-radius: 2px;
+                background: Theme.accent;
+            }
+        }
+    }
+
+    if panel.kind == "queue": VerticalLayout {
+        padding: 12px;
+        padding-top: 36px;
+        spacing: 4px;
+        for t in root.queue: Rectangle {
+            height: 40px;
+            border-radius: 8px;
+            background: t.playing ? Theme.surface-2 : transparent;
+            HorizontalLayout {
+                padding-left: 10px;
+                spacing: 10px;
+                Text {
+                    text: t.playing ? "▶" : "•";
+                    color: t.playing ? Theme.accent : Theme.muted;
+                    vertical-alignment: center;
+                    width: 12px;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: t.title;
+                        color: Theme.text;
+                        font-family: Theme.font;
+                        font-size: 13px;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        text: t.artist;
+                        color: Theme.muted;
+                        font-family: Theme.font;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        Rectangle { }
+    }
+
+    if panel.kind == "meters": HorizontalLayout {
+        padding: 14px;
+        padding-top: 38px;
+        spacing: 10px;
+        Meter {
+            label: "grave";
+            value: root.bass;
+            color: Theme.accent-2;
+        }
+
+        Meter {
+            label: "médio";
+            value: root.mid;
+            color: Theme.accent;
+        }
+
+        Meter {
+            label: "agudo";
+            value: root.high;
+            color: #7ee0c3;
+        }
+
+        Meter {
+            label: "volume";
+            value: root.level;
+            color: Theme.text;
+        }
+
+        Meter {
+            label: "energia";
+            value: root.intensity;
+            color: #ffb454;
+        }
+    }
+
+    if panel.kind == "clock": VerticalLayout {
+        alignment: center;
+        padding: 10px;
+        Text {
+            text: root.clock-text;
+            color: Theme.text;
+            font-family: Theme.font;
+            font-size: min(root.height * 0.38, root.width * 0.2);
+            font-weight: 300;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.stats-text;
+            color: Theme.muted;
+            font-size: 10px;
+            horizontal-alignment: center;
+        }
+    }
+
+    Header {
+        y: 0;
+        width: parent.width;
+        title: panel.kind == "visual" ? "" : panel.kind == "player" ? "TOCANDO AGORA" : panel.kind == "queue" ? "FILA" : panel.kind == "meters" ? "ESPECTRO" : "";
+        edit: root.edit;
+        drag-moved(mx, my) => {
+            if (panel.floating) {
+                root.floating-moved(panel.x + mx - 15px, panel.y + my - 15px, panel.w, panel.h);
+            } else {
+                root.header-moved(panel.x + mx, panel.y + my);
+            }
+        }
+        drag-ended(mx, my) => {
+            if (!panel.floating) {
+                root.header-dropped(panel.x + mx, panel.y + my);
+            }
+        }
+    }
+
+    // Alça de redimensionar dos widgets flutuantes.
+    if edit && panel.floating: TouchArea {
+        x: parent.width - 18px;
+        y: parent.height - 18px;
+        width: 18px;
+        height: 18px;
+        mouse-cursor: nwse-resize;
+        moved => {
+            root.floating-moved(panel.x, panel.y, panel.w + self.mouse-x - self.pressed-x, panel.h + self.mouse-y - self.pressed-y);
+        }
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            x: 6px;
+            y: 6px;
+            border-radius: 2px;
+            background: Theme.accent;
+        }
+    }
+}
+
+export component App inherits Window {
+    // ----- Contrato com o app (não renomear) -----
+    in property <[Panel]> panels;
+    in property <[Div]> dividers;
+    in property <image> visual;
+    in property <[Track]> queue;
+    in property <bool> edit-mode;
+    in property <bool> dragging;
+    in property <string> now-title: "Modo Escuta";
+    in property <string> now-artist: "tocando no sistema";
+    in property <float> progress: 0.3;
+    in property <float> bass;
+    in property <float> mid;
+    in property <float> high;
+    in property <float> level;
+    in property <float> intensity;
+    in property <string> clock-text: "00:00";
+    in property <string> stats-text;
+    in property <string> hint-text;
+    in property <string> error-text;
+    in property <bool> preview-visible;
+    in property <length> preview-x;
+    in property <length> preview-y;
+    in property <length> preview-w;
+    in property <length> preview-h;
+    callback divider-drag(int, length, length);
+    callback divider-released();
+    callback panel-drag(string, length, length);
+    callback panel-drop(string, length, length);
+    callback floating-move(string, length, length, length, length);
+    callback key(string);
+    // ---------------------------------------------
+
+    title: "Protótipo Slint — layout em árvore";
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    background: Theme.bg;
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            root.key(event.text);
+            accept
+        }
+    }
+
+    for p in root.panels: PanelView {
+        panel: p;
+        edit: root.edit-mode;
+        dragging: root.dragging;
+        visual: root.visual;
+        queue: root.queue;
+        now-title: root.now-title;
+        now-artist: root.now-artist;
+        progress: root.progress;
+        bass: root.bass;
+        mid: root.mid;
+        high: root.high;
+        level: root.level;
+        intensity: root.intensity;
+        clock-text: root.clock-text;
+        stats-text: root.stats-text;
+        header-moved(x, y) => {
+            root.panel-drag(p.id, x, y);
+        }
+        header-dropped(x, y) => {
+            root.panel-drop(p.id, x, y);
+        }
+        floating-moved(x, y, w, h) => {
+            root.floating-move(p.id, x, y, w, h);
+        }
+    }
+
+    // Divisórias: só aparecem (e só respondem) no modo edição.
+    if root.edit-mode: Rectangle {
+        for d[i] in root.dividers: TouchArea {
+            x: d.x;
+            y: d.y;
+            width: d.w;
+            height: d.h;
+            mouse-cursor: d.row ? ew-resize : ns-resize;
+            moved => {
+                root.divider-drag(i, d.x + self.mouse-x, d.y + self.mouse-y);
+            }
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.up) {
+                    root.divider-released();
+                }
+            }
+            Rectangle {
+                x: d.row ? (parent.width - 4px) / 2 : (parent.width - 48px) / 2;
+                y: d.row ? (parent.height - 48px) / 2 : (parent.height - 4px) / 2;
+                width: d.row ? 4px : 48px;
+                height: d.row ? 48px : 4px;
+                border-radius: 2px;
+                background: parent.has-hover || parent.pressed ? Theme.accent : Theme.muted.with-alpha(0.6);
+            }
+        }
+    }
+
+    // Prévia de onde o painel vai cair.
+    if root.preview-visible: Rectangle {
+        x: root.preview-x;
+        y: root.preview-y;
+        width: root.preview-w;
+        height: root.preview-h;
+        border-radius: Theme.radius;
+        background: Theme.accent.with-alpha(0.18);
+        border-width: 2px;
+        border-color: Theme.accent;
+        animate x, y, width, height { duration: 120ms; easing: ease-out; }
+    }
+
+    if root.hint-text != "": Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 44px;
+        width: hint.preferred-width + 28px;
+        height: 30px;
+        border-radius: 15px;
+        background: Theme.surface-2.with-alpha(0.92);
+        border-width: 1px;
+        border-color: Theme.border;
+        hint := Text {
+            text: root.hint-text;
+            color: Theme.text;
+            font-family: Theme.font;
+            font-size: 12px;
+        }
+    }
+
+    if root.error-text != "": Rectangle {
+        x: 16px;
+        y: 16px;
+        width: parent.width - 32px;
+        height: err.preferred-height + 20px;
+        border-radius: 10px;
+        background: #4a1020;
+        err := Text {
+            x: 10px;
+            width: parent.width - 20px;
+            text: root.error-text;
+            color: #ffd7de;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+    }
+}

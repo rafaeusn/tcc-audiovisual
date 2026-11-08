@@ -1,0 +1,14 @@
+# Cenário de estresse: o visual ocupa quase a janela toda (tela cheia), com o player embaixo e o relógio flutuante.
+gaps_in = 8.0
+gaps_out = 12.0
+
+[[breakpoint]]
+min_width = 0.0
+root = { split = "column", ratio = 0.88, a = { panel = "visual" }, b = { panel = "player" } }
+
+[[floating]]
+panel = "clock"
+x = 0.03
+y = 0.04
+w = 0.14
+h = 0.1

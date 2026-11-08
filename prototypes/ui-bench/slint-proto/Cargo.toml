@@ -1,0 +1,15 @@
+[package]
+name = "slint-proto"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Protótipo Slint: layout em árvore, skin carregada em tempo de execução e visual wgpu."
+
+[dependencies]
+proto-core.workspace = true
+wgpu.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+slint = { version = "1.18", default-features = false, features = ["std", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-30", "accessibility", "compat-1-2"] }
+slint-interpreter = { version = "1.18", default-features = false, features = ["backend-winit", "renderer-femtovg-wgpu", "accessibility", "compat-1-2"] }
+spin_on = "0.1"

@@ -1,0 +1,58 @@
+// Skin "default" do protótipo GPUI, em KDL. Edite e salve com o app aberto: recarrega na hora.
+// Cores são tokens do tema (themes/*.toml): bg, surface, surface-2, border, text, muted, accent, accent-2.
+// Valores ao vivo entre chaves: {bass} {mid} {high} {level} {intensity} {progress} {clock} {stats}
+// {now.title} {now.source}, e na lista: each "queue" { … {item.title} {item.artist} {item.playing} }.
+
+app bg="bg" visual="panel"
+
+// Moldura de todos os painéis.
+frame radius="theme" bg="surface" border="border" border-width="theme" edit-border="accent" shadow="floating"
+
+// Cabeçalho (título) dos painéis.
+header height=30 padding-x=12 size=12 weight="semibold" color="muted"
+
+panel "visual"
+
+panel "player" title="TOCANDO AGORA" {
+    column w="fill" h="fill" padding-top=34 padding-x=16 gap=10 {
+        row gap=14 align="center" {
+            box w=52 h=52 radius=10 bg="gradient(accent, accent-2)"
+            column {
+                text "{now.title}" size=16 weight="bold" color="text"
+                text "{now.source}" size=12 color="muted"
+            }
+        }
+        progress "{progress}" h=4 radius=2 track="surface-2" fill="accent"
+    }
+}
+
+panel "queue" title="FILA" {
+    column w="fill" h="fill" padding-top=36 padding-x=12 gap=4 {
+        each "queue" {
+            row h=40 radius=8 padding-x=10 gap=10 align="center" active="{item.playing}" active-bg="surface-2" {
+                text "•" w=12 color="muted" active="{item.playing}" active-color="accent"
+                column {
+                    text "{item.title}" size=13 color="text"
+                    text "{item.artist}" size=11 color="muted"
+                }
+            }
+        }
+    }
+}
+
+panel "meters" title="ESPECTRO" {
+    row w="fill" h="fill" padding-top=38 padding-x=14 padding-bottom=8 gap=10 {
+        bar "{bass}" label="grave" fill="accent-2"
+        bar "{mid}" label="médio" fill="accent"
+        bar "{high}" label="agudo" fill="#7ee0c3"
+        bar "{level}" label="volume" fill="text"
+        bar "{intensity}" label="energia" fill="#ffb454"
+    }
+}
+
+panel "clock" {
+    column w="fill" h="fill" align="center" justify="center" {
+        text "{clock}" size="36%h" weight="light" color="text"
+        text "{stats}" size=10 color="muted"
+    }
+}

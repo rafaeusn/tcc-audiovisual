@@ -1,0 +1,17 @@
+{
+  "framework": "slint 1.18 (interpreter)",
+  "renderer": "femtovg-wgpu",
+  "audio": "sintético",
+  "window": "1280x800",
+  "startup_ms_first_frame": 1136.517578125,
+  "duration_s": 20.0022003,
+  "frames": 2082,
+  "avg_fps": 104.08854869831497,
+  "frame_ms_p50": 9.3658,
+  "frame_ms_p95": 11.2943,
+  "frame_ms_p99": 13.3625,
+  "frame_ms_max": 15.04,
+  "working_set_mb": 171.66015625,
+  "private_mb": 207.97265625,
+  "cpu_percent": 101.78567704873952
+}

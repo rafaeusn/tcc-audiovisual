@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["core", "slint-proto", "gpui-proto"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+
+[workspace.dependencies]
+proto-core = { path = "core" }
+wgpu = "30"
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }
+cpal = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+windows-sys = { version = "0.61", features = ["Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_Foundation", "Win32_System_SystemInformation"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+
+# Compilar dependências otimizadas mesmo em debug: shaders, áudio e layout ficam rápidos durante o desenvolvimento.
+[profile.dev.package."*"]
+opt-level = 2

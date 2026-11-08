@@ -24,6 +24,15 @@ App desktop (web-first) híbrido: **player nativo + modo Escuta**, com templates
 
 **Assinatura (visão de produto):** templates/presets, matcher de biblioteca, pré-análise (BPM/seções/drop), stats estilo Last.fm + “templates mais usados”, modo Escuta, packs curados feitos no TouchDesigner. A assinatura vende experiência em cima da música, não o catálogo.
 
+**Atualização 07/11/2026 — novo modelo de produto:** dois apps com o mesmo núcleo Rust. O **Player** é grátis e tem
+módulos de serviço (Spotify estilo Spotifast, SoundCloud, Last.fm, YT Music). O **Studio** é pago (editor audiovisual
+com linha do tempo e exportação de vídeo, templates de câmera/corpo) e usa só o Modo Escuta e arquivos importados.
+O Player é **Modo Escuta primeiro**: não pede conexão com nenhum serviço, e os módulos de serviço são baixados à
+parte numa loja dentro do app (estilo Marketplace do Spicetify). Desktop Windows primeiro. Framework de UI: protótipo comparativo (`prototypes/ui-bench`, resultados em
+[`docs/prototipo-ui-resultados.md`](docs/prototipo-ui-resultados.md)) decidiu por **GPUI**:
+visual sem cópia via camada DirectComposition + skins KDL recarregadas ao vivo (144 fps, ~14% de CPU). Detalhes, termos do Spotify (Developer Policy III.6/III.13/IV.2) e stack em
+[`docs/pesquisa-referencias-app.md`](docs/pesquisa-referencias-app.md).
+
 ---
 
 ## 2. Decisões de arquitetura já tomadas
