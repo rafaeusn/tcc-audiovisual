@@ -12,6 +12,9 @@ Atualizado em 07/11/2026. Responda sempre em **pt-BR**.
 3. Seguir o **plano da v1** (`docs/plano-v1.md`): app em Rust + GPUI, Windows, fases 0–6.
 4. Não reinventar o que já está em `spectralTD.js`, `director.js`, `audio.js` nem no protótipo `prototypes/ui-bench`:
    eles são a base do port e o gabarito dos testes de paridade.
+5. Para ver ou mudar o design da UI: o mockup interativo (v4) está em `mockup/`, com prévia local e regras em
+   `mockup/README.md`; as decisões estão em `docs/design-ui-v1.md` e `docs/repertorio-ui.md`. A versão publicada é um
+   artefato do claude.ai, que só o Claude Code atualiza.
 
 ---
 

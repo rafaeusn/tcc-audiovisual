@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Sistema visual</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&amp;family=Doto:wght@500..800&amp;family=Fragment+Mono&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="frame sys" data-theme="noite" style="font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: var(--fg)">
+
+<header class="sys-head">
+<svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-t" d="{{ mark }}"></path><circle class="mk-c" cx="12" cy="12" r="2.3"></circle></svg>
+<div>
+<h1 class="t-hero">Noite</h1>
+<p>Moldura preta, palco vivo, painel de leitura. Contêiner ganha linha e estado ganha preenchimento. A cor aparece onde tem significado: a energia da música, a marca de cada serviço, as capas e o tom do visual no dock.</p>
+</div>
+</header>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Assinatura</h2><p>Quatro elementos repetidos em todo o app formam a identidade. Todos nascem do mesmo ponto.</p></div>
+<div class="comp-grid">
+<div class="comp"><span class="t-head">Símbolo</span><div style="display: flex; align-items: center; gap: 20px"><svg class="mark" viewBox="0 0 24 24" style="width: 72px; height: 72px" aria-hidden="true"><path class="mk-t" d="{{ mark }}"></path><circle class="mk-c" cx="12" cy="12" r="2.3"></circle></svg><p class="meta">Anel de pontos de tamanhos diferentes, como níveis de áudio em volta de um círculo. Pulsa uma vez por compasso.</p></div></div>
+<div class="comp"><span class="t-head">Números em matriz</span><div style="display: flex; align-items: flex-end; gap: 6px"><span class="dots" style="font-size: 44px">128</span><span class="bpm-u">BPM</span></div><p class="meta">Doto, só em números: BPM, relógio, contagens e o selo raro. Os dígitos rolam quando o valor muda.</p></div>
+<div class="comp"><span class="t-head">Ícone ativo em pontos</span><div class="comp-row"><span class="rail-it on" style="display: grid"><svg class="ico ico-24 ico-dots" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ homeDots }}"></path></svg></span><span class="rail-it" style="display: grid"><svg class="ico ico-24" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.lib }}"></path></svg></span><span class="rail-it" style="display: grid"><svg class="ico ico-24" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.store }}"></path></svg></span></div><p class="meta">O traço do ícone rasterizado numa grade de 12 por 12. A mesma linguagem dos números.</p></div>
+<div class="comp span2"><span class="t-head">Mapa de energia como barra de tempo</span><div style="display: flex; align-items: center; gap: 3px; height: 34px; overflow: hidden"><sc-for list="{{ map }}" as="c" hint-placeholder-count="48"><span style="display: flex; flex-direction: column; gap: 3px; opacity: {{ c.o }}"><sc-for list="{{ c.dots }}" as="d" hint-placeholder-count="3"><i style="display: block; width: 4px; height: 4px; border-radius: 50%; background: {{ d.c }}"></i></sc-for></span></sc-for></div><p class="meta">Um vão separa as seções da faixa. A seção atual se acende inteira, as anteriores ficam a 50%. No Modo Escuta o mapa se desenha enquanto toca.</p></div>
+<div class="comp"><span class="t-head">Selo raro</span><div class="seal" role="img" aria-label="Selo: 100 horas ouvidas" style="width: 120px; height: 120px"><svg viewBox="0 0 148 148" aria-hidden="true"><path d="{{ seal }}" fill="currentColor"></path></svg><span class="seal-in"><span class="dots" style="font-size: 28px">100</span><span class="seal-l">horas</span></span></div><p class="meta">Só para marcos em Estatísticas.</p></div>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Superfícies</h2><p>Moldura e painel no mesmo preto, separados por um filete. Preenchimento só em estado. O palco é o próprio visual, e o dock é a única faixa com cor.</p></div>
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div class="sw-grid"><sc-for list="{{ ui }}" as="c" hint-placeholder-count="10"><div class="sw"><span class="sw-c" style="background: {{ c.v }}"></span><b>{{ c.n }}</b><span>{{ c.r }}</span><span>{{ c.v }}</span></div></sc-for></div>
+<div class="sw-grid"><sc-for list="{{ tones }}" as="c" hint-placeholder-count="4"><div class="sw"><span class="sw-c" style="background: {{ c.v }}"></span><b>{{ c.n }}</b><span>{{ c.r }}</span></div></sc-for></div>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Cores com significado</h2><p>Energia, marcas e confirmação. No tema Monocromático os acentos viram cinza e as capas e logos perdem a cor.</p></div>
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div class="sw-grid"><sc-for list="{{ acc }}" as="c" hint-placeholder-count="9"><div class="sw"><span class="sw-c" style="background: {{ c.v }}"></span><b>{{ c.n }}</b><span>{{ c.r }}</span><span>{{ c.v }}</span></div></sc-for></div>
+<div class="sw-grid"><sc-for list="{{ vis }}" as="c" hint-placeholder-count="3"><div class="sw"><span class="sw-c" style="background: linear-gradient(90deg, {{ c.a }} 0 50%, {{ c.b }} 50% 100%)"></span><b>Visual {{ c.n }}</b><span>{{ c.r }}</span></div></sc-for></div>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Tipografia</h2><p>Escala fixa de 7 tamanhos, com entrelinha em múltiplos de 4. Instrument Sans em duas larguras, Doto nos números e Fragment Mono só no tempo e em código.</p></div>
+<div>
+<div class="type-r"><span class="meta">Herói<br>88/80, peso 700<br>largura 78%</span><span class="t-hero">Vidro Noturno</span></div>
+<div class="type-r"><span class="meta">Página<br>44/44, peso 700<br>largura 82%</span><span class="t-display">Biblioteca</span></div>
+<div class="type-r"><span class="meta">Destaque<br>28/32, peso 650</span><span class="t-title">Intensa</span></div>
+<div class="type-r"><span class="meta">Seção e faixa<br>20/28 e 16/24</span><span style="display: flex; flex-direction: column"><span style="font-size: 20px; line-height: 28px; font-weight: 500">Coletivo Sal</span><span class="t-head">Perfis de Escuta</span></span></div>
+<div class="type-r"><span class="meta">Corpo<br>14/20, peso 450</span><span style="font-size: 14px; line-height: 20px">O visual começa sozinho, sem conectar conta e sem configurar nada.</span></div>
+<div class="type-r"><span class="meta">Apoio<br>12/16, peso 500</span><span class="micro">Ouvindo só este app</span></div>
+<div class="type-r"><span class="meta">Números<br>Doto 44, peso 800</span><span class="dots" style="font-size: 44px">12<i class="colon"></i>30</span></div>
+<div class="type-r"><span class="meta">Tempo e código<br>Fragment Mono 12/16</span><span class="mono">1:32 e player.tocar-pausar</span></div>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Ícones e cantos</h2><p>Ícones no mesmo grid de 24 px, com traço de 1,6. Cantos concêntricos: o de dentro é o de fora menos o recuo.</p></div>
+<div style="display: flex; flex-direction: column; gap: 32px">
+<div class="icons"><sc-for list="{{ icons }}" as="i" hint-placeholder-count="30"><span title="{{ i.n }}"><svg class="{{ i.cls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ i.d }}"></path></svg></span></sc-for></div>
+<div class="radii"><span><i style="border-radius: 28px"></i>28 palco, painel, dock</span><span><i style="border-radius: 16px"></i>16 capas, cartões, menus</span><span><i style="border-radius: 10px"></i>10 controles</span><span><i style="border-radius: 999px; height: 40px"></i>pílula</span><span><i style="border-radius: 50%"></i>círculo</span></div>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Componentes</h2><p>Um botão principal, um secundário e um jeito de separar: linha para contêiner, preenchimento para estado. Sem card dentro de card.</p></div>
+<div class="comp-grid">
+<div class="comp"><span class="t-head">Botões</span>
+<div class="comp-row"><button class="btn btn-pri"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.download }}"></path></svg>Instalar</button><button class="btn btn-sec">Cancelar</button><button class="btn btn-ok"><svg class="ico ok" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg>Instalado</button></div>
+<div class="comp-row"><button class="play is-playing" aria-label="Pausar"><svg class="ico ico-fill i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg><svg class="ico ico-fill i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pause }}"></path></svg></button><button class="ib on" aria-label="Painel"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.panel }}"></path></svg></button><button class="ib" aria-label="Tela cheia"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.full }}"></path></svg></button><button class="btn btn-sec sm hold holding" style="--x: 1"><span>Segure…</span></button></div>
+</div>
+<div class="comp"><span class="t-head">Controles</span>
+<div class="comp-row"><button class="switch" role="switch" aria-checked="true" aria-label="Ligado"></button><button class="switch" role="switch" aria-checked="false" aria-label="Desligado"></button></div>
+<div class="seg wide"><i class="seg-ind" style="--i: 0; --n: 3"></i><button class="on">Noite</button><button>Grafite</button><button>Papel</button></div>
+<div class="sld" style="flex: none; width: 100%"><span class="sld-track"></span><span class="sld-fill" style="left: 0; width: 64%"></span><span class="sld-knob" style="left: 64%"></span></div>
+</div>
+<div class="comp"><span class="t-head">Etiquetas</span>
+<div class="comp-row"><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.metro }}"></path></svg>112 BPM</span><span class="badge on">Em uso</span><span class="badge">Automático</span></div>
+<div class="comp-row"><span class="kbd">Ctrl</span><span class="kbd">K</span><span class="kbd">E</span><span class="kbd">F</span><span class="kbd">M</span><span class="kbd">Espaço</span></div>
+</div>
+<div class="comp span2"><span class="t-head">Linha de lista</span>
+<div class="row" style="background: var(--hover)"><img src="{{ cover }}" alt=""><span class="row-tx"><span class="row-t">Cidade Submersa</span><span class="row-a">Lume</span></span><span class="row-r">há 4 min</span><button class="ib xs row-act" style="opacity: 1" aria-label="Tocar"><svg class="ico ico-fill ico-16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg></button></div>
+<p class="meta">Capa, título, artista e um dado à direita. As ações aparecem no hover e no foco; com tela de toque, ficam sempre à vista.</p>
+</div>
+<div class="comp"><span class="t-head">Silhueta por tipo</span>
+<div class="comp-row" style="align-items: flex-end; gap: 16px"><span style="width: 40px; height: 40px; border-radius: 10px; background: #3d7bff" title="Faixa"></span><span class="sil-folder" style="--c: #8fb0ff" title="Pasta"></span><span style="width: 56px; height: 32px; border-radius: 6px; background: radial-gradient(ellipse at 50% 60%, rgba(255,255,255,.5), transparent 65%), #000; box-shadow: inset 0 0 0 1px var(--hair-3)" title="Skin"></span><span class="pin-prof" style="width: 40px; height: 40px" title="Perfil"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: #1ED760; width: 20px; height: 20px"><path d="{{ spotify }}"></path></svg></span></div>
+<p class="meta">Faixa em quadrado, pasta com aba lateral, skin em 16:9, perfil e serviço em círculo com a marca.</p>
+</div>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Movimento</h2><p>Curvas fortes de saída e molas sem quique. A saída é mais rápida que a entrada. A paleta de comandos não anima: ela é usada o tempo todo.</p></div>
+<div class="comp-grid">
+<sc-for list="{{ curves }}" as="cv" hint-placeholder-count="3">
+<div class="curve"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path class="curve-g" d="M0 100H100V0"></path><path class="curve-l" d="{{ cv.d }}"></path></svg><span class="t-head">{{ cv.n }}</span><span class="mono" style="color: var(--fg-2)">{{ cv.v }}</span><span class="meta">{{ cv.u }}</span></div>
+</sc-for>
+</div>
+</section>
+
+<section class="sys-sec">
+<div class="sys-sec-h"><h2 class="t-title">Regras</h2><p>O que separa uma interface feita à mão de uma montada no automático.</p></div>
+<ul class="rules-x"><sc-for list="{{ rules }}" as="r" hint-placeholder-count="10"><li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg><span>{{ r.t }}</span></li></sc-for></ul>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":4200}}'>
+class Component extends DCLogic {
+  static dotPath(d) {
+    let out = '';
+    try {
+      const G = 12, R = 4, off = document.createElement('canvas');
+      off.width = off.height = 24 * R;
+      const o = off.getContext('2d');
+      o.scale(R, R); o.lineWidth = 2.2; o.lineCap = 'round'; o.lineJoin = 'round'; o.strokeStyle = '#fff';
+      o.stroke(new Path2D(d));
+      const px = o.getImageData(0, 0, off.width, off.height).data, cell = off.width / G;
+      for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+        let sum = 0, n = 0;
+        for (let yy = 0; yy < cell; yy += 2) for (let xx = 0; xx < cell; xx += 2) { sum += px[((y * cell + yy) * off.width + (x * cell + xx)) * 4 + 3]; n++; }
+        const cov = sum / n / 255;
+        if (cov > 0.1) { const r = 0.55 + 0.45 * Math.min(1, cov * 1.6), cx = x * 2 + 1, cy = y * 2 + 1; out += 'M' + (cx - r).toFixed(2) + ' ' + cy + 'a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (2 * r).toFixed(2) + ' 0a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (-2 * r).toFixed(2) + ' 0z'; }
+      }
+    } catch (e) { out = ''; }
+    return out;
+  }
+  renderVals() {
+    const amp = [1, 0.62, 0.3, 0.48, 0.85, 0.4, 0.18, 0.55, 0.92, 0.5, 0.24, 0.36, 0.78, 0.58, 0.2, 0.44];
+    const ring = (n, cx0, rad, base, k) => {
+      let d = '';
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2 - Math.PI / 2, r = base + amp[i % 16] * k;
+        const cx = cx0 + Math.cos(a) * rad, cy = cx0 + Math.sin(a) * rad;
+        d += 'M' + (cx - r).toFixed(2) + ' ' + cy.toFixed(2) + 'a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (2 * r).toFixed(2) + ' 0a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (-2 * r).toFixed(2) + ' 0z';
+      }
+      return d;
+    };
+    const mark = ring(16, 12, 8.6, 0.55, 1.05);
+    const seal = ring(32, 74, 66, 1.4, 2.2);
+    const ic = {
+      home: 'M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z',
+      lib: 'M7 4.5h10M5.5 7.5h13M5 10.5h14a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z',
+      store: 'M5.2 8h13.6l-1 11a1.5 1.5 0 0 1-1.5 1.4H7.7a1.5 1.5 0 0 1-1.5-1.4zM9 8V7a3 3 0 0 1 6 0v1',
+      stats: 'M5 20v-6M10 20V8M15 20v-9M20 20V5',
+      sliders: 'M4 7h9M17 7h3M15 4.8v4.4M4 17h3M11 17h9M9 14.8v4.4',
+      search: 'M10.75 17.5a6.75 6.75 0 1 0 0-13.5 6.75 6.75 0 0 0 0 13.5zM15.75 15.75 20 20',
+      grid: 'M4.5 5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM13.5 5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM4.5 14.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM16.5 13.5v6M13.5 16.5h6',
+      play: 'M8 5.65v12.7a1.1 1.1 0 0 0 1.66.95l10.55-6.35a1.1 1.1 0 0 0 0-1.9L9.66 4.7A1.1 1.1 0 0 0 8 5.65z',
+      pause: 'M7.5 5h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm7 0h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
+      next: 'M17.75 5.5a1.25 1.25 0 0 0-2.5 0v13a1.25 1.25 0 0 0 2.5 0zM5 6.4v11.2a1.1 1.1 0 0 0 1.7.92l7.8-5.6a1.1 1.1 0 0 0 0-1.84l-7.8-5.6A1.1 1.1 0 0 0 5 6.4z',
+      full: 'M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15',
+      pip: 'M3.5 6.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM12.5 12h5.5v5h-5.5z',
+      vol: 'M4 9.5h3.2L12 5.6v12.8l-4.8-3.9H4zM15.5 9a4 4 0 0 1 0 6M18.2 6.4a7.6 7.6 0 0 1 0 11.2',
+      shield: 'M12 3.6 18.8 6.3v5.1c0 4.1-2.8 7.2-6.8 8.5-4-1.3-6.8-4.4-6.8-8.5V6.3zM9 11.8l2.1 2.1L15.2 9.8',
+      drop: 'M12 3.8c3.2 3.8 5.8 6.9 5.8 9.9a5.8 5.8 0 0 1-11.6 0c0-3 2.6-6.1 5.8-9.9z',
+      wave: 'M3.5 12h1.5M7.5 8.5v7M11.5 5v14M15.5 8v8M19.5 10.5v3',
+      folder: 'M3.5 7.5a2 2 0 0 1 2-2h3.9l2.1 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z',
+      struct: 'M4 9h4.5v6H4zM10.5 6.5h3.5v11h-3.5zM16 10.5h4v3h-4z',
+      metro: 'M9.7 3.5h4.6l3.9 17H5.8zM12 15.5l4.2-7.5M7.4 16.5h9.2',
+      bolt: 'M13.2 3.5 5.5 13.6h5.9l-.9 6.9 7.7-10.1h-5.9z',
+      clock: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 7.5V12l3 2',
+      eye: 'M2.8 12S6.2 5.5 12 5.5 21.2 12 21.2 12 17.8 18.5 12 18.5 2.8 12 2.8 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+      history: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v3.6h3.6M12 8.5v4l2.8 1.6',
+      queue: 'M4 6.5h12M4 11.5h12M4 16.5h7M17 14v6M14 17h6',
+      panel: 'M4.5 6a1.5 1.5 0 0 1 1.5-1.5h12A1.5 1.5 0 0 1 19.5 6v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18zM14.5 4.5v15',
+      layers: 'M12 4l8.5 4.5L12 13 3.5 8.5zM3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5',
+      tone: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 3.5v17M12 8h6.5M12 12h8.5M12 16h6.5',
+      globe: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM3.5 12h17M12 3.5c2.6 2.8 2.6 14.2 0 17M12 3.5c-2.6 2.8-2.6 14.2 0 17',
+      key: 'M14.5 14a4.5 4.5 0 1 0-4.3-3.2L4 17v3h3v-2h2v-2h2l1.2-1.2c.7.3 1.5.3 2.3.2zM15.5 8.5h.01',
+      download: 'M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 19.5h14',
+      check: 'M5 12.5l4.5 4.5L19 7.5',
+    };
+    const homeDots = Component.dotPath(ic.home);
+    const fill = { play: 1, pause: 1, next: 1 };
+    const names = ['home', 'lib', 'store', 'stats', 'search', 'sliders', 'grid', 'play', 'pause', 'next', 'full', 'pip', 'vol', 'drop', 'shield', 'wave', 'folder', 'struct', 'metro', 'bolt', 'clock', 'eye', 'history', 'queue', 'panel', 'layers', 'tone', 'globe', 'key', 'download'];
+    const icons = names.map((n) => ({ n: n, d: n === 'home' && homeDots ? homeDots : ic[n], cls: n === 'home' && homeDots ? 'ico ico-dots' : fill[n] ? 'ico ico-fill' : 'ico' }));
+    const ui = [
+      ['Moldura e painel', '#000000', 'O mesmo preto'], ['Filete', '#1F1F22', 'Separa contêineres, 1,3:1'], ['Menus e modais', '#111113', 'O que flutua'], ['Hover', '#18181B', 'Estado'],
+      ['Seleção e ativo', '#222226', 'Estado'], ['Texto', '#F2F2F3', '18,8:1 no preto'], ['Apoio', '#A7A7AD', '8,8:1; o mínimo no dock e na seleção'], ['Discreto', '#808087', '5,4:1; fora do dock e da seleção'],
+      ['Decoração', '#46464C', '2,2:1; só desabilitado'], ['Botão principal', '#F4F4F5', 'Texto escuro por cima'],
+    ].map((x) => ({ n: x[0], v: x[1], r: x[2] }));
+    const tones = [
+      ['Dock calmo', 'rgb(34, 34, 34)', 'Apoio a 6,7:1'], ['Dock agitado', 'rgb(20, 33, 65)', 'Apoio a 6,6:1'], ['Dock intenso', 'rgb(68, 14, 21)', 'Apoio a 6,7:1'], ['Dock no modo seguro', '#111113', 'Neutro e parado'],
+    ].map((x) => ({ n: x[0], v: x[1], r: x[2] }));
+    const acc = [
+      ['Energia calma', '#E9EEFB', 'Módulo Energia e mapa'], ['Energia agitada', '#3D7BFF', 'Módulo Energia e mapa'], ['Energia intensa', '#FF3348', 'Módulo Energia e mapa'],
+      ['Spotify', '#1ED760', 'Logo'], ['Last.fm', '#D51007', 'Logo e destaque na Loja'], ['YouTube Music', '#FF0033', 'Logo'],
+      ['SoundCloud', '#FF5500', 'Logo'], ['Confirmação', '#30D158', 'Instalado, conectado'], ['Aviso', '#FF3348', 'Novidade na barra de ícones'],
+    ].map((x) => ({ n: x[0], v: x[1], r: x[2] }));
+    const vis = [{ n: 'calmo', a: '#FFFFFF', b: '#DEE6FF', r: 'Energia baixa' }, { n: 'agitado', a: '#2E6BFF', b: '#8FE3FF', r: 'Energia média' }, { n: 'intenso', a: '#FF1A38', b: '#FF8C38', r: 'Energia alta e drops' }];
+    const secs = [[0, 8, 0.17, 0.22], [8, 26, 0.47, 0.58], [26, 34, 0.6, 0.8], [34, 56, 0.95, 0.9], [56, 68, 0.33, 0.37], [68, 82, 0.55, 0.63], [82, 90, 0.65, 0.84], [90, 114, 0.97, 0.92], [114, 132, 0.38, 0.12]];
+    const map = [];
+    const N = 60, nowCol = 30;
+    const curSec = secs.find((x) => (nowCol + 0.5) / N * 132 < x[1]);
+    for (let i = 0; i < N; i++) {
+      const t = (i + 0.5) / N * 132;
+      const s = secs.find((x) => t < x[1]) || secs[secs.length - 1];
+      const gap = secs.some((x) => x[0] > 0 && Math.round(x[0] / 132 * N - 0.5) === i);
+      const e = Math.max(0.05, Math.min(1, s[2] + (s[3] - s[2]) * (t - s[0]) / (s[1] - s[0])));
+      const k = Math.max(1, Math.min(5, Math.round(Math.pow(e, 1.35) * 5 + 0.3)));
+      const lc = e < 0.43 ? 'var(--en-calm)' : e < 0.83 ? 'var(--en-mid)' : 'var(--en-hot)';
+      const past = i <= nowCol;
+      const dots = [];
+      if (!gap) for (let j = 0; j < k; j++) dots.push({ c: past ? lc : 'var(--fg-4)' });
+      map.push({ dots: dots, o: past && s !== curSec ? 0.5 : 1 });
+    }
+    const curve = (x1, y1, x2, y2) => 'M0 100C' + x1 * 100 + ' ' + (100 - y1 * 100) + ' ' + x2 * 100 + ' ' + (100 - y2 * 100) + ' 100 0';
+    const curves = [
+      { n: 'Saída forte', v: 'cubic-bezier(.23, 1, .32, 1)', u: 'Pressionar 120 ms, menus 200 ms, painéis 240 ms', d: curve(0.23, 1, 0.32, 1) },
+      { n: 'Gaveta', v: 'cubic-bezier(.32, .72, 0, 1)', u: 'Painel em gaveta e menu lateral, 300 ms', d: curve(0.32, 0.72, 0, 1) },
+      { n: 'Troca', v: 'cubic-bezier(.77, 0, .175, 1)', u: 'Fechar e sair, de 160 a 180 ms', d: curve(0.77, 0, 0.175, 1) },
+    ];
+    const rules = [
+      'Contêiner ganha linha; estado ganha preenchimento.',
+      'Nenhum card dentro de card. Os módulos se separam por espaço e título; a caixa só aparece no modo edição.',
+      'Escala fixa de 7 tamanhos: 12, 14, 16, 20, 28, 44 e 88, com entrelinha em múltiplos de 4.',
+      'Contraste mínimo de 4,5:1 em qualquer texto. No dock e na seleção, o apoio nunca fica abaixo de #A7A7AD.',
+      'O dock leva o tom do visual até luminância 0,016. No modo seguro ele fica neutro e parado.',
+      'Nenhum rótulo minúsculo em caixa alta acima de um título, e nenhum ponto do meio separando dados.',
+      'Fonte mono só para tempo e código, nunca como enfeite.',
+      'Vidro só por cima do visual, onde ele explica que existe algo atrás.',
+      'Movimento só para explicar uma mudança. Nada anima em atalho de teclado.',
+      'Ações da linha aparecem no hover e no foco; com tela de toque, ficam sempre à vista.',
+    ].map((t) => ({ t: t }));
+    return { mark: mark, seal: seal, homeDots: homeDots, ic: ic, icons: icons, ui: ui, tones: tones, acc: acc, vis: vis, map: map, curves: curves, rules: rules, spotify: 'M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z', cover: '/_blob/34c3ad39e324c89a98d2de5b472c0e94' };
+  }
+}
+</script>
+</body>
+</html>

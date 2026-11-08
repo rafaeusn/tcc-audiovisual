@@ -1,0 +1,2166 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Player, protótipo v4</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&amp;family=Doto:wght@500..800&amp;family=Fragment+Mono&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="{{ rootCls }}" ref="{{ rootRef }}" data-theme="{{ tema }}" data-root="{{ uid }}" tabindex="0" onKeyDown="{{ onKey }}" onPointerMove="{{ onMove }}" style="font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: var(--fg); --tone: {{ tone }}; --tone-soft: {{ toneSoft }}">
+<div class="app" style="grid-template-columns: {{ appCols }}">
+
+<nav class="rail {{ railCls }}" aria-label="Navegação">
+<button class="rail-mark" aria-label="Início" onClick="{{ goHome }}"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-t" d="{{ mark }}"></path><circle class="mk-c" cx="12" cy="12" r="2.3"></circle></svg></button>
+<div class="rail-nav">
+<sc-for list="{{ navItems }}" as="n" hint-placeholder-count="3">
+<button class="{{ n.cls }}" aria-label="{{ n.label }}" aria-current="{{ n.cur }}" data-tip="{{ n.label }}" data-tip-pos="right" onClick="{{ n.click }}"><svg class="{{ n.icoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ n.icon }}"></path></svg><sc-if value="{{ n.isNew }}" hint-placeholder-val="{{ false }}"><span class="badge-dot"></span></sc-if></button>
+</sc-for>
+</div>
+<span class="rail-sep" aria-hidden="true"></span>
+<div class="rail-pins">
+<button class="{{ pinProfCls }}" aria-label="Fixado: ouvir só o Spotify" data-tip="Ouvir só o Spotify" data-tip-pos="right" onClick="{{ pinSpotify }}"><span class="pin-prof"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: #1ED760"><path d="{{ br.spotify }}"></path></svg></span></button>
+<button class="{{ pinSkinCls }}" aria-label="Fixado: skin Imersiva" aria-pressed="{{ isImersiva }}" data-tip="Skin Imersiva" data-tip-pos="right" onClick="{{ pinSkin }}"><span class="pin-skin"></span></button>
+</div>
+<div class="rail-end">
+<button class="{{ editRailCls }}" aria-label="Editar layout (E)" aria-pressed="{{ editing }}" data-tip="Editar layout (E)" data-tip-pos="right" onClick="{{ toggleEdit }}"><svg class="{{ editIcoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ editIcon }}"></path></svg></button>
+<button class="{{ ajRailCls }}" aria-label="Ajustes" data-tip="Ajustes" data-tip-pos="right" onClick="{{ openAjustesRail }}"><svg class="{{ ajIcoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ajIcon }}"></path></svg></button>
+</div>
+</nav>
+
+<header class="top" style="grid-column: {{ spanCol }}">
+<button class="ib sm show-sm" aria-label="Abrir o menu" onClick="{{ openDrawer }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.menu }}"></path></svg></button>
+<sc-if value="{{ hasPage }}" hint-placeholder-val="{{ false }}"><div class="top-l"><svg class="ico ico-18 hide-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ pageIcon }}"></path></svg><span>{{ pageName }}</span></div></sc-if>
+<sc-if value="{{ notEditing }}" hint-placeholder-val="{{ true }}">
+<button class="cmd" onClick="{{ openPalette }}" aria-label="Buscar ou executar um comando (Ctrl K)"><svg class="ico ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.search }}"></path></svg><span class="cmd-tx">Buscar<span class="cmd-long"> ou executar um comando</span></span><span class="kbds"><span class="kbd">Ctrl</span><span class="kbd">K</span></span></button>
+</sc-if>
+<sc-if value="{{ editing }}" hint-placeholder-val="{{ false }}">
+<div class="edit-bar">
+<span class="edit-pill"><svg class="ico ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grid }}"></path></svg>Editando o layout</span>
+<button class="btn btn-sec sm" onClick="{{ undo }}" disabled="{{ noUndo }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.undo }}"></path></svg>Desfazer</button>
+<button class="{{ holdResetCls }}" onPointerDown="{{ holdResetDown }}" onPointerLeave="{{ holdCancel }}" onKeyDown="{{ holdResetKey }}" aria-label="Restaurar o layout padrão. Segure para confirmar"><span>{{ holdResetLabel }}</span></button>
+<button class="btn btn-pri sm" onClick="{{ toggleEdit }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg>Concluir</button>
+</div>
+</sc-if>
+<div class="top-r">
+<button class="ib sm show-sm" aria-label="Buscar ou executar um comando" onClick="{{ openPalette }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.search }}"></path></svg></button>
+<div class="win" aria-hidden="true">
+<span><svg class="ico" viewBox="0 0 24 24"><path d="{{ ic.min }}"></path></svg></span>
+<span><svg class="ico" viewBox="0 0 24 24"><path d="{{ ic.max }}"></path></svg></span>
+<span class="x"><svg class="ico" viewBox="0 0 24 24"><path d="{{ ic.x }}"></path></svg></span>
+</div>
+</div>
+</header>
+
+<section class="tile hero" data-tile="hero" style="grid-column: {{ heroCol }}" aria-label="Visual">
+<div class="tile-in">
+<canvas class="gl" role="img" aria-label="Visual Spectral reagindo à música"></canvas>
+<sc-if value="{{ noGL }}" hint-placeholder-val="{{ false }}"><div class="nogl">Este navegador não tem WebGL 2.</div></sc-if>
+<div class="scrim-b"></div>
+<div class="hero-tl"><span class="chip glass" data-tip="Diretor automático"><svg class="mark ico-16" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-t" d="{{ mark }}"></path><circle class="mk-c" cx="12" cy="12" r="2.3"></circle></svg>Spectral<i class="en-dot"></i></span></div>
+<div class="hero-tr"><button class="gbtn" aria-label="Ajustes do visual" data-tip="Ajustes do visual" onClick="{{ openAjustesVisual }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.sliders }}"></path></svg></button></div>
+<sc-if value="{{ hasTrack }}" hint-placeholder-val="{{ true }}">
+<div class="hero-b {{ tfx }}">
+<span class="hero-src fx-2"><sc-if value="{{ srcIsBrand }}" hint-placeholder-val="{{ true }}"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: {{ srcColor }}"><path d="{{ srcBrand }}"></path></svg></sc-if><sc-if value="{{ srcIsIcon }}" hint-placeholder-val="{{ false }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ srcIcon }}"></path></svg></sc-if>{{ heroSrc }}<sc-if value="{{ srcLive }}" hint-placeholder-val="{{ true }}"><i class="live" aria-label="ao vivo"></i></sc-if></span>
+<h1 class="t-hero hero-title fx-1">{{ np.title }}</h1>
+<div class="hero-art fx-2">{{ np.artist }}</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isVazio }}" hint-placeholder-val="{{ false }}">
+<div class="empty">
+<div class="empty-in">
+<svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-t" d="{{ mark }}"></path><circle class="mk-c" cx="12" cy="12" r="2.3"></circle></svg>
+<h1 class="t-display">Toque uma música em qualquer app.</h1>
+<p class="empty-p">O visual começa sozinho, sem conectar conta e sem configurar nada.</p>
+<div class="sess-row">
+<div class="sess"><span class="logo"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: #1ED760"><path d="{{ br.spotify }}"></path></svg></span><span class="sess-tx"><b>Spotify</b><span>Aberto e pausado</span></span><button class="btn btn-pri sm" onClick="{{ playFromEmpty }}"><svg class="ico ico-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg>Tocar</button></div>
+<div class="sess dim"><span class="logo"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.globe }}"></path></svg></span><span class="sess-tx"><b>Navegador</b><span>Nenhuma mídia tocando</span></span></div>
+</div>
+<button class="link" onClick="{{ openBib }}">Ou abra uma música do seu PC</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showBib }}" hint-placeholder-val="{{ false }}">
+<section class="{{ sheetCls }}" style="--oy: {{ sheetOY }}px" aria-label="Biblioteca">
+<div class="sh-head">
+<div class="sh-top">
+<div class="sh-tt"><h2 class="t-display">Biblioteca</h2><p class="sh-sub">{{ libCount }} faixas, todas em Creative Commons ou domínio público.</p></div>
+<label class="field"><svg class="ico ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.search }}"></path></svg><input type="search" placeholder="Filtrar faixas" value="{{ bibQuery }}" onChange="{{ onBibQuery }}" aria-label="Filtrar por título, artista ou gênero"></label>
+</div>
+<div><div class="seg" role="tablist"><i class="seg-ind" style="--i: {{ bibSegI }}; --n: 2"></i><button class="{{ segFaixas }}" role="tab" aria-selected="{{ isFaixas }}" onClick="{{ bibFaixas }}">Faixas</button><button class="{{ segPastas }}" role="tab" aria-selected="{{ isPastas }}" onClick="{{ bibPastas }}">Pastas</button></div></div>
+</div>
+<button class="ib sh-close" aria-label="Fechar (Esc)" onClick="{{ closeSheet }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.x }}"></path></svg></button>
+<div class="sh-body fade-y">
+<sc-if value="{{ isFaixas }}" hint-placeholder-val="{{ true }}">
+<div class="lib" role="table" aria-label="Faixas">
+<div class="lib-h" role="row"><span role="columnheader">#</span><span role="columnheader">Título</span><span class="c-gen" role="columnheader">Gênero</span><span class="r" role="columnheader">BPM</span><span class="c-en" role="columnheader">Energia</span><span class="c-lic" role="columnheader">Licença</span></div>
+<sc-for list="{{ libRows }}" as="r" hint-placeholder-count="6">
+<div class="{{ r.cls }}" role="row" aria-selected="{{ r.isSel }}" onClick="{{ r.sel }}" onDoubleClick="{{ r.play }}">
+<span class="lib-n" role="cell"><span class="lib-idx">{{ r.n }}</span><sc-if value="{{ r.playing }}" hint-placeholder-val="{{ false }}"><span class="eqs"><span class="{{ eqCls }}" aria-hidden="true"><i style="height: {{ eqA }}px"></i><i style="height: {{ eqB }}px"></i><i style="height: {{ eqC }}px"></i></span></span></sc-if><button class="ib" aria-label="{{ r.playLabel }}" onClick="{{ r.play }}"><svg class="ico ico-fill ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg></button></span>
+<span class="row-main" role="cell"><img src="{{ r.cover }}" alt=""><span class="row-tx"><span class="row-t">{{ r.title }}</span><span class="row-a">{{ r.artist }}</span></span></span>
+<span class="cell c-gen" role="cell">{{ r.genre }}</span>
+<span class="cell r" role="cell">{{ r.bpm }}</span>
+<span class="c-en" role="cell"><span class="rng" title="{{ r.rngTitle }}"><span class="rng-track"></span><span class="rng-span" style="left: {{ r.p10 }}%; width: {{ r.span }}%"></span><span class="rng-dot" style="left: {{ r.p50 }}%"></span></span></span>
+<span class="lic c-lic" role="cell">{{ r.lic }}</span>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{ libEmpty }}" hint-placeholder-val="{{ false }}"><p class="empty-sm">Nenhuma faixa com “{{ bibQuery }}”.</p></sc-if>
+</sc-if>
+<sc-if value="{{ isPastas }}" hint-placeholder-val="{{ false }}">
+<div class="folders">
+<div class="folder"><span class="sil-folder" style="--c: #3d7bff" aria-hidden="true"></span><span class="folder-tx"><b>corpus</b><span>C:\Projetos\tcc-audiovisual\corpus</span></span><span class="cnt" style="color: #8fb0ff">9 faixas</span></div>
+<div class="folder"><span class="sil-folder" style="--c: #46464c" aria-hidden="true"></span><span class="folder-tx"><b>Músicas</b><span>C:\Usuários\você\Músicas</span></span><span class="badge">Vazia</span></div>
+<div style="padding-top: 20px"><button class="btn btn-sec"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.plus }}"></path></svg>Adicionar pasta</button></div>
+</div>
+</sc-if>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{ showLoja }}" hint-placeholder-val="{{ false }}">
+<section class="{{ sheetCls }}" style="--oy: {{ sheetOY }}px" aria-label="Loja">
+<div class="sh-head">
+<div class="sh-top"><div class="sh-tt"><h2 class="t-display">Loja</h2><p class="sh-sub">Módulos, temas, skins e layouts. Tudo é assinado e conferido antes de instalar.</p></div></div>
+<div><div class="seg" role="tablist"><i class="seg-ind" style="--i: {{ lojaI }}; --n: 5"></i><sc-for list="{{ lojaTabs }}" as="tb" hint-placeholder-count="5"><button class="{{ tb.cls }}" role="tab" aria-selected="{{ tb.on }}" onClick="{{ tb.click }}">{{ tb.label }}<span class="tab-n">{{ tb.n }}</span></button></sc-for></div></div>
+</div>
+<button class="ib sh-close" aria-label="Fechar (Esc)" onClick="{{ closeSheet }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.x }}"></path></svg></button>
+<div class="sh-body fade-y">
+<sc-if value="{{ lojaModulos }}" hint-placeholder-val="{{ true }}">
+<article class="feature">
+<span class="feature-logo lfm"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ br.lastdotfm }}"></path></svg></span>
+<div class="feature-tx">
+<h3 class="t-title">Last.fm</h3>
+<p>Faz scrobble do que você ouve em qualquer fonte, importa o histórico e cria a página Estatísticas.</p>
+<div class="perm-chips"><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.globe }}"></path></svg>Só ws.audioscrobbler.com</span><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.key }}"></path></svg>Cofre do Windows</span><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.wave }}"></path></svg>Lê o que está tocando</span></div>
+</div>
+<button class="{{ lfm.cls }}" onClick="{{ lfm.click }}" disabled="{{ lfm.disabled }}"><sc-if value="{{ lfm.busy }}" hint-placeholder-val="{{ false }}"><svg class="ring" viewBox="0 0 16 16" aria-hidden="true"><circle class="rb" cx="8" cy="8" r="6"></circle><circle class="rf" cx="8" cy="8" r="6" style="stroke-dashoffset: {{ lfm.ringOff }}"></circle></svg></sc-if><sc-if value="{{ lfm.done }}" hint-placeholder-val="{{ false }}"><svg class="ico ok" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg></sc-if><sc-if value="{{ lfm.idle }}" hint-placeholder-val="{{ true }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.download }}"></path></svg></sc-if><span>{{ lfm.label }}</span></button>
+</article>
+<div class="sec"><h3 class="t-head">Perfis de Escuta</h3><p>Sem código: ensinam o app a reconhecer cada serviço e a ouvir só ele.</p></div>
+<div class="plist">
+<sc-for list="{{ escCards }}" as="c" hint-placeholder-count="5">
+<div class="pl-r"><span class="pl-logo"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: {{ c.color }}"><path d="{{ c.brand }}"></path></svg></span><span class="pl-tx"><b>{{ c.name }}</b><span>{{ c.desc }}</span></span><span class="pl-act"><sc-if value="{{ c.canRemove }}" hint-placeholder-val="{{ false }}"><button class="{{ c.rmCls }}" onPointerDown="{{ c.rmDown }}" onPointerLeave="{{ holdCancel }}" onKeyDown="{{ c.rmKey }}" aria-label="Remover {{ c.name }}. Segure para confirmar"><span>{{ c.rmLabel }}</span></button></sc-if><button class="{{ c.btnCls }}" onClick="{{ c.click }}" disabled="{{ c.disabled }}"><sc-if value="{{ c.busy }}" hint-placeholder-val="{{ false }}"><svg class="ring" viewBox="0 0 16 16" aria-hidden="true"><circle class="rb" cx="8" cy="8" r="6"></circle><circle class="rf" cx="8" cy="8" r="6" style="stroke-dashoffset: {{ c.ringOff }}"></circle></svg></sc-if><sc-if value="{{ c.done }}" hint-placeholder-val="{{ false }}"><svg class="ico ok" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg></sc-if><span>{{ c.btnLabel }}</span></button></span></div>
+</sc-for>
+</div>
+<div class="sec"><h3 class="t-head">Para o painel</h3><p>Módulos opcionais. Entram no painel ao lado do visual.</p></div>
+<div class="plist">
+<div class="pl-r"><span class="pl-logo stack"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.clock }}"></path></svg></span><span class="pl-tx"><b>Relógio</b><span>Hora e data em matriz de pontos.</span></span><span class="pl-act"><button class="{{ clockBtn.cls }}" onClick="{{ clockBtn.click }}"><sc-if value="{{ clockBtn.done }}" hint-placeholder-val="{{ false }}"><svg class="ico ok" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg></sc-if><span>{{ clockBtn.label }}</span></button></span></div>
+</div>
+</sc-if>
+<sc-if value="{{ lojaTemas }}" hint-placeholder-val="{{ false }}">
+<div class="picks">
+<sc-for list="{{ themeCards }}" as="c" hint-placeholder-count="4">
+<button class="{{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.click }}"><span class="{{ c.tpCls }}" style="background: {{ c.wall }}"><i class="tp-dot"></i><sc-for list="{{ c.cells }}" as="ce" hint-placeholder-count="5"><i class="{{ ce.cls }}" style="background: {{ ce.bg }}"></i></sc-for></span><span class="pick-foot"><span><b>{{ c.name }}</b><span>{{ c.meta }}</span></span><span class="{{ c.badgeCls }}">{{ c.badge }}</span></span></button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ lojaSkins }}" hint-placeholder-val="{{ false }}">
+<div class="picks">
+<sc-for list="{{ skinCards }}" as="c" hint-placeholder-count="2">
+<button class="{{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.click }}"><span class="{{ c.prev }}"><sc-for list="{{ c.cells }}" as="ce" hint-placeholder-count="5"><i class="{{ ce.cls }}"></i></sc-for></span><span class="pick-foot"><span><b>{{ c.name }}</b><span>{{ c.meta }}</span></span><span class="{{ c.badgeCls }}">{{ c.badge }}</span></span></button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ lojaLayouts }}" hint-placeholder-val="{{ false }}">
+<div class="picks">
+<sc-for list="{{ layoutCards }}" as="c" hint-placeholder-count="3">
+<button class="{{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.click }}"><span class="{{ c.prev }}"><sc-for list="{{ c.cells }}" as="ce" hint-placeholder-count="4"><i class="{{ ce.cls }}"></i></sc-for></span><span class="pick-foot"><span><b>{{ c.name }}</b><span>{{ c.meta }}</span></span><span class="{{ c.badgeCls }}">{{ c.badge }}</span></span></button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{ lojaPacotes }}" hint-placeholder-val="{{ false }}">
+<div class="picks">
+<sc-for list="{{ packCards }}" as="c" hint-placeholder-count="2">
+<button class="{{ c.cls }}" style="--c: {{ c.color }}" aria-pressed="{{ c.on }}" onClick="{{ c.click }}"><span class="{{ c.prev }}"><sc-for list="{{ c.cells }}" as="ce" hint-placeholder-count="5"><i class="{{ ce.cls }}"></i></sc-for></span><span class="pick-foot"><span><b>{{ c.name }}</b><span>{{ c.meta }}</span></span><span class="{{ c.badgeCls }}">{{ c.badge }}</span></span></button>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{ showStats }}" hint-placeholder-val="{{ false }}">
+<section class="{{ sheetCls }}" style="--oy: {{ sheetOY }}px" aria-label="Estatísticas">
+<button class="ib sh-close" aria-label="Fechar (Esc)" onClick="{{ closeSheet }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.x }}"></path></svg></button>
+<div class="sh-body fade-y" style="padding-top: 40px">
+<sc-if value="{{ lfmNoUser }}" hint-placeholder-val="{{ true }}">
+<div class="cta"><h2 class="t-display">Entre no Last.fm para ver o que você mais ouve.</h2><p class="sh-sub">O login abre no navegador. A sessão fica no cofre do Windows, nunca a sua senha.</p><div><button class="btn btn-pri lg" onClick="{{ lfmLogin }}"><svg class="brand ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ br.lastdotfm }}"></path></svg>Entrar no Last.fm</button></div></div>
+</sc-if>
+<sc-if value="{{ lfmUser }}" hint-placeholder-val="{{ false }}">
+<div class="stats-lead">
+<div><h2 class="t-display">Você ouviu 71 horas nesta semana.</h2><p class="sh-sub">Do módulo Last.fm. Exemplo com dados fictícios.</p></div>
+<div class="seal" role="img" aria-label="Selo raro: 100 horas ouvidas"><svg viewBox="0 0 148 148" aria-hidden="true"><path d="{{ sealPath }}" fill="currentColor"></path></svg><span class="seal-in"><span class="dots seal-n">100</span><span class="seal-l">horas ouvidas</span></span></div>
+</div>
+<div class="stats-grid">
+<div><div class="sec"><h3 class="t-head">Quando você ouve</h3></div><div class="heat"><sc-for list="{{ heatRows }}" as="hr" hint-placeholder-count="7"><div class="heat-r"><span>{{ hr.day }}</span><sc-for list="{{ hr.cells }}" as="hc" hint-placeholder-count="24"><i class="heat-c" style="opacity: {{ hc.o }}"></i></sc-for></div></sc-for></div><div class="heat-x"><span></span><span>0h</span><span>6h</span><span>12h</span><span>18h</span></div></div>
+<div><div class="sec"><h3 class="t-head">Quem você mais ouviu</h3></div><div class="tops"><sc-for list="{{ tops }}" as="tp" hint-placeholder-count="5"><div class="top-r"><img src="{{ tp.cover }}" alt=""><span style="min-width: 0"><span class="row-t" style="display: block">{{ tp.name }}</span><span class="top-bar" style="width: {{ tp.w }}%"></span></span><span class="micro">{{ tp.plays }} plays</span></div></sc-for></div></div>
+</div>
+</sc-if>
+</div>
+</section>
+</sc-if>
+</div>
+<div class="edit-chrome"><span class="ec-label">Visual</span><button class="ec-grip" aria-label="Arrastar o visual para trocar de lado" onPointerDown="{{ gripHero }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<sc-if value="{{ dtHero }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Soltar para trocar</span></div></sc-if>
+</section>
+
+<aside class="{{ panelCls }}" data-tile="bento" style="grid-column: {{ bentoCol }}" aria-label="{{ panelLabel }}">
+<sc-if value="{{ pnMods }}" hint-placeholder-val="{{ true }}">
+<div class="mods fade-y">
+<section class="{{ modCls.ritmo }}" data-mod="ritmo" style="order: {{ mo.ritmo }}" aria-label="Ritmo">
+<div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.metro }}"></path></svg>Ritmo<button class="ec-grip" aria-label="Arrastar o módulo Ritmo" onPointerDown="{{ gp.ritmo }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<div class="mod-body">
+<sc-if value="{{ hasPulse }}" hint-placeholder-val="{{ true }}"><div class="bpm-row"><span class="dots bpm-n" role="img" aria-label="{{ bpmTxt }} BPM"><sc-for list="{{ bpmDigits }}" as="dg" hint-placeholder-count="3"><span class="roll"><span class="roll-col" style="transform: translateY({{ dg.ty }})"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></span></span></sc-for></span><span class="bpm-u">BPM</span></div><div class="beats" aria-hidden="true"><sc-for list="{{ beats }}" as="b" hint-placeholder-count="4"><i class="{{ b.cls }}"></i></sc-for></div></sc-if>
+<sc-if value="{{ noPulse }}" hint-placeholder-val="{{ false }}"><p class="no-pulse">{{ noPulseTxt }}</p></sc-if>
+</div>
+<sc-if value="{{ dt.ritmo }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Trocar</span></div></sc-if>
+</section>
+<section class="{{ modCls.energia }}" data-mod="energia" style="order: {{ mo.energia }}" aria-label="Energia">
+<div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.bolt }}"></path></svg>Energia<span class="mod-r">{{ energyTxt }}</span><button class="ec-grip" aria-label="Arrastar o módulo Energia" onPointerDown="{{ gp.energia }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<div class="mod-body">
+<span class="t-title en-word">{{ lbl }}</span>
+<div class="en-grid" aria-hidden="true"><sc-for list="{{ enCols }}" as="c" hint-placeholder-count="16"><span class="{{ c.cls }}"><sc-for list="{{ c.dots }}" as="d" hint-placeholder-count="5"><i class="{{ d.cls }}"></i></sc-for></span></sc-for></div>
+</div>
+<sc-if value="{{ dt.energia }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Trocar</span></div></sc-if>
+</section>
+<section class="{{ modCls.estrutura }}" data-mod="estrutura" style="order: {{ mo.estrutura }}" aria-label="Estrutura da faixa">
+<div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.struct }}"></path></svg>Estrutura da faixa<span class="mod-r">{{ stRight }}</span><button class="ec-grip" aria-label="Arrastar o módulo Estrutura da faixa" onPointerDown="{{ gp.estrutura }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<div class="mod-body" style="gap: 10px">
+<div class="st-now"><b>{{ stName }}</b><span>{{ stRange }}</span></div>
+<div class="st-bar" aria-hidden="true"><sc-for list="{{ stSegs }}" as="sg" hint-placeholder-count="9"><span class="{{ sg.cls }}" style="flex: {{ sg.w }} 1 0px; --p: {{ sg.p }}"></span></sc-for></div>
+</div>
+<sc-if value="{{ dt.estrutura }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Trocar</span></div></sc-if>
+</section>
+<section class="{{ modCls.sessao }}" data-mod="sessao" style="order: {{ mo.sessao }}" aria-label="{{ histLabel }}">
+<div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ histIcon }}"></path></svg>{{ histLabel }}<span class="mod-r">{{ histCount }}</span><button class="ec-grip" aria-label="Arrastar o módulo da lista" onPointerDown="{{ gp.sessao }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<div class="mod-body">
+<sc-for list="{{ histItems }}" as="h" hint-placeholder-count="3">
+<div class="row"><img src="{{ h.cover }}" alt=""><span class="row-tx"><span class="row-t">{{ h.title }}</span><span class="row-a">{{ h.artist }}</span></span><span class="row-r">{{ h.right }}</span><sc-if value="{{ h.canPlay }}" hint-placeholder-val="{{ false }}"><button class="ib xs row-act" aria-label="{{ h.playLabel }}" onClick="{{ h.play }}"><svg class="ico ico-fill ico-16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg></button></sc-if></div>
+</sc-for>
+<sc-if value="{{ histEmpty }}" hint-placeholder-val="{{ false }}"><p class="list-empty">As músicas desta sessão aparecem aqui.</p></sc-if>
+</div>
+<sc-if value="{{ dt.sessao }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Trocar</span></div></sc-if>
+</section>
+<section class="{{ modCls.rapidos }}" data-mod="rapidos" style="order: {{ mo.rapidos }}" aria-label="Visual">
+<div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.eye }}"></path></svg>Visual<button class="ec-grip" aria-label="Arrastar o módulo Visual" onPointerDown="{{ gp.rapidos }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<div class="mod-body">
+<button class="{{ qReactCls }}" aria-pressed="{{ reactive }}" onClick="{{ toggleReactive }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.drop }}"></path></svg>Cores reativas</button>
+<button class="{{ qSafeCls }}" aria-pressed="{{ safe }}" onClick="{{ toggleSafe }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.shield }}"></path></svg>Modo seguro</button>
+</div>
+<sc-if value="{{ dt.rapidos }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Trocar</span></div></sc-if>
+</section>
+<sc-if value="{{ hasClock }}" hint-placeholder-val="{{ false }}">
+<section class="{{ modCls.relogio }}" data-mod="relogio" style="order: {{ mo.relogio }}" aria-label="Relógio">
+<div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.clock }}"></path></svg>Relógio<span class="mod-r">{{ dateLong }}</span><button class="ec-grip" aria-label="Arrastar o módulo Relógio" onPointerDown="{{ gp.relogio }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
+<div class="mod-body"><span class="dots clock-n" role="img" aria-label="{{ clock }}">{{ clockH }}<i class="colon"></i>{{ clockM }}</span></div>
+<sc-if value="{{ dt.relogio }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Trocar</span></div></sc-if>
+</section>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ pnAj }}" hint-placeholder-val="{{ false }}">
+<div class="{{ pnCls }}">
+<div class="pn-head">
+<div class="pn-top"><h2 class="t-title">Ajustes</h2><div style="display: flex; gap: 4px"><button class="{{ aboutBtnCls }}" aria-label="Sobre o app" aria-pressed="{{ ajSobre }}" data-tip="Sobre" onClick="{{ ajAbout }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.info }}"></path></svg></button><button class="ib" aria-label="Fechar (Esc)" onClick="{{ closeSheet }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.x }}"></path></svg></button></div></div>
+<div class="seg wide" role="tablist"><i class="seg-ind" style="--i: {{ ajI }}; --n: 3"></i><sc-for list="{{ ajTabs }}" as="tb" hint-placeholder-count="3"><button class="{{ tb.cls }}" role="tab" aria-selected="{{ tb.on }}" onClick="{{ tb.click }}">{{ tb.label }}</button></sc-for></div>
+</div>
+<div class="pn-body fade-y">
+<sc-if value="{{ ajVisual }}" hint-placeholder-val="{{ true }}">
+<div class="set"><div class="set-row"><span class="set-ic"><svg class="mark ico-22" viewBox="0 0 24 24" aria-hidden="true"><path class="mk-t" d="{{ mark }}"></path><circle class="mk-c" cx="12" cy="12" r="2.3"></circle></svg></span><span class="set-tx"><b>Spectral</b><span>O diretor automático conduz forma, movimento e luz.</span></span><span class="badge">Automático</span></div></div>
+<div class="set">
+<div class="set-row"><span class="set-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.drop }}"></path></svg></span><span class="set-tx"><b>Cores reativas</b><span>{{ reactDesc }}</span></span><button class="switch" role="switch" aria-checked="{{ reactive }}" aria-label="Cores reativas" onClick="{{ toggleReactive }}"></button></div>
+<div class="set-sub">
+<sc-if value="{{ reactive }}" hint-placeholder-val="{{ true }}"><div class="legend"><span><i style="background: var(--en-calm)"></i>Calma</span><span><i style="background: var(--en-mid)"></i>Agitada</span><span><i style="background: var(--en-hot)"></i>Intensa</span></div></sc-if>
+<sc-if value="{{ notReactive }}" hint-placeholder-val="{{ false }}">
+<div class="pickers">
+<label class="colorpick"><span class="cp-sw" style="background: {{ colA }}"></span><span class="cp-tx"><span class="cp-n">Principal</span><span class="cp-v">{{ colAU }}</span></span><input type="color" value="{{ colA }}" onChange="{{ onColA }}" aria-label="Cor principal"></label>
+<label class="colorpick"><span class="cp-sw" style="background: {{ colB }}"></span><span class="cp-tx"><span class="cp-n">Secundária</span><span class="cp-v">{{ colBU }}</span></span><input type="color" value="{{ colB }}" onChange="{{ onColB }}" aria-label="Cor secundária"></label>
+</div>
+<div class="swatches"><sc-for list="{{ presets }}" as="pz" hint-placeholder-count="5"><button class="{{ pz.cls }}" aria-label="{{ pz.name }}" onClick="{{ pz.click }}"><i style="background: {{ pz.a }}"></i><i style="background: {{ pz.b }}"></i></button></sc-for></div>
+</sc-if>
+</div>
+</div>
+<div class="set">
+<div class="set-row"><span class="set-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.shield }}"></path></svg></span><span class="set-tx"><b>Modo seguro</b><span>Para quem tem sensibilidade a luzes piscando.</span></span><button class="switch" role="switch" aria-checked="{{ safe }}" aria-label="Modo seguro para fotossensibilidade" onClick="{{ toggleSafe }}"></button></div>
+<div class="set-sub">
+<sc-if value="{{ safe }}" hint-placeholder-val="{{ false }}"><ul class="rules"><li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg>Sem clarão no drop</li><li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg>O brilho e o tom do dock mudam devagar</li><li><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg>No máximo 3 flashes por segundo</li></ul></sc-if>
+<div class="flash"><span><b>{{ flashTxt }}</b> flashes por segundo</span><span class="flash-bar"><i style="width: {{ flashPct }}%"></i><span class="flash-lim" style="left: 75%"></span></span></div>
+</div>
+</div>
+<div class="set">
+<div class="set-row"><span class="set-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.clock }}"></path></svg></span><span class="set-tx"><b>Ajuste de sincronia</b><span>Para fone Bluetooth ou caixa com atraso.</span></span><span class="mono" style="color: var(--fg)">{{ syncTxt }}</span></div>
+<div class="set-sub">
+<div class="sld" style="flex: none"><span class="sld-track"></span><span class="sld-mid"></span><span class="sld-fill" style="left: {{ syncFillL }}%; width: {{ syncFillW }}%"></span><input type="range" min="-250" max="250" step="10" value="{{ sync }}" onChange="{{ onSync }}" aria-label="Ajuste de sincronia em milissegundos"><span class="sld-knob" style="left: {{ syncPct }}%"></span></div>
+<div class="ticks"><span>−250 ms</span><span>0</span><span>+250 ms</span></div>
+</div>
+</div>
+<div style="padding-top: 20px"><button class="link" onClick="{{ resetVisual }}">Restaurar o padrão do visual</button></div>
+</sc-if>
+<sc-if value="{{ ajAparencia }}" hint-placeholder-val="{{ false }}">
+<div class="ap-row"><span>Tema</span><div class="seg wide"><i class="seg-ind" style="--i: {{ temaI }}; --n: {{ temaN }}"></i><sc-for list="{{ temaSeg }}" as="o" hint-placeholder-count="3"><button class="{{ o.cls }}" onClick="{{ o.click }}">{{ o.label }}</button></sc-for></div></div>
+<div class="ap-row"><span>Skin</span><div class="seg wide"><i class="seg-ind" style="--i: {{ skinI }}; --n: 2"></i><sc-for list="{{ skinSeg }}" as="o" hint-placeholder-count="2"><button class="{{ o.cls }}" onClick="{{ o.click }}">{{ o.label }}</button></sc-for></div></div>
+<div class="ap-row"><span>Layout</span><div class="seg wide"><i class="seg-ind" style="--i: {{ layoutI }}; --n: 3"></i><sc-for list="{{ layoutSeg }}" as="o" hint-placeholder-count="3"><button class="{{ o.cls }}" onClick="{{ o.click }}">{{ o.label }}</button></sc-for></div></div>
+<div style="padding-top: 20px"><button class="link" onClick="{{ openLojaTemas }}">Mais temas, skins e layouts na Loja</button></div>
+</sc-if>
+<sc-if value="{{ ajAtalhos }}" hint-placeholder-val="{{ false }}">
+<div style="padding-top: 4px"><sc-for list="{{ shortcuts }}" as="sc" hint-placeholder-count="8"><div class="keys-row"><span>{{ sc.label }}</span><span class="keys"><sc-for list="{{ sc.keys }}" as="kk" hint-placeholder-count="1"><span class="kbd">{{ kk.k }}</span></sc-for></span></div></sc-for></div>
+<p class="meta" style="padding-top: 16px">Cada atalho chama um comando com nome, como <span class="mono">player.tocar-pausar</span>. Botões, atalhos, paleta e módulos usam os mesmos comandos.</p>
+</sc-if>
+<sc-if value="{{ ajSobre }}" hint-placeholder-val="{{ false }}">
+<div class="about"><p><b>Player</b>, nome provisório. Mockup v4.</p><p>No app de verdade a interface é feita em Rust com GPUI, e o visual roda numa camada própria por baixo dela, sem cópia de imagem.</p><p>Este protótipo não toca áudio: a música, o diretor e o Modo Escuta são simulados.</p></div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ pnDet }}" hint-placeholder-val="{{ false }}">
+<div class="{{ pnCls }}">
+<div class="pn-body fade-y" style="padding-top: 24px">
+<div class="det">
+<div class="det-cover"><img src="{{ det.cover }}" alt="Capa de {{ det.title }}"></div>
+<div class="det-tx"><h3 class="t-title">{{ det.title }}</h3><p class="det-a">{{ det.artist }}</p></div>
+<div class="det-chips"><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.metro }}"></path></svg>{{ det.bpm }}</span><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.bolt }}"></path></svg>{{ det.energy }}</span><span class="chip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.struct }}"></path></svg>{{ det.drop }}</span></div>
+<div><button class="{{ det.btnCls }}" onClick="{{ det.play }}"><sc-if value="{{ det.isPlaying }}" hint-placeholder-val="{{ false }}"><span class="{{ eqCls }}" aria-hidden="true"><i style="height: {{ eqA }}px"></i><i style="height: {{ eqB }}px"></i><i style="height: {{ eqC }}px"></i></span></sc-if><sc-if value="{{ det.notPlaying }}" hint-placeholder-val="{{ true }}"><svg class="ico ico-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg></sc-if>{{ det.btnLabel }}</button></div>
+<dl class="det-meta"><dt>Gênero</dt><dd>{{ det.genre }}</dd><dt>Duração</dt><dd>{{ det.dur }}</dd><dt>Licença</dt><dd>{{ det.lic }}</dd><sc-if value="{{ det.hasSrc }}" hint-placeholder-val="{{ true }}"><dt>Fonte</dt><dd>{{ det.src }}</dd></sc-if><dt>Análise</dt><dd>Pronta, {{ det.nSecs }} seções</dd></dl>
+</div>
+</div>
+</div>
+</sc-if>
+<button class="{{ bentoRz }}" aria-label="Redimensionar o painel" onPointerDown="{{ rzBento }}"></button>
+<sc-if value="{{ dtBento }}" hint-placeholder-val="{{ false }}"><div class="drop-target"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.swap }}"></path></svg><span>Soltar para trocar</span></div></sc-if>
+</aside>
+
+<footer class="tile dock" data-tile="bar" style="grid-column: {{ spanCol }}" aria-label="Controles do player">
+<div class="tile-in">
+<div style="position: relative; justify-self: start; min-width: 0; max-width: 100%">
+<button class="np-btn" aria-haspopup="menu" aria-expanded="{{ srcMenu }}" aria-label="{{ npLabel }}" onClick="{{ toggleSrcMenu }}">
+<span class="np-cover"><sc-if value="{{ hasTrack }}" hint-placeholder-val="{{ true }}"><img src="{{ np.cover }}" alt=""></sc-if><sc-if value="{{ isVazio }}" hint-placeholder-val="{{ false }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.headphones }}"></path></svg></sc-if><span class="np-src" style="color: {{ srcColor }}"><sc-if value="{{ srcIsBrand }}" hint-placeholder-val="{{ true }}"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ srcBrand }}"></path></svg></sc-if><sc-if value="{{ srcIsIcon }}" hint-placeholder-val="{{ false }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ srcIcon }}"></path></svg></sc-if></span></span>
+<span class="np-tx {{ tfx }}"><span class="np-t fx-1"><span class="t">{{ npTitle }}</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.chevD }}"></path></svg></span><span class="np-a fx-2"><span class="t">{{ npSub }}</span></span></span>
+</button>
+<sc-if value="{{ srcMenu }}" hint-placeholder-val="{{ false }}">
+<div class="pop" role="menu" aria-label="Fontes">
+<sc-for list="{{ srcItems }}" as="si" hint-placeholder-count="3">
+<button class="{{ si.cls }}" role="menuitem" onClick="{{ si.click }}"><span class="src-logo"><sc-if value="{{ si.isBrand }}" hint-placeholder-val="{{ true }}"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: {{ si.color }}"><path d="{{ si.brand }}"></path></svg></sc-if><sc-if value="{{ si.isIcon }}" hint-placeholder-val="{{ false }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ si.icon }}"></path></svg></sc-if></span><span class="src-tx"><span class="src-name">{{ si.name }}</span><span class="src-st">{{ si.st }}</span></span><sc-if value="{{ si.on }}" hint-placeholder-val="{{ false }}"><svg class="ico ico-check" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg></sc-if></button>
+</sc-for>
+<div class="pop-sep"></div>
+<button class="pop-it" role="menuitem" onClick="{{ openStoreModules }}"><span class="src-logo"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.plus }}"></path></svg></span><span class="src-tx"><span class="src-name">Adicionar fonte</span><span class="src-st">Perfis de Escuta na Loja</span></span></button>
+</div>
+</sc-if>
+</div>
+<div class="center">
+<div class="transport">
+<button class="ib" aria-label="Anterior" onClick="{{ prev }}" disabled="{{ noTrack }}"><svg class="ico ico-fill ico-22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.prev }}"></path></svg></button>
+<button class="{{ playCls }}" aria-label="{{ playLabel }}" onClick="{{ togglePlay }}" disabled="{{ noTrack }}"><svg class="ico ico-fill i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg><svg class="ico ico-fill i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pause }}"></path></svg></button>
+<button class="ib" aria-label="Próxima" onClick="{{ next }}" disabled="{{ noTrack }}"><svg class="ico ico-fill ico-22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.next }}"></path></svg></button>
+</div>
+<div class="timeline">
+<span class="time">{{ tTxt }}</span>
+<button class="map" aria-label="Mapa de energia da música. Arraste para ir a um ponto" onPointerDown="{{ mapDown }}" onPointerMove="{{ mapMove }}" onPointerLeave="{{ mapLeave }}" onKeyDown="{{ mapKey }}"><canvas class="map-cv" data-map="bar"></canvas><sc-if value="{{ showTip }}" hint-placeholder-val="{{ false }}"><span class="map-tip" style="left: {{ tipX }}px"><span class="mono">{{ tipT }}</span>{{ tipL }}</span></sc-if></button>
+<span class="time end">{{ durTxt }}</span>
+</div>
+</div>
+<div class="tools">
+<button class="{{ bentoBtnCls }}" aria-label="Mostrar o painel" aria-pressed="{{ bentoOn }}" data-tip="Painel" data-tip-pos="up" onClick="{{ toggleBento }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.panel }}"></path></svg></button>
+<button class="ib" aria-label="Mini player" data-tip="Mini player" data-tip-pos="up" onClick="{{ toggleMini }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pip }}"></path></svg></button>
+<button class="ib" aria-label="Tela cheia (F)" data-tip="Tela cheia (F)" data-tip-pos="up" onClick="{{ toggleFull }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.full }}"></path></svg></button>
+<div class="vol"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.vol }}"></path></svg><div class="{{ volCls }}" style="transform: {{ volXf }}; --vo: {{ volOrigin }}" role="slider" tabindex="0" aria-label="Volume do app de origem" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ vol }}" onPointerDown="{{ volDown }}" onKeyDown="{{ volKey }}" ref="{{ volRef }}"><span class="sld-track"></span><span class="sld-fill" style="width: {{ vol }}%"></span><span class="sld-knob" style="left: {{ vol }}%"></span><sc-if value="{{ volDrag }}" hint-placeholder-val="{{ false }}"><span class="vbub" style="left: {{ vol }}%">{{ vol }}</span></sc-if></div></div>
+</div>
+</div>
+</footer>
+</div>
+
+<div class="{{ fsCls }}">
+<div class="fs-scrim"></div>
+<div class="fs-exit"><button class="gbtn wide" onClick="{{ toggleFull }}">Sair da tela cheia<span class="kbd" style="color: rgba(255,255,255,.8); box-shadow: inset 0 0 0 1px rgba(255,255,255,.24)">Esc</span></button></div>
+<div class="fs-title {{ tfx }}"><span class="hero-src fx-2"><sc-if value="{{ srcIsBrand }}" hint-placeholder-val="{{ true }}"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true" style="color: {{ srcColor }}"><path d="{{ srcBrand }}"></path></svg></sc-if><sc-if value="{{ srcIsIcon }}" hint-placeholder-val="{{ false }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ srcIcon }}"></path></svg></sc-if>{{ heroSrc }}</span><h2 class="t-hero fx-1">{{ np.title }}</h2><div class="hero-art fx-2">{{ np.artist }}</div></div>
+<div class="fs-dock">
+<div class="transport">
+<button class="ib" aria-label="Anterior" onClick="{{ prev }}"><svg class="ico ico-fill ico-22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.prev }}"></path></svg></button>
+<button class="{{ playCls }}" aria-label="{{ playLabel }}" onClick="{{ togglePlay }}"><svg class="ico ico-fill i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg><svg class="ico ico-fill i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pause }}"></path></svg></button>
+<button class="ib" aria-label="Próxima" onClick="{{ next }}"><svg class="ico ico-fill ico-22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.next }}"></path></svg></button>
+</div>
+<div class="timeline"><span class="time">{{ tTxt }}</span><span class="map" style="cursor: default"><canvas class="map-cv" data-map="fs"></canvas></span><span class="time end">{{ durTxt }}</span></div>
+</div>
+</div>
+
+<div class="mini-wrap">
+<div class="mini" role="region" aria-label="Mini player">
+<div class="mini-vis"></div>
+<div class="mini-r">
+<div class="mini-top"><span class="np-tx {{ tfx }}"><span class="np-t fx-1"><span class="t">{{ npTitle }}</span></span><span class="np-a fx-2"><span class="t">{{ npSub }}</span></span></span><button class="ib sm" aria-label="Voltar para a janela completa" data-tip="Voltar à janela" onClick="{{ toggleMini }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.expand }}"></path></svg></button></div>
+<div class="mini-ctl">
+<button class="ib sm" aria-label="Anterior" onClick="{{ prev }}" disabled="{{ noTrack }}"><svg class="ico ico-fill ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.prev }}"></path></svg></button>
+<button class="{{ playCls }}" aria-label="{{ playLabel }}" onClick="{{ togglePlay }}" disabled="{{ noTrack }}"><svg class="pring" viewBox="0 0 48 48" aria-hidden="true"><circle class="rb" cx="24" cy="24" r="23"></circle><circle class="rf" cx="24" cy="24" r="23" style="stroke-dashoffset: {{ ringOff }}"></circle></svg><svg class="ico ico-fill i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg><svg class="ico ico-fill i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pause }}"></path></svg></button>
+<button class="ib sm" aria-label="Próxima" onClick="{{ next }}" disabled="{{ noTrack }}"><svg class="ico ico-fill ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.next }}"></path></svg></button>
+<span class="map" style="cursor: default"><canvas class="map-cv" data-map="mini"></canvas></span>
+</div>
+</div>
+</div>
+<p class="mini-cap">Janela compacta, sempre por cima das outras. Esc volta para a janela completa.</p>
+</div>
+
+<sc-if value="{{ drawer }}" hint-placeholder-val="{{ false }}"><button class="drawer-scrim" aria-label="Fechar o menu" onClick="{{ closeDrawer }}"></button></sc-if>
+
+<sc-if value="{{ palOpen }}" hint-placeholder-val="{{ false }}">
+<div class="pal-wrap">
+<button class="scrim" aria-label="Fechar a paleta" tabindex="-1" onClick="{{ closePalette }}"></button>
+<div class="pal" role="dialog" aria-label="Paleta de comandos">
+<div class="pal-in"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.search }}"></path></svg><input type="text" placeholder="Buscar ações, ajustes e faixas" value="{{ palQuery }}" onChange="{{ onPalQuery }}" onKeyDown="{{ onPalKey }}" aria-label="Buscar comandos" autocomplete="off" spellcheck="false"><span class="kbd">Esc</span></div>
+<div class="pal-list">
+<sc-for list="{{ palEntries }}" as="en" hint-placeholder-count="8">
+<sc-if value="{{ en.isHead }}" hint-placeholder-val="{{ false }}"><div class="pal-grp">{{ en.label }}</div></sc-if>
+<sc-if value="{{ en.isItem }}" hint-placeholder-val="{{ true }}"><button class="{{ en.cls }}" onClick="{{ en.run }}" onMouseEnter="{{ en.hover }}"><span class="pal-ic"><svg class="{{ en.icoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ en.icon }}"></path></svg></span><span class="pal-lb">{{ en.label }}</span><span class="pal-hint">{{ en.hint }}</span><span class="pal-id">{{ en.id }}</span><sc-if value="{{ en.hasKbd }}" hint-placeholder-val="{{ false }}"><span class="kbd">{{ en.kbd }}</span></sc-if></button></sc-if>
+</sc-for>
+<sc-if value="{{ palEmpty }}" hint-placeholder-val="{{ false }}"><p class="pal-empty">Nada encontrado para “{{ palQuery }}”.</p></sc-if>
+</div>
+<div class="pal-foot"><span><span class="kbd">↑</span><span class="kbd">↓</span>navegar</span><span><span class="kbd">Enter</span>executar</span><span><span class="kbd">Esc</span>fechar</span></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showPerm }}" hint-placeholder-val="{{ false }}">
+<div class="modal-wrap">
+<button class="scrim" aria-label="Cancelar" tabindex="-1" onClick="{{ cancelPerm }}"></button>
+<div class="modal" role="dialog" aria-modal="true" aria-label="Instalar o Last.fm">
+<span class="feature-logo lfm"><svg class="brand" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ br.lastdotfm }}"></path></svg></span>
+<h2 class="t-title">Instalar o Last.fm?</h2>
+<p>Ele roda isolado e só pode fazer o que está abaixo. Dá para revogar quando quiser.</p>
+<ul class="perms">
+<li class="perm"><span class="perm-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.globe }}"></path></svg></span><div class="perm-tx"><b>Conectar a ws.audioscrobbler.com</b><span>Só esse endereço.</span></div></li>
+<li class="perm"><span class="perm-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.key }}"></path></svg></span><div class="perm-tx"><b>Guardar a sessão no cofre do Windows</b><span>A senha nunca fica no app.</span></div></li>
+<li class="perm"><span class="perm-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.wave }}"></path></svg></span><div class="perm-tx"><b>Ler o que está tocando</b><span>Título, artista e duração. Nunca o áudio.</span></div></li>
+<li class="perm"><span class="perm-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.doc }}"></path></svg></span><div class="perm-tx"><b>Adicionar a página Estatísticas</b><span>Ela aparece na barra de ícones.</span></div></li>
+</ul>
+<span class="modal-sig"><svg class="ico ico-16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.shield }}"></path></svg>Assinado pela Loja e conferido por SHA-256</span>
+<div class="modal-act"><button class="btn btn-sec" onClick="{{ cancelPerm }}">Cancelar</button><button class="btn btn-pri" onClick="{{ confirmPerm }}">Instalar</button></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showToast }}" hint-placeholder-val="{{ false }}">
+<div class="toast" role="status" ref="{{ toastRef }}"><span class="toast-ic"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg></span><span class="toast-tx"><b>{{ toastTitle }}</b><span>{{ toastText }}</span></span><sc-if value="{{ toastHasAction }}" hint-placeholder-val="{{ false }}"><button class="btn btn-pri sm" onClick="{{ toastAction }}">{{ toastActionLabel }}</button></sc-if><button class="ib xs" aria-label="Fechar o aviso" onClick="{{ closeToast }}"><svg class="ico ico-16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.x }}"></path></svg></button></div>
+</sc-if>
+
+<sc-if value="{{ dragging }}" hint-placeholder-val="{{ false }}"><div class="ghost" style="left: {{ dragX }}px; top: {{ dragY }}px">{{ dragLabel }}</div></sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"tela":{"editor":"enum","options":["inicio","biblioteca","loja","ajustes"],"default":"inicio","section":"Estado"},"cenario":{"editor":"enum","options":["escuta","arquivo","vazio"],"default":"escuta","section":"Estado"},"momento":{"editor":"range","min":0,"max":130,"step":1,"unit":"s","default":3,"section":"Estado"},"tema":{"editor":"enum","options":["noite","grafite","papel","mono"],"default":"noite","section":"Aparência"},"skin":{"editor":"enum","options":["blocos","imersiva"],"default":"blocos","section":"Aparência"},"layout":{"editor":"enum","options":["padrao","foco","mini"],"default":"padrao","section":"Aparência"},"coresReativas":{"editor":"boolean","default":true,"section":"Visual"},"modoSeguro":{"editor":"boolean","default":false,"section":"Visual"},"edicao":{"editor":"boolean","default":false,"section":"Modos"},"telaCheia":{"editor":"boolean","default":false,"section":"Modos"},"paleta":{"editor":"boolean","default":false,"section":"Modos"},"mini":{"editor":"boolean","default":false,"section":"Modos"},"painel":{"editor":null},"faixa":{"editor":null},"estatico":{"editor":null},"lastfm":{"editor":null},"paletaBusca":{"editor":null},"lojaAba":{"editor":null},"ajustesAba":{"editor":null},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const p = props || {};
+    this.uid = 'pv' + Math.random().toString(36).slice(2, 9);
+    this.isStatic = Component.bool(p.estatico, false);
+    this.tracks = Component.buildTracks();
+    const cen = ['escuta', 'arquivo', 'vazio'].indexOf(p.cenario) >= 0 ? p.cenario : 'escuta';
+    let track = 'demo';
+    if (cen === 'arquivo') {
+      const f = this.tracks.byId[p.faixa];
+      track = f && !f.esc ? p.faixa : 'go';
+    }
+    const lfm = Component.bool(p.lastfm, false);
+    const clk = Component.clockNow();
+    this.state = {
+      tela: Component.TELAS.indexOf(p.tela) >= 0 ? p.tela : 'inicio',
+      closing: false,
+      tema: Component.TEMAS.indexOf(p.tema) >= 0 ? p.tema : 'noite',
+      skin: p.skin === 'imersiva' ? 'imersiva' : 'blocos',
+      layout: ['padrao', 'foco', 'mini'].indexOf(p.layout) >= 0 ? p.layout : 'padrao',
+      cenario: cen,
+      src: cen === 'arquivo' ? 'arquivos' : 'spotify',
+      track: track,
+      playing: cen !== 'vazio',
+      reactive: Component.bool(p.coresReativas, true),
+      safe: Component.bool(p.modoSeguro, false),
+      colA: '#ffffff', colB: '#8a8a8a', preset: 'mono', sync: 0, vol: 72,
+      editing: Component.bool(p.edicao, false),
+      full: Component.bool(p.telaCheia, false),
+      mini: Component.bool(p.mini, false),
+      drawer: false, srcMenu: false, panelDrawer: Component.bool(p.painel, false), narrow: false, tiny: false,
+      cols: ['hero', 'bento'], bentoW: 380,
+      mods: Component.DEFAULT_MODS.slice(),
+      drag: null, rz: false, hold: null, bibSel: null, tfx: 'tfx-a',
+      volDrag: false, volOver: 0, eqH: [4, 4, 4], tone: 'rgb(17, 17, 19)', toneSoft: 'rgba(17, 17, 19, .55)',
+      lojaTab: ['modulos', 'temas', 'skins', 'layouts', 'pacotes'].indexOf(p.lojaAba) >= 0 ? p.lojaAba : 'modulos',
+      bibTab: 'faixas',
+      ajTab: ['visual', 'aparencia', 'atalhos', 'sobre'].indexOf(p.ajustesAba) >= 0 ? p.ajustesAba : 'visual',
+      bibQuery: '',
+      installed: { spotify: true, ytmusic: false, soundcloud: false, tidal: false, apple: false, lastfm: lfm },
+      installing: {}, permFor: null, lfmUser: lfm, toast: null,
+      themes: { mono: p.tema === 'mono' },
+      palOpen: Component.bool(p.paleta, false),
+      palQuery: typeof p.paletaBusca === 'string' ? p.paletaBusca : '',
+      palIdx: 0,
+      escHist: Component.ESC_HIST.slice(),
+      tNow: 0, E: 0.2, lbl: 'Calma', flashRate: 0, beatIdx: -1, enHist: [],
+      clock: clk.clock, dateLong: clk.dateLong,
+      fsIdle: false, mapTip: null, noGL: false, undoN: 0,
+    };
+    this.t0 = Component.num(p.momento, cen === 'arquivo' ? 40 : 3);
+    this.histStack = [];
+    this.lastMove = 0;
+    this.frames = 0;
+    this.alive = false;
+    this.statsSeen = false;
+    this.loop = this.loop.bind(this);
+    this.rootRef = (el) => { if (el) this.rootEl = el; };
+    this.volRef = (el) => this.bindWheel(el);
+    this.toastRef = (el) => this.bindSwipe(el);
+    this.h = this.makeHandlers();
+    this.initSim();
+    this.toneRGB = this.toneTarget().slice();
+    Object.assign(this.state, this.toneStrings());
+  }
+
+  /* ---------- dados fixos ---------- */
+  static bool(v, d) { if (v === undefined || v === null || v === '') return d; return v === true || v === 'true' || v === '1' || v === 1; }
+  static num(v, d) { const x = parseFloat(v); return isFinite(x) ? x : d; }
+  static get TELAS() { return ['inicio', 'biblioteca', 'loja', 'ajustes', 'stats']; }
+  static get TEMAS() { return ['noite', 'grafite', 'papel', 'mono']; }
+  static get TEMA_NOME() { return { noite: 'Noite', grafite: 'Grafite', papel: 'Papel', mono: 'Monocromático' }; }
+  static get BRAND_COLORS() { return { spotify: '#1ED760', youtubemusic: '#FF0033', soundcloud: '#FF5500', tidal: '', applemusic: '#FA2D48', lastdotfm: '#D51007' }; }
+  static get SPANS() { return { ritmo: 1, energia: 1, estrutura: 2, sessao: 2, rapidos: 2, relogio: 1 }; }
+  static get DEFAULT_MODS() { return ['ritmo', 'energia', 'estrutura', 'sessao', 'rapidos']; }
+  static get MOD_CLS() { return { ritmo: 'bpm', energia: 'energy', estrutura: 'struct', sessao: 'list', rapidos: 'quick', relogio: 'clock' }; }
+  static get MOD_NOME() { return { ritmo: 'Ritmo', energia: 'Energia', estrutura: 'Estrutura', relogio: 'Relógio', rapidos: 'Visual', sessao: 'Lista', hero: 'Visual', bento: 'Painel' }; }
+  static get NAV_Y() { return { biblioteca: 76, loja: 128, stats: 180, ajustes: 24 }; }
+  static get NEUTRAL() { return { noite: [0.067, 0.067, 0.075], mono: [0.067, 0.067, 0.067], grafite: [0.098, 0.098, 0.106], papel: [0.882, 0.882, 0.867] }; }
+  static get THEMES() {
+    return {
+      noite: { name: 'Noite', meta: 'Preto puro. O padrão.', wall: '#000000', dock: '#1a2340' },
+      grafite: { name: 'Grafite', meta: 'Cinzas suaves, menos contraste', wall: '#0f0f10', dock: '#232a3d' },
+      papel: { name: 'Papel', meta: 'Claro, para ambiente iluminado', wall: '#ecece9', dock: '#d7dbe6' },
+      mono: { name: 'Monocromático', meta: 'Só preto, branco e cinza. Logos e capas também.', wall: '#000000', dock: '#2a2a2b' },
+    };
+  }
+  /* Tom do dock: a cor do visual, um pouco dessaturada, até luminância 0,016.
+     O teto que mantém o --fg-2 em 4,5:1 é 0,045; o tom fica bem abaixo dele. */
+  static toneFor(c0, theme) {
+    const g0 = 0.2126 * c0[0] + 0.7152 * c0[1] + 0.0722 * c0[2];
+    const c = c0.map((v) => v + (g0 - v) * 0.3);
+    if (theme === 'papel') { const b = [0.89, 0.89, 0.875]; return b.map((v, i) => v + (c[i] - v) * 0.12); }
+    const b = theme === 'grafite' ? [0.078, 0.078, 0.086] : [0, 0, 0];
+    const lin = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    const L = (p) => 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]);
+    let lo = 0, hi = 1;
+    for (let k = 0; k < 12; k++) { const m = (lo + hi) / 2; if (L(b.map((v, i) => v + (c[i] - v) * m)) <= 0.016) lo = m; else hi = m; }
+    let p = b.map((v, i) => v + (c[i] - v) * lo);
+    if (theme === 'mono') { const y = L(p); const g = y <= 0.0031308 ? 12.92 * y : 1.055 * Math.pow(y, 1 / 2.4) - 0.055; p = [g, g, g]; }
+    return p;
+  }
+  static rubber(over, dim, c) { const k = c || 0.55; return (over * dim * k) / (dim + k * over); }
+  /* Ícone ativo em pontos: o traço rasterizado numa grade de 12 por 12 */
+  static dotPath(d) {
+    Component._dots = Component._dots || {};
+    if (Component._dots[d] !== undefined) return Component._dots[d];
+    let out = '';
+    try {
+      const G = 12, R = 4, off = document.createElement('canvas');
+      off.width = off.height = 24 * R;
+      const o = off.getContext('2d');
+      o.scale(R, R); o.lineWidth = 2.2; o.lineCap = 'round'; o.lineJoin = 'round'; o.strokeStyle = '#fff';
+      o.stroke(new Path2D(d));
+      const px = o.getImageData(0, 0, off.width, off.height).data, cell = off.width / G;
+      for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) {
+        let sum = 0, n = 0;
+        for (let yy = 0; yy < cell; yy += 2) for (let xx = 0; xx < cell; xx += 2) { sum += px[((y * cell + yy) * off.width + (x * cell + xx)) * 4 + 3]; n++; }
+        const cov = sum / n / 255;
+        if (cov > 0.1) {
+          const r = 0.55 + 0.45 * Math.min(1, cov * 1.6), cx = x * 2 + 1, cy = y * 2 + 1;
+          out += 'M' + (cx - r).toFixed(2) + ' ' + cy + 'a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (2 * r).toFixed(2) + ' 0a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (-2 * r).toFixed(2) + ' 0z';
+        }
+      }
+    } catch (e) { out = ''; }
+    Component._dots[d] = out;
+    return out;
+  }
+  /* Selo raro: anel de 32 pontos de tamanhos diferentes, como o símbolo */
+  static get SEAL() {
+    if (Component._seal) return Component._seal;
+    const amp = [1, 0.62, 0.3, 0.48, 0.85, 0.4, 0.18, 0.55, 0.92, 0.5, 0.24, 0.36, 0.78, 0.58, 0.2, 0.44];
+    let d = '';
+    for (let i = 0; i < 32; i++) {
+      const a = i / 32 * Math.PI * 2 - Math.PI / 2, r = 1.4 + amp[i % 16] * 2.2;
+      const cx = 74 + Math.cos(a) * 66, cy = 74 + Math.sin(a) * 66;
+      d += 'M' + (cx - r).toFixed(2) + ' ' + cy.toFixed(2) + 'a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (2 * r).toFixed(2) + ' 0a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (-2 * r).toFixed(2) + ' 0z';
+    }
+    Component._seal = d;
+    return d;
+  }
+  static get DIAS() { return ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']; }
+  static get DIAS_C() { return ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']; }
+  static get MESES() { return ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']; }
+  static get SEC_NOME() { return { calma: 'Calma', agitada: 'Agitada', subida: 'Subida', drop: 'Drop', intensa: 'Intensa' }; }
+  static get COVERS() {
+    return {
+      silk: '/_blob/17613e56726a02a4b36f3b70361bc8f5', flow: '/_blob/2cb9540638c85e386799867991ef5c51', contour: '/_blob/661b0f7026e786c1c43401a0e6d62cca',
+      halftone: '/_blob/34c3ad39e324c89a98d2de5b472c0e94', glow: '/_blob/19cf1c50aa183a2ab64961ca9302c51f', sphere: '/_blob/f27c00f2d027013e5f731c2af051fe12',
+      moire: '/_blob/54a9efb67d74db525f3412c600f2d1ed', dither: '/_blob/4d5fdabd2bbc015a9673fbe10d7025b0', bars: '/_blob/f8707a86d958127b4899ab522fdd5c25',
+      warpgrid: '/_blob/796de4d71cf70eea38fe5327a53746b3', scan: '/_blob/c1a440d1a082a78e0d91701d6b325098', orbit: '/_blob/c9f074f4fce36ddffa15862fee772518',
+    };
+  }
+  static get BRANDS() {
+    return {
+      spotify: 'M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z',
+      youtubemusic: 'M12 0C5.376 0 0 5.376 0 12s5.376 12 12 12 12-5.376 12-12S18.624 0 12 0zm0 19.104c-3.924 0-7.104-3.18-7.104-7.104S8.076 4.896 12 4.896s7.104 3.18 7.104 7.104-3.18 7.104-7.104 7.104zm0-13.332c-3.432 0-6.228 2.796-6.228 6.228S8.568 18.228 12 18.228s6.228-2.796 6.228-6.228S15.432 5.772 12 5.772zM9.684 15.54V8.46L15.816 12l-6.132 3.54z',
+      soundcloud: 'M23.999 14.165c-.052 1.796-1.612 3.169-3.4 3.169h-8.18a.68.68 0 0 1-.675-.683V7.862a.747.747 0 0 1 .452-.724s.75-.513 2.333-.513a5.364 5.364 0 0 1 2.763.755 5.433 5.433 0 0 1 2.57 3.54c.282-.08.574-.121.868-.12.884 0 1.73.358 2.347.992s.948 1.49.922 2.373ZM10.721 8.421c.247 2.98.427 5.697 0 8.672a.264.264 0 0 1-.53 0c-.395-2.946-.22-5.718 0-8.672a.264.264 0 0 1 .53 0ZM9.072 9.448c.285 2.659.37 4.986-.006 7.655a.277.277 0 0 1-.55 0c-.331-2.63-.256-5.02 0-7.655a.277.277 0 0 1 .556 0Zm-1.663-.257c.27 2.726.39 5.171 0 7.904a.266.266 0 0 1-.532 0c-.38-2.69-.257-5.21 0-7.904a.266.266 0 0 1 .532 0Zm-1.647.77a26.108 26.108 0 0 1-.008 7.147.272.272 0 0 1-.542 0 27.955 27.955 0 0 1 0-7.147.275.275 0 0 1 .55 0Zm-1.67 1.769c.421 1.865.228 3.5-.029 5.388a.257.257 0 0 1-.514 0c-.21-1.858-.398-3.549 0-5.389a.272.272 0 0 1 .543 0Zm-1.655-.273c.388 1.897.26 3.508-.01 5.412-.026.28-.514.283-.54 0-.244-1.878-.347-3.54-.01-5.412a.283.283 0 0 1 .56 0Zm-1.668.911c.4 1.268.257 2.292-.026 3.572a.257.257 0 0 1-.514 0c-.241-1.262-.354-2.312-.023-3.572a.283.283 0 0 1 .563 0Z',
+      tidal: 'M12.012 3.992L8.008 7.996 4.004 3.992 0 7.996 4.004 12l4.004-4.004L12.012 12l-4.004 4.004 4.004 4.004 4.004-4.004L12.012 12l4.004-4.004-4.004-4.004zM16.042 7.996l3.979-3.979L24 7.996l-3.979 3.979z',
+      applemusic: 'M23.994 6.124a9.23 9.23 0 00-.24-2.19c-.317-1.31-1.062-2.31-2.18-3.043a5.022 5.022 0 00-1.877-.726 10.496 10.496 0 00-1.564-.15c-.04-.003-.083-.01-.124-.013H5.986c-.152.01-.303.017-.455.026-.747.043-1.49.123-2.193.4-1.336.53-2.3 1.452-2.865 2.78-.192.448-.292.925-.363 1.408-.056.392-.088.785-.1 1.18 0 .032-.007.062-.01.093v12.223c.01.14.017.283.027.424.05.815.154 1.624.497 2.373.65 1.42 1.738 2.353 3.234 2.801.42.127.856.187 1.293.228.555.053 1.11.06 1.667.06h11.03a12.5 12.5 0 001.57-.1c.822-.106 1.596-.35 2.295-.81a5.046 5.046 0 001.88-2.207c.186-.42.293-.87.37-1.324.113-.675.138-1.358.137-2.04-.002-3.8 0-7.595-.003-11.393zm-6.423 3.99v5.712c0 .417-.058.827-.244 1.206-.29.59-.76.962-1.388 1.14-.35.1-.706.157-1.07.173-.95.045-1.773-.6-1.943-1.536a1.88 1.88 0 011.038-2.022c.323-.16.67-.25 1.018-.324.378-.082.758-.153 1.134-.24.274-.063.457-.23.51-.516a.904.904 0 00.02-.193c0-1.815 0-3.63-.002-5.443a.725.725 0 00-.026-.185c-.04-.15-.15-.243-.304-.234-.16.01-.318.035-.475.066-.76.15-1.52.303-2.28.456l-2.325.47-1.374.278c-.016.003-.032.01-.048.013-.277.077-.377.203-.39.49-.002.042 0 .086 0 .13-.002 2.602 0 5.204-.003 7.805 0 .42-.047.836-.215 1.227-.278.64-.77 1.04-1.434 1.233-.35.1-.71.16-1.075.172-.96.036-1.755-.6-1.92-1.544-.14-.812.23-1.685 1.154-2.075.357-.15.73-.232 1.108-.31.287-.06.575-.116.86-.177.383-.083.583-.323.6-.714v-.15c0-2.96 0-5.922.002-8.882 0-.123.013-.25.042-.37.07-.285.273-.448.546-.518.255-.066.515-.112.774-.165.733-.15 1.466-.296 2.2-.444l2.27-.46c.67-.134 1.34-.27 2.01-.403.22-.043.442-.088.663-.106.31-.025.523.17.554.482.008.073.012.148.012.223.002 1.91.002 3.822 0 5.732z',
+      lastdotfm: 'M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.42 0 3.189 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.595 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.87.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z',
+    };
+  }
+  static get ESC_HIST() {
+    return [
+      { title: 'Cidade Submersa', artist: 'Lume', cover: 'halftone', ago: 'há 4 min' },
+      { title: 'Respirar Fundo', artist: 'Tremor', cover: 'flow', ago: 'há 8 min' },
+      { title: 'Último Trem', artist: 'Orla', cover: 'scan', ago: 'há 13 min' },
+      { title: 'Faixa Escura', artist: 'Ana Fiori', cover: 'contour', ago: 'há 17 min' },
+    ];
+  }
+  static get ESC_MODS() {
+    return [
+      { k: 'spotify', name: 'Spotify', brand: 'spotify', desc: 'Mostra a faixa, controla o app oficial e ouve só ele.' },
+      { k: 'ytmusic', name: 'YouTube Music', brand: 'youtubemusic', desc: 'No navegador ou no app. Capa e controles pelo Windows.' },
+      { k: 'soundcloud', name: 'SoundCloud', brand: 'soundcloud', desc: 'Ouve só a aba ou o app do SoundCloud.' },
+      { k: 'tidal', name: 'Tidal', brand: 'tidal', desc: 'Reconhece o app do Tidal e ouve só ele.' },
+      { k: 'apple', name: 'Apple Music', brand: 'applemusic', desc: 'Reconhece o Apple Music para Windows.' },
+    ];
+  }
+  static get PRESETS() {
+    return [
+      { id: 'mono', name: 'Branco e cinza', a: '#ffffff', b: '#8a8a8a' },
+      { id: 'prata', name: 'Prata', a: '#e9edf2', b: '#7d8a99' },
+      { id: 'ambar', name: 'Âmbar', a: '#ffd08a', b: '#ff7a2f' },
+      { id: 'gelo', name: 'Gelo', a: '#dff3ff', b: '#4f9dff' },
+      { id: 'coral', name: 'Coral', a: '#ffc2b3', b: '#ff4f5e' },
+    ];
+  }
+  static get MARK() {
+    let d = '';
+    const amp = [1, 0.62, 0.3, 0.48, 0.85, 0.4, 0.18, 0.55, 0.92, 0.5, 0.24, 0.36, 0.78, 0.58, 0.2, 0.44];
+    const n = amp.length;
+    for (let i = 0; i < n; i++) {
+      const a = i / n * Math.PI * 2 - Math.PI / 2;
+      const r = 0.55 + amp[i] * 1.05;
+      const cx = 12 + Math.cos(a) * 8.6, cy = 12 + Math.sin(a) * 8.6;
+      d += 'M' + (cx - r).toFixed(2) + ' ' + cy.toFixed(2) + 'a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (2 * r).toFixed(2) + ' 0a' + r.toFixed(2) + ' ' + r.toFixed(2) + ' 0 1 0 ' + (-2 * r).toFixed(2) + ' 0z';
+    }
+    return d;
+  }
+  static get ICONS() {
+    return {
+      home: 'M4 10.6 12 4l8 6.6V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z',
+      homeF: 'M3.6 10.2 11.1 4.1a1.4 1.4 0 0 1 1.8 0l7.5 6.1c.4.3.6.7.6 1.2V19a1.5 1.5 0 0 1-1.5 1.5H15v-5.5a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v5.5H4.5A1.5 1.5 0 0 1 3 19v-7.6c0-.5.2-.9.6-1.2z',
+      lib: 'M7 4.5h10M5.5 7.5h13M5 10.5h14a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z',
+      libF: 'M7 3.75h10a.75.75 0 0 1 0 1.5H7a.75.75 0 0 1 0-1.5zM5.5 6.75h13a.75.75 0 0 1 0 1.5h-13a.75.75 0 0 1 0-1.5zM5 9.75h14a1.75 1.75 0 0 1 1.75 1.75v7A1.75 1.75 0 0 1 19 20.25H5a1.75 1.75 0 0 1-1.75-1.75v-7A1.75 1.75 0 0 1 5 9.75z',
+      store: 'M5.2 8h13.6l-1 11a1.5 1.5 0 0 1-1.5 1.4H7.7a1.5 1.5 0 0 1-1.5-1.4zM9 8V7a3 3 0 0 1 6 0v1',
+      storeF: 'M15.75 7.25V7a3.75 3.75 0 0 0-7.5 0v.25H5.2a.75.75 0 0 0-.75.82l1 11A2.25 2.25 0 0 0 7.7 21.1h8.6a2.25 2.25 0 0 0 2.24-2.03l1-11a.75.75 0 0 0-.75-.82zm-6 0V7a2.25 2.25 0 0 1 4.5 0v.25z',
+      stats: 'M5 20v-6M10 20V8M15 20v-9M20 20V5',
+      statsF: 'M3.75 13.5a1.25 1.25 0 0 1 2.5 0V20a1.25 1.25 0 0 1-2.5 0zM8.75 7.5a1.25 1.25 0 0 1 2.5 0V20a1.25 1.25 0 0 1-2.5 0zM13.75 10.5a1.25 1.25 0 0 1 2.5 0V20a1.25 1.25 0 0 1-2.5 0zM18.75 4.5a1.25 1.25 0 0 1 2.5 0V20a1.25 1.25 0 0 1-2.5 0z',
+      sliders: 'M4 7h9M17 7h3M15 4.8v4.4M4 17h3M11 17h9M9 14.8v4.4',
+      search: 'M10.75 17.5a6.75 6.75 0 1 0 0-13.5 6.75 6.75 0 0 0 0 13.5zM15.75 15.75 20 20',
+      grid: 'M4.5 5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM13.5 5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM4.5 14.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1zM16.5 13.5v6M13.5 16.5h6',
+      chevD: 'M7 10l5 5 5-5',
+      play: 'M8 5.65v12.7a1.1 1.1 0 0 0 1.66.95l10.55-6.35a1.1 1.1 0 0 0 0-1.9L9.66 4.7A1.1 1.1 0 0 0 8 5.65z',
+      pause: 'M7.5 5h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm7 0h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
+      prev: 'M6.25 5.5a1.25 1.25 0 0 1 2.5 0v13a1.25 1.25 0 0 1-2.5 0zM19 6.4v11.2a1.1 1.1 0 0 1-1.7.92l-7.8-5.6a1.1 1.1 0 0 1 0-1.84l7.8-5.6A1.1 1.1 0 0 1 19 6.4z',
+      next: 'M17.75 5.5a1.25 1.25 0 0 0-2.5 0v13a1.25 1.25 0 0 0 2.5 0zM5 6.4v11.2a1.1 1.1 0 0 0 1.7.92l7.8-5.6a1.1 1.1 0 0 0 0-1.84l-7.8-5.6A1.1 1.1 0 0 0 5 6.4z',
+      full: 'M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15',
+      x: 'M6.5 6.5l11 11M17.5 6.5l-11 11',
+      min: 'M5 12h14',
+      max: 'M6 6h12v12H6z',
+      plus: 'M12 5v14M5 12h14',
+      check: 'M5 12.5l4.5 4.5L19 7.5',
+      vol: 'M4 9.5h3.2L12 5.6v12.8l-4.8-3.9H4zM15.5 9a4 4 0 0 1 0 6M18.2 6.4a7.6 7.6 0 0 1 0 11.2',
+      shield: 'M12 3.6 18.8 6.3v5.1c0 4.1-2.8 7.2-6.8 8.5-4-1.3-6.8-4.4-6.8-8.5V6.3zM9 11.8l2.1 2.1L15.2 9.8',
+      drop: 'M12 3.8c3.2 3.8 5.8 6.9 5.8 9.9a5.8 5.8 0 0 1-11.6 0c0-3 2.6-6.1 5.8-9.9z',
+      wave: 'M3.5 12h1.5M7.5 8.5v7M11.5 5v14M15.5 8v8M19.5 10.5v3',
+      folder: 'M3.5 7.5a2 2 0 0 1 2-2h3.9l2.1 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z',
+      grip: 'M9 7h.01M15 7h.01M9 12h.01M15 12h.01M9 17h.01M15 17h.01',
+      globe: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM3.5 12h17M12 3.5c2.6 2.8 2.6 14.2 0 17M12 3.5c-2.6 2.8-2.6 14.2 0 17',
+      key: 'M14.5 14a4.5 4.5 0 1 0-4.3-3.2L4 17v3h3v-2h2v-2h2l1.2-1.2c.7.3 1.5.3 2.3.2zM15.5 8.5h.01',
+      doc: 'M7 3.5h7l4 4v13H7zM14 3.5v4h4M9.5 12.5h5M9.5 16h5',
+      swap: 'M7 8h11l-3-3M17 16H6l3 3',
+      undo: 'M8.5 6 5 9.5 8.5 13M5.5 9.5H14a5 5 0 0 1 0 10h-3',
+      menu: 'M4 8h16M4 16h16',
+      tone: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 3.5v17M12 8h6.5M12 12h8.5M12 16h6.5',
+      layers: 'M12 4l8.5 4.5L12 13 3.5 8.5zM3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5',
+      metro: 'M9.7 3.5h4.6l3.9 17H5.8zM12 15.5l4.2-7.5M7.4 16.5h9.2',
+      bolt: 'M13.2 3.5 5.5 13.6h5.9l-.9 6.9 7.7-10.1h-5.9z',
+      clock: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 7.5V12l3 2',
+      eye: 'M2.8 12S6.2 5.5 12 5.5 21.2 12 21.2 12 17.8 18.5 12 18.5 2.8 12 2.8 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+      history: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v3.6h3.6M12 8.5v4l2.8 1.6',
+      queue: 'M4 6.5h12M4 11.5h12M4 16.5h7M17 14v6M14 17h6',
+      panel: 'M4.5 6a1.5 1.5 0 0 1 1.5-1.5h12A1.5 1.5 0 0 1 19.5 6v12a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18zM14.5 4.5v15',
+      keyboard: 'M3.5 7.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM7 9.5h.01M10.5 9.5h.01M14 9.5h.01M17 9.5h.01M7 13h.01M17 13h.01M9.5 15.5h5',
+      arrowUR: 'M8 16 16 8M9.5 8H16v6.5',
+      headphones: 'M4.5 15v-2.5a7.5 7.5 0 0 1 15 0V15M4.5 15a1.5 1.5 0 0 1 1.5-1.5h1.5v6H6A1.5 1.5 0 0 1 4.5 18zM19.5 15a1.5 1.5 0 0 0-1.5-1.5h-1.5v6H18a1.5 1.5 0 0 0 1.5-1.5z',
+      download: 'M12 4.5v10M7.5 10.5 12 15l4.5-4.5M5 19.5h14',
+      pip: 'M3.5 6.5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM12.5 12h5.5v5h-5.5z',
+      expand: 'M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5l-6 6M4.5 19.5l6-6',
+      struct: 'M4 9h4.5v6H4zM10.5 6.5h3.5v11h-3.5zM16 10.5h4v3h-4z',
+      info: 'M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 11v5.5M12 7.8h.01',
+    };
+  }
+
+  static rng(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  static genSecs(tr, seed) {
+    const r = Component.rng(seed);
+    const p10 = tr.p[0], p50 = tr.p[1], p90 = tr.p[2];
+    const n = 6 + Math.floor(r() * 3);
+    const cuts = [0];
+    for (let i = 1; i < n; i++) cuts.push(i / n + (r() - 0.5) * 0.05);
+    cuts.push(1);
+    const secs = [];
+    for (let i = 0; i < n; i++) {
+      let lvl;
+      if (i === 0) lvl = p10 + (p50 - p10) * 0.25;
+      else if (i === n - 1) lvl = p10 + (p50 - p10) * 0.45;
+      else if (i % 2 === 1) lvl = p50 + (p90 - p50) * (0.35 + 0.65 * r());
+      else lvl = p10 + (p50 - p10) * (0.35 + 0.65 * r());
+      const k = lvl < 0.43 ? 'calma' : lvl < 0.84 ? 'agitada' : 'intensa';
+      secs.push({ a: cuts[i] * tr.dur, b: cuts[i + 1] * tr.dur, k: k, e0: lvl - 0.02, e1: lvl + 0.02, beat: tr.bpm > 0 });
+    }
+    const drops = [];
+    let left = tr.nDrops || 0;
+    for (let i = 1; i < secs.length && left > 0; i++) {
+      const jump = secs[i].e0 - secs[i - 1].e1;
+      if (jump >= 0.1 && secs[i].e0 >= 0.5) {
+        secs[i].k = 'drop';
+        drops.push({ t: secs[i].a, mag: Math.min(1, 0.45 + jump * 2) });
+        left--;
+      }
+    }
+    tr.secs = secs;
+    tr.drops = drops;
+  }
+  static buildTracks() {
+    const demo = {
+      id: 'demo', esc: true, title: 'Vidro Noturno', artist: 'Coletivo Sal', cover: 'silk', bpm: 128, beat0: 0.25, dur: 132,
+      secs: [
+        { a: 0, b: 8, k: 'calma', e0: 0.17, e1: 0.22, beat: false },
+        { a: 8, b: 26, k: 'agitada', e0: 0.47, e1: 0.58, beat: true },
+        { a: 26, b: 34, k: 'subida', e0: 0.6, e1: 0.8, beat: true },
+        { a: 34, b: 56, k: 'drop', e0: 0.95, e1: 0.9, beat: true },
+        { a: 56, b: 68, k: 'calma', e0: 0.33, e1: 0.37, beat: false },
+        { a: 68, b: 82, k: 'agitada', e0: 0.55, e1: 0.63, beat: true },
+        { a: 82, b: 90, k: 'subida', e0: 0.65, e1: 0.84, beat: true },
+        { a: 90, b: 114, k: 'drop', e0: 0.97, e1: 0.92, beat: true },
+        { a: 114, b: 132, k: 'calma', e0: 0.38, e1: 0.12, beat: true },
+      ],
+      drops: [{ t: 34, mag: 0.85 }, { t: 90, mag: 1 }],
+    };
+    const esc2 = { id: 'esc2', esc: true, title: 'Ponto Cego', artist: 'Lume', cover: 'orbit', bpm: 122, beat0: 0.1, dur: 196, p: [0.3, 0.62, 0.86], nDrops: 2 };
+    const esc3 = { id: 'esc3', esc: true, title: 'Calor Seco', artist: 'Tremor', cover: 'glow', bpm: 140, beat0: 0.1, dur: 204, p: [0.4, 0.74, 0.95], nDrops: 3 };
+    const lib = [
+      { id: 'apologo', title: 'Um Apólogo', artist: 'Machado de Assis', src: 'LibriVox, narração', genre: 'Voz (fala)', bpm: 0, p: [0.12, 0.24, 0.38], lic: 'Domínio público', cover: 'dither' },
+      { id: 'chopin', title: 'Valsa Op. 69 nº 1', artist: 'Chopin', src: 'Musopen', genre: 'Piano solo', bpm: 0, p: [0.13, 0.18, 0.34], lic: 'Domínio público', cover: 'moire' },
+      { id: 'beethoven', title: 'Sinfonia nº 5, III', artist: 'Beethoven', src: 'Musopen', genre: 'Orquestra', bpm: 0, p: [0.14, 0.2, 0.55], lic: 'CC BY-SA 3.0', cover: 'contour' },
+      { id: 'docks', title: 'Night on the Docks', artist: 'Kevin MacLeod', genre: 'Jazz lento', bpm: 0, p: [0.13, 0.19, 0.31], lic: 'CC BY 3.0', cover: 'glow' },
+      { id: 'go', title: 'Go', artist: 'Josh Woodward', genre: 'Pop/folk', bpm: 112, p: [0.31, 0.71, 0.8], lic: 'CC BY 3.0', nDrops: 1, cover: 'halftone' },
+      { id: 'control', title: 'Under Control', artist: 'the Transisters', genre: 'Indie rock', bpm: 157, p: [0.87, 0.9, 0.95], lic: 'CC BY-NC-SA 2.0', nDrops: 3, cover: 'bars' },
+      { id: 'april', title: 'April Showers', artist: 'ProleteR', genre: 'Hip-hop', bpm: 94, p: [0.36, 0.63, 0.66], lic: 'CC BY-NC-ND 3.0', nDrops: 2, cover: 'sphere' },
+      { id: 'discipline', title: 'Discipline', artist: 'Nine Inch Nails', genre: 'Rock industrial', bpm: 122, p: [0.56, 0.8, 0.9], lic: 'CC BY-NC-SA 3.0', nDrops: 2, cover: 'warpgrid' },
+      { id: 'effort', title: "Drop It Like It's Not", artist: 'effort', genre: 'Eletrônica', bpm: 92, p: [0.45, 0.58, 0.63], lic: 'CC BY-NC-ND 2.5', nDrops: 1, cover: 'scan' },
+    ];
+    lib.forEach((t, i) => { t.beat0 = 0.1; t.dur = 172 + ((i * 37) % 64); Component.genSecs(t, 1000 + i * 77); });
+    Component.genSecs(esc2, 4242);
+    Component.genSecs(esc3, 5151);
+    const esc = [demo, esc2, esc3];
+    const all = esc.concat(lib);
+    all.forEach((tr) => {
+      tr.curve = new Float32Array(360);
+      for (let j = 0; j < 360; j++) tr.curve[j] = Component.energyAt(tr, (j + 0.5) / 360 * tr.dur);
+    });
+    const byId = {};
+    all.forEach((t) => { byId[t.id] = t; });
+    return { demo: demo, esc: esc, lib: lib, all: all, byId: byId };
+  }
+  static sectionAt(tr, t) {
+    const S = tr.secs;
+    let i = 0;
+    while (i < S.length - 1 && t >= S[i].b) i++;
+    return S[i];
+  }
+  static energyAt(tr, t) {
+    const S = tr.secs;
+    let i = 0;
+    while (i < S.length - 1 && t >= S[i].b) i++;
+    const s = S[i];
+    const u = Math.min(1, Math.max(0, (t - s.a) / Math.max(0.001, s.b - s.a)));
+    let e = s.e0 + (s.e1 - s.e0) * (s.k === 'subida' ? u * u : u * u * (3 - 2 * u));
+    if (i > 0) {
+      const pe = S[i - 1].e1, dt = t - s.a;
+      if (e < pe && dt < 0.9) { const w = dt / 0.9; e = pe + (e - pe) * (w * w * (3 - 2 * w)); }
+    }
+    e += 0.022 * Math.sin(t * 1.93 + tr.bpm) + 0.014 * Math.sin(t * 0.57 + 1.3);
+    return Math.max(0.05, Math.min(1, e));
+  }
+  static palette(x) {
+    const P = [[0, [1, 1, 1], [0.87, 0.9, 1]], [0.3, [1, 1, 1], [0.87, 0.9, 1]], [0.55, [0.18, 0.42, 1], [0.56, 0.89, 1]], [0.75, [0.18, 0.42, 1], [0.56, 0.89, 1]], [0.92, [1, 0.1, 0.22], [1, 0.55, 0.22]]];
+    let i = 0;
+    while (i < P.length - 2 && x > P[i + 1][0]) i++;
+    const a = P[i], b = P[i + 1];
+    const u = Math.min(1, Math.max(0, (x - a[0]) / (b[0] - a[0])));
+    const t = u * u * (3 - 2 * u);
+    const mix = (p, q) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
+    return [mix(a[1], b[1]), mix(a[2], b[2])];
+  }
+  static hex(h) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(h || '');
+    if (!m) return [1, 1, 1];
+    const n = parseInt(m[1], 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  }
+  static luma(a, b) { return 0.5 * (0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]) + 0.5 * (0.2126 * b[0] + 0.7152 * b[1] + 0.0722 * b[2]); }
+  static fmt(t) { t = Math.max(0, Math.floor(t)); const m = Math.floor(t / 60), s = t % 60; return m + ':' + (s < 10 ? '0' : '') + s; }
+  static dec(x) { return x.toFixed(2).replace('.', ','); }
+  static norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+  static heat(d, h) {
+    const eve = Math.exp(-Math.pow((h - 21.5) / 2.6, 2));
+    const noon = 0.55 * Math.exp(-Math.pow((h - 13) / 1.6, 2));
+    const night = h < 6 ? 0.25 * Math.exp(-h / 2) : 0;
+    const wk = d === 0 || d === 6 ? 1.15 : 1;
+    const v = Math.min(1, (eve + noon + night) * wk * (0.75 + 0.25 * Math.sin(d * 2.1 + h * 0.9)));
+    return (0.07 + 0.88 * v).toFixed(2);
+  }
+  static clockNow() {
+    const d = new Date();
+    const pad = (x) => (x < 10 ? '0' : '') + x;
+    return { clock: pad(d.getHours()) + ':' + pad(d.getMinutes()), dateLong: Component.DIAS[d.getDay()] + ', ' + d.getDate() + ' ' + Component.MESES[d.getMonth()].slice(0, 3) };
+  }
+
+  /* ---------- ciclo de vida ---------- */
+  componentDidMount() {
+    this.alive = true;
+    this.boot(0);
+  }
+  componentWillUnmount() {
+    this.alive = false;
+    cancelAnimationFrame(this.raf);
+    clearTimeout(this.tClose);
+    clearTimeout(this.tToast);
+    if (this.ro) this.ro.disconnect();
+    if (this.gl) { const ext = this.gl.getExtension('WEBGL_lose_context'); if (ext) ext.loseContext(); this.gl = null; }
+  }
+  findRoot() {
+    if (this.rootEl && this.rootEl.isConnected) return this.rootEl;
+    const sel = '[data-root="' + this.uid + '"]';
+    const direct = document.querySelector(sel);
+    if (direct) return direct;
+    const walk = (node) => {
+      const all = node.querySelectorAll('*');
+      for (let i = 0; i < all.length; i++) {
+        const sr = all[i].shadowRoot;
+        if (sr) { const f = sr.querySelector(sel) || walk(sr); if (f) return f; }
+      }
+      return null;
+    };
+    try { return walk(document); } catch (e) { return null; }
+  }
+  wake() {
+    if (!this.isStatic || !this.stopped || !this.alive) return;
+    this.stopped = false;
+    this.frames = 0;
+    this.awake = true;
+    this.last = performance.now();
+    this.raf = requestAnimationFrame(this.loop);
+  }
+  boot(tries) {
+    if (!this.alive) return;
+    const root = this.findRoot();
+    if (!root) { if (tries < 240) requestAnimationFrame(() => this.boot(tries + 1)); return; }
+    this.root = root;
+    this.initGL();
+    if (typeof ResizeObserver !== 'undefined') {
+      this.ro = new ResizeObserver(() => { this.needResize = true; });
+      this.ro.observe(root);
+      if (this.cv) this.ro.observe(this.cv);
+    }
+    this.last = performance.now();
+    this.uiAt = 0;
+    this.raf = requestAnimationFrame(this.loop);
+  }
+  componentDidUpdate(prevProps, prevState) {
+    const p = this.props || {}, q = prevProps || {}, up = {};
+    const ch = (k) => p[k] !== q[k] && p[k] !== undefined;
+    if (ch('tela') && Component.TELAS.indexOf(p.tela) >= 0) up.tela = p.tela;
+    if (ch('tema') && Component.TEMAS.indexOf(p.tema) >= 0) { up.tema = p.tema; if (p.tema === 'mono') up.themes = Object.assign({}, this.state.themes, { mono: true }); }
+    if (ch('skin')) up.skin = p.skin === 'imersiva' ? 'imersiva' : 'blocos';
+    if (ch('layout') && ['padrao', 'foco', 'mini'].indexOf(p.layout) >= 0) up.layout = p.layout;
+    if (ch('cenario') && ['escuta', 'arquivo', 'vazio'].indexOf(p.cenario) >= 0) {
+      const nt = p.cenario === 'arquivo' ? 'go' : 'demo';
+      up.cenario = p.cenario; up.playing = p.cenario !== 'vazio'; up.track = nt; up.src = p.cenario === 'arquivo' ? 'arquivos' : 'spotify';
+      this.seek(this.sim ? this.sim.t : 0, this.tracks.byId[nt], p.cenario);
+    }
+    if (ch('coresReativas')) up.reactive = Component.bool(p.coresReativas, true);
+    if (ch('modoSeguro')) up.safe = Component.bool(p.modoSeguro, false);
+    if (ch('edicao')) up.editing = Component.bool(p.edicao, false);
+    if (ch('telaCheia')) up.full = Component.bool(p.telaCheia, false);
+    if (ch('paleta')) up.palOpen = Component.bool(p.paleta, false);
+    if (ch('mini')) up.mini = Component.bool(p.mini, false);
+    if (ch('painel')) up.panelDrawer = Component.bool(p.painel, false);
+    if (ch('momento')) this.seek(Component.num(p.momento, 0));
+    if (Object.keys(up).length) this.setState(up);
+    if (prevState && prevState.tema !== this.state.tema) this.mapCol = null;
+    if (prevState && !prevState.palOpen && this.state.palOpen && !this.isStatic && this.root) {
+      const el = this.root.querySelector('.pal-in input');
+      if (el) el.focus();
+    }
+    if (prevState && (prevState.full !== this.state.full || prevState.mini !== this.state.mini || prevState.skin !== this.state.skin || prevState.layout !== this.state.layout || prevState.cols !== this.state.cols || prevState.tela !== this.state.tela)) { this.needResize = true; this.mapEls = null; }
+  }
+
+  /* ---------- simulação do diretor ---------- */
+  curTrack() { return this.tracks.byId[this.state.track] || this.tracks.demo; }
+  initSim() {
+    this.sim = { t: 0, prevT: 0, E: 0.2, pump: 0, drop: 0, build: 0, lastBeat: -1, kickN: 0, x: 0, y: 0, vx: 0, vy: 0, r: 0, vr: 0, anim: 7.3, off: 0.4, A: 0.064, X: 1.1, Bk: 0.8, F: 0, ca: [1, 1, 1], cb: [0.87, 0.9, 1], lbl: 'Calma' };
+    this.fl = { ref: 1, ext: 0, dir: 1, ev: [] };
+    this.enHist = [];
+    this.enAt = 0;
+    this.seek(this.t0);
+    for (let i = 0; i < 16; i++) this.enHist.push(Component.energyAt(this.curTrack(), Math.max(0, this.sim.t - (16 - i) * 0.75)));
+    this.state.tNow = this.sim.t;
+    this.state.E = this.sim.E;
+    this.state.enHist = this.enHist.slice();
+  }
+  seek(t, track, cenario) {
+    const S = this.sim;
+    if (!S) return;
+    const tr = track || this.curTrack();
+    const cen = cenario || this.state.cenario;
+    t = Math.max(0, Math.min(tr.dur - 0.5, t));
+    S.t = t; S.prevT = t; S.lastBeat = -1;
+    S.E = cen === 'vazio' ? 0.16 : Component.energyAt(tr, t);
+    let d = 0;
+    tr.drops.forEach((dr) => { if (t >= dr.t && t - dr.t < 4) d = Math.max(d, dr.mag * Math.exp(-(t - dr.t) / 0.9)); });
+    S.drop = d;
+    const sec = Component.sectionAt(tr, t);
+    S.build = sec.k === 'subida' ? Math.pow((t - sec.a) / (sec.b - sec.a), 2) : 0;
+    const st = this.state;
+    const pal = st.reactive ? Component.palette(Math.min(1, S.E + 0.35 * S.drop)) : [Component.hex(st.colA), Component.hex(st.colB)];
+    S.ca = pal[0].slice(); S.cb = pal[1].slice();
+    if (st.tema === 'mono') { const ga = 0.08 + 0.92 * Math.max.apply(null, S.ca), gb = 0.06 + 0.7 * Math.max.apply(null, S.cb); S.ca = [ga, ga, ga]; S.cb = [gb, gb, gb]; }
+    S.lbl = S.E > 0.86 ? 'Intensa' : S.E > 0.47 ? 'Agitada' : 'Calma';
+  }
+  kick(down) {
+    const S = this.sim, safe = this.state.safe;
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const d = dirs[S.kickN % 4];
+    S.kickN++;
+    const m = (down ? 0.5 : 0.3) * (0.4 + 0.6 * S.E) * (safe ? 0.45 : 1);
+    S.vx += d[0] * m; S.vy += d[1] * m; S.vr += (S.kickN % 2 ? 1 : -1) * 0.45 * m;
+  }
+  step(dt, now) {
+    const S = this.sim, st = this.state, tr = this.curTrack();
+    const vazio = st.cenario === 'vazio';
+    const active = !vazio && st.playing;
+    if (active) {
+      S.t += dt;
+      if (S.t >= tr.dur) { S.t = 0; S.prevT = 0; S.lastBeat = -1; }
+    }
+    const tt = Math.max(0, S.t + st.sync / 1000);
+    const sec = Component.sectionAt(tr, tt);
+    const E0 = active ? Component.energyAt(tr, tt) : (vazio ? 0.14 : Math.min(S.E, 0.3));
+    S.E += (E0 - S.E) * (1 - Math.exp(-dt / (E0 > S.E ? 0.28 : 0.85)));
+    if (active && sec.beat && tr.bpm && tt >= tr.beat0) {
+      const bi = Math.floor((tt - tr.beat0) * tr.bpm / 60);
+      if (bi !== S.lastBeat) {
+        const first = S.lastBeat < 0;
+        S.lastBeat = bi;
+        if (!first) { const down = bi % 4 === 0; S.pump = Math.max(S.pump, (down ? 1 : 0.7) * (0.45 + 0.55 * S.E)); this.kick(down); if (down && !st.safe) this.pulse(); }
+      }
+    }
+    S.pump *= Math.exp(-dt / 0.12);
+    if (active) tr.drops.forEach((d) => { if (S.prevT < d.t && tt >= d.t) S.drop = Math.max(S.drop, d.mag); });
+    S.drop *= Math.exp(-dt / 0.9);
+    S.prevT = tt;
+    S.build = active && sec.k === 'subida' ? Math.pow((tt - sec.a) / (sec.b - sec.a), 2) : S.build * Math.exp(-dt / 0.3);
+    S.vx += (-70 * S.x - 10 * S.vx) * dt; S.vy += (-70 * S.y - 10 * S.vy) * dt; S.vr += (-40 * S.r - 6 * S.vr) * dt;
+    S.x += S.vx * dt; S.y += S.vy * dt; S.r += S.vr * dt;
+
+    const E = S.E, P = S.pump, D = S.drop, B = S.build, safe = st.safe;
+    const L = (a, b) => a + (b - a) * E;
+    S.anim += dt * (active ? 1 : 0.22) * L(0.8, 1.35);
+    S.off += dt * (active ? 1 : 0.3) * (0.035 + 0.2 * E + P * (safe ? 0.5 : 1.3));
+    const tA = 0.064 * L(0.85, 1.2) * (1 + (safe ? 0 : 0.5 * P + 0.7 * D));
+    const tX = L(1, 1.7);
+    const tB = L(0.6, 1.05) * (1 + (safe ? 0 : 0.45 * P + 0.5 * D));
+    if (safe) {
+      const lim = (c, g, r) => c + Math.max(-r * dt, Math.min(r * dt, g - c));
+      S.A = lim(S.A, tA, 0.016); S.X = lim(S.X, tX, 0.25); S.Bk = lim(S.Bk, tB, 0.25); S.F = 0;
+    } else { S.A = tA; S.X = tX; S.Bk = tB; S.F = 0.18 * D * D; }
+    let ca, cb;
+    if (st.reactive) {
+      const pal = Component.palette(Math.min(1, E + (safe ? 0.1 : 0.35) * D));
+      ca = pal[0]; cb = pal[1];
+      if (safe) {
+        const red = Math.max(0, Math.min(1, (ca[0] - ca[2]) * 1.4));
+        const g = 0.2126 * ca[0] + 0.7152 * ca[1] + 0.0722 * ca[2];
+        ca = ca.map((v) => v + (g - v) * 0.45 * red);
+        cb = cb.map((v) => v + (g - v) * 0.3 * red);
+      }
+    } else { ca = Component.hex(st.colA); cb = Component.hex(st.colB); }
+    if (st.tema === 'mono') {
+      const ga = 0.08 + 0.92 * Math.max(ca[0], ca[1], ca[2]), gb = 0.06 + 0.7 * Math.max(cb[0], cb[1], cb[2]);
+      ca = [ga, ga, ga]; cb = [gb, gb, gb];
+    }
+    const ct = 1 - Math.exp(-dt / (safe ? 1.4 : 0.3));
+    for (let i = 0; i < 3; i++) { S.ca[i] += (ca[i] - S.ca[i]) * ct; S.cb[i] += (cb[i] - S.cb[i]) * ct; }
+    this.V = {
+      time: S.anim, off: S.off,
+      fold: L(0.34, 0.62) + 0.05 * Math.sin(S.anim * 0.7),
+      scale: L(0.9, 1.16) * (1 + 0.045 * P * (safe ? 0.5 : 1)) * (1 - 0.13 * B) + 0.2 * D * (safe ? 0.5 : 1),
+      burst: D * 0.28 * (safe ? 0.5 : 1) + P * 0.02 * E,
+      jitter: (0.0015 + 0.004 * E + 0.01 * B) * (safe ? 0.35 : 1),
+      spin: 0.06 * Math.sin(S.anim * 0.21) + S.r * (safe ? 0.5 : 1),
+      kx: S.x * (safe ? 0.6 : 1), ky: S.y * (safe ? 0.6 : 1),
+      alpha: S.A, exposure: S.X, bloomK: S.Bk, flash: S.F,
+      keep: L(0.45, 0.66),
+      ab: 0.0012 + 0.003 * E + (safe ? 0 : 0.004 * P),
+      ca: S.ca, cb: S.cb,
+    };
+    const lumN = (S.A / 0.064) * S.X * (1 + 0.3 * S.Bk) * Component.luma(S.ca, S.cb) + S.F * 3;
+    this.lumNow = lumN;
+    const F = this.fl;
+    F.ref = Math.max(F.ref * Math.exp(-dt / 3), lumN);
+    const thr = 0.1 * Math.max(F.ref, 0.6);
+    if (F.dir > 0) { if (lumN > F.ext) F.ext = lumN; else if (F.ext - lumN >= thr) { F.ev.push(now); F.dir = -1; F.ext = lumN; } }
+    else { if (lumN < F.ext) F.ext = lumN; else if (lumN - F.ext >= thr) { F.ev.push(now); F.dir = 1; F.ext = lumN; } }
+    this.enAt += dt;
+    if (this.enAt >= 0.75) { this.enAt = 0; this.enHist.push(vazio ? 0 : S.E); if (this.enHist.length > 16) this.enHist.shift(); }
+    /* o tom do dock segue o visual por uma média lenta; no modo seguro fica neutro e muda ainda mais devagar */
+    const tg = this.toneTarget(), tk = 1 - Math.exp(-dt / (safe ? 6 : 2));
+    if (this.toneRGB) for (let i = 0; i < 3; i++) this.toneRGB[i] += (tg[i] - this.toneRGB[i]) * tk;
+    if (!this.scrub && this.scrubRub) { this.scrubRub *= Math.exp(-dt / 0.08); if (Math.abs(this.scrubRub) < 0.1) this.scrubRub = 0; }
+  }
+  toneTarget() {
+    const st = this.state;
+    const nt = Component.NEUTRAL[st.tema] || Component.NEUTRAL.noite;
+    if (st.cenario === 'vazio' || !st.reactive || st.safe || !this.sim) return nt;
+    return Component.toneFor(this.sim.ca, st.tema);
+  }
+  toneStrings() {
+    const T = (this.toneRGB || [0.067, 0.067, 0.075]).map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255));
+    return { tone: 'rgb(' + T.join(', ') + ')', toneSoft: 'rgba(' + T.join(', ') + ', .45)' };
+  }
+  reducedMotion() { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
+  /* 12. Um pulso por compasso no símbolo e no ponto de energia */
+  pulse() {
+    if (!this.root || this.isStatic || this.reducedMotion()) return;
+    const ease = 'cubic-bezier(.23, 1, .32, 1)';
+    const m = this.root.querySelector('.rail-mark .mark');
+    if (m && m.animate) m.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)', offset: 0.22 }, { transform: 'scale(1)' }], { duration: 520, easing: ease });
+    const d = this.root.querySelector('.hero-tl .en-dot');
+    if (d && d.animate) d.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.7)', offset: 0.2 }, { transform: 'scale(1)' }], { duration: 480, easing: ease });
+  }
+  loop(now) {
+    if (!this.alive) return;
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.last) / 1000));
+    this.last = now;
+    if (this.root && !this.root.isConnected) { const r = this.findRoot(); if (r) { this.root = r; this.mapEls = null; } }
+    this.step(dt, now);
+    if (this.gl) this.render();
+    this.drawMaps();
+    if (now - this.uiAt > 100) { this.uiAt = now; this.pushUI(now); }
+    this.frames++;
+    if (this.isStatic && this.frames > (this.awake ? 600 : 90)) { this.pushUI(now); this.stopped = true; return; }
+    this.raf = requestAnimationFrame(this.loop);
+  }
+  pushUI(now) {
+    const S = this.sim, s = this.state, tr = this.curTrack();
+    let lbl = S.lbl;
+    const E = S.E;
+    if (lbl === 'Calma') { if (E > 0.47) lbl = E > 0.86 ? 'Intensa' : 'Agitada'; }
+    else if (lbl === 'Agitada') { if (E > 0.86) lbl = 'Intensa'; else if (E < 0.4) lbl = 'Calma'; }
+    else if (E < 0.8) lbl = E < 0.4 ? 'Calma' : 'Agitada';
+    S.lbl = lbl;
+    const F = this.fl;
+    while (F.ev.length && now - F.ev[0] > 1000) F.ev.shift();
+    const tt = S.t + s.sync / 1000;
+    const sec = Component.sectionAt(tr, tt);
+    let beatIdx = -1;
+    if (s.playing && s.cenario !== 'vazio' && sec.beat && tr.bpm && tt >= tr.beat0) beatIdx = Math.floor((tt - tr.beat0) * tr.bpm / 60) % 4;
+    const clk = Component.clockNow();
+    const live = s.playing && s.cenario !== 'vazio', ph = now / 1000;
+    const eqH = [0, 1, 2].map((i) => (live ? Math.round(3 + 11 * Math.max(0, Math.min(1, 0.2 + 0.62 * E * (0.55 + 0.45 * Math.abs(Math.sin(ph * (4.3 + i * 1.9) + i * 1.3))) + 0.3 * S.pump))) : 4));
+    const w = this.root ? this.root.clientWidth : 1440;
+    this.setState(Object.assign({ tNow: S.t, E: E, lbl: lbl, flashRate: F.ev.length / 2, beatIdx: beatIdx, enHist: this.enHist.slice(), clock: clk.clock, dateLong: clk.dateLong, fsIdle: s.full && !this.isStatic && now - this.lastMove > 2600, eqH: eqH, narrow: w > 0 && w <= 1060, tiny: w > 0 && w <= 760 }, this.toneStrings()));
+  }
+
+  /* ---------- WebGL: o visual Spectral ---------- */
+  static get SH() {
+    const noise = [
+      'vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}',
+      'vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}',
+      'vec4 permute(vec4 x){return mod289(((x*34.0)+10.0)*x);}',
+      'vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}',
+      'float snoise(vec3 v){',
+      ' const vec2 C=vec2(1.0/6.0,1.0/3.0); const vec4 D=vec4(0.0,0.5,1.0,2.0);',
+      ' vec3 i=floor(v+dot(v,C.yyy)); vec3 x0=v-i+dot(i,C.xxx);',
+      ' vec3 g=step(x0.yzx,x0.xyz); vec3 l=1.0-g; vec3 i1=min(g.xyz,l.zxy); vec3 i2=max(g.xyz,l.zxy);',
+      ' vec3 x1=x0-i1+C.xxx; vec3 x2=x0-i2+C.yyy; vec3 x3=x0-D.yyy;',
+      ' i=mod289(i);',
+      ' vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));',
+      ' float n_=0.142857142857; vec3 ns=n_*D.wyz-D.xzx;',
+      ' vec4 j=p-49.0*floor(p*ns.z*ns.z); vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_);',
+      ' vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=1.0-abs(x)-abs(y);',
+      ' vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw);',
+      ' vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0; vec4 sh=-step(h,vec4(0.0));',
+      ' vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;',
+      ' vec3 p0=vec3(a0.xy,h.x); vec3 p1=vec3(a0.zw,h.y); vec3 p2=vec3(a1.xy,h.z); vec3 p3=vec3(a1.zw,h.w);',
+      ' vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));',
+      ' p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;',
+      ' vec4 m=max(0.5-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0); m=m*m;',
+      ' return 105.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));',
+      '}',
+      'float fbm(vec3 p){float s=0.0,a=0.5;for(int i=0;i<4;i++){s+=a*snoise(p);p=p*2.02+vec3(1.7,9.2,3.4);a*=0.5;}return s;}',
+      'float fbm3(vec3 p){float s=0.0,a=0.5;for(int i=0;i<3;i++){s+=a*snoise(p);p=p*2.02+vec3(1.7,9.2,3.4);a*=0.5;}return s;}',
+    ].join('\n');
+    const ptsV = [
+      '#version 300 es',
+      'precision highp float;',
+      'uniform vec2 uRes; uniform float uTime, uOff, uFold, uScale, uBurst, uJitter, uSpin, uGrid, uPoint; uniform vec2 uKick;',
+      'out float vT;',
+      noise,
+      'void main(){',
+      ' float id=float(gl_VertexID);',
+      ' float gx=mod(id,uGrid); float gy=floor(id/uGrid);',
+      ' vec2 uv=vec2(gx,gy)/(uGrid-1.0);',
+      ' vec2 q=uv*2.4;',
+      ' vec2 w=vec2(fbm(vec3(q,uOff)),fbm(vec3(q+vec2(17.3,4.1),uOff)));',
+      ' vec2 dom=w*uFold*1.2+uv*0.25;',
+      ' float tt=uTime*0.045;',
+      ' vec2 p=vec2(fbm3(vec3(dom*2.6,tt)),fbm3(vec3(dom*2.6+vec2(31.7,11.3),tt+3.7)))*1.89;',
+      ' float h=fract(sin(dot(vec2(gx,gy),vec2(12.9898,78.233)))*43758.5453);',
+      ' float r=length(p);',
+      ' vec2 dir=r>1e-4?p/r:vec2(0.0);',
+      ' p+=dir*uBurst*(0.35+h);',
+      ' p+=(vec2(fract(h*7.13),fract(h*3.71))-0.5)*uJitter;',
+      ' float c=cos(uSpin); float s=sin(uSpin);',
+      ' p=mat2(c,s,-s,c)*p;',
+      ' p=p*uScale+uKick;',
+      ' float asp=uRes.x/uRes.y;',
+      ' vec2 ndc=p*vec2(min(1.0,1.0/asp),min(1.0,asp))*0.9;',
+      ' gl_Position=vec4(ndc,0.0,1.0);',
+      ' gl_PointSize=uPoint;',
+      ' vT=clamp(0.5+w.x*1.4,0.0,1.0);',
+      '}',
+    ].join('\n');
+    const ptsF = [
+      '#version 300 es',
+      'precision highp float;',
+      'uniform vec3 uColA, uColB; uniform float uAlpha, uPoint;',
+      'in float vT; out vec4 o;',
+      'void main(){',
+      ' if(uPoint>1.6){vec2 c=gl_PointCoord-0.5; if(dot(c,c)>0.25) discard;}',
+      ' o=vec4(mix(uColA,uColB,vT)*uAlpha,1.0);',
+      '}',
+    ].join('\n');
+    const triV = [
+      '#version 300 es',
+      'out vec2 vUv;',
+      'void main(){',
+      ' vec2 p=vec2(gl_VertexID==1?3.0:-1.0, gl_VertexID==2?3.0:-1.0);',
+      ' vUv=p*0.5+0.5;',
+      ' gl_Position=vec4(p,0.0,1.0);',
+      '}',
+    ].join('\n');
+    const fadeF = ['#version 300 es', 'precision highp float;', 'uniform float uKeep; out vec4 o;', 'void main(){o=vec4(0.0,0.0,0.0,uKeep);}'].join('\n');
+    const downF = [
+      '#version 300 es', 'precision highp float;',
+      'uniform sampler2D uTex; uniform vec2 uTexel; in vec2 vUv; out vec4 o;',
+      'void main(){',
+      ' vec3 c=texture(uTex,vUv+uTexel*vec2(-1.0,-1.0)).rgb+texture(uTex,vUv+uTexel*vec2(1.0,-1.0)).rgb+texture(uTex,vUv+uTexel*vec2(-1.0,1.0)).rgb+texture(uTex,vUv+uTexel*vec2(1.0,1.0)).rgb;',
+      ' c*=0.25; c=max(c-vec3(0.03),vec3(0.0));',
+      ' o=vec4(c,1.0);',
+      '}',
+    ].join('\n');
+    const blurF = [
+      '#version 300 es', 'precision highp float;',
+      'uniform sampler2D uTex; uniform vec2 uDir; in vec2 vUv; out vec4 o;',
+      'void main(){',
+      ' vec3 c=texture(uTex,vUv).rgb*0.2270270270;',
+      ' c+=texture(uTex,vUv+uDir*1.3846153846).rgb*0.3162162162;',
+      ' c+=texture(uTex,vUv-uDir*1.3846153846).rgb*0.3162162162;',
+      ' c+=texture(uTex,vUv+uDir*3.2307692308).rgb*0.0702702703;',
+      ' c+=texture(uTex,vUv-uDir*3.2307692308).rgb*0.0702702703;',
+      ' o=vec4(c,1.0);',
+      '}',
+    ].join('\n');
+    const compF = [
+      '#version 300 es', 'precision highp float;',
+      'uniform sampler2D uScene, uBloom; uniform float uBloomK, uExposure, uFlash, uAb, uSeed;',
+      'in vec2 vUv; out vec4 o;',
+      'void main(){',
+      ' vec2 d=(vUv-0.5)*uAb;',
+      ' vec3 s=vec3(texture(uScene,vUv+d).r, texture(uScene,vUv).g, texture(uScene,vUv-d).b);',
+      ' vec3 b=texture(uBloom,vUv).rgb;',
+      ' vec3 c=(s+b*uBloomK)*uExposure+vec3(uFlash);',
+      ' c=vec3(1.0)-exp(-c);',
+      ' vec2 q=vUv-0.5; c*=1.0-dot(q,q)*0.6;',
+      ' float n=fract(sin(dot(gl_FragCoord.xy+uSeed,vec2(12.9898,78.233)))*43758.5453);',
+      ' c+=(n-0.5)/255.0;',
+      ' o=vec4(c,1.0);',
+      '}',
+    ].join('\n');
+    return { ptsV: ptsV, ptsF: ptsF, triV: triV, fadeF: fadeF, downF: downF, blurF: blurF, compF: compF };
+  }
+  initGL() {
+    const cv = this.root && this.root.querySelector('canvas.gl');
+    if (!cv) return;
+    let gl = null;
+    try { gl = cv.getContext('webgl2', { antialias: false, alpha: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' }); } catch (e) { gl = null; }
+    if (!gl) { this.setState({ noGL: true }); return; }
+    this.cv = cv;
+    this.gl = gl;
+    this.hdr = !!gl.getExtension('EXT_color_buffer_float');
+    const SH = Component.SH;
+    const mk = (vs, fs) => {
+      const sh = (type, src) => {
+        const o = gl.createShader(type);
+        gl.shaderSource(o, src);
+        gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) console.warn('[visual] shader:', gl.getShaderInfoLog(o));
+        return o;
+      };
+      const prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+      gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.warn('[visual] link:', gl.getProgramInfoLog(prog));
+      const u = {};
+      const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS) || 0;
+      for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(prog, i); u[info.name] = gl.getUniformLocation(prog, info.name); }
+      return { p: prog, u: u };
+    };
+    this.P = { pts: mk(SH.ptsV, SH.ptsF), fade: mk(SH.triV, SH.fadeF), down: mk(SH.triV, SH.downF), blur: mk(SH.triV, SH.blurF), comp: mk(SH.triV, SH.compF) };
+    this.vao = gl.createVertexArray();
+    this.grid = 256;
+    this.count = this.grid * this.grid;
+    this.targets = null;
+    this.needResize = true;
+  }
+  mkTarget(w, h) {
+    const gl = this.gl;
+    const make = (hdr) => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, hdr ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA, hdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      if (!ok) { gl.deleteTexture(tex); gl.deleteFramebuffer(fb); return null; }
+      return { tex: tex, fb: fb, w: w, h: h };
+    };
+    let t = this.hdr ? make(true) : null;
+    if (!t) { this.hdr = false; t = make(false); }
+    return t;
+  }
+  resizeGL() {
+    const gl = this.gl, cv = this.cv;
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+    const w = Math.max(2, Math.round(cv.clientWidth * dpr)), h = Math.max(2, Math.round(cv.clientHeight * dpr));
+    if (this.targets && w === this.cw && h === this.ch) return;
+    this.cw = w; this.ch = h; this.dpr = dpr;
+    cv.width = w; cv.height = h;
+    if (this.targets) this.targets.forEach((t) => { if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); } });
+    const bw = Math.max(2, w >> 2), bh = Math.max(2, h >> 2);
+    this.tScene = this.mkTarget(w, h);
+    this.tA = this.mkTarget(bw, bh);
+    this.tB = this.mkTarget(bw, bh);
+    this.targets = [this.tScene, this.tA, this.tB];
+    if (!this.tScene || !this.tA || !this.tB) this.targets = null;
+  }
+  render() {
+    const gl = this.gl, P = this.P, V = this.V;
+    if (!gl || !V || gl.isContextLost()) return;
+    if (this.needResize) { this.needResize = false; this.resizeGL(); }
+    if (!this.targets) return;
+    const W = this.cw, H = this.ch, bw = this.tA.w, bh = this.tA.h;
+    gl.bindVertexArray(this.vao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.tScene.fb);
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+    gl.useProgram(P.fade.p);
+    gl.blendFunc(gl.ZERO, gl.SRC_ALPHA);
+    gl.uniform1f(P.fade.u.uKeep, V.keep);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.useProgram(P.pts.p);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    const u = P.pts.u;
+    gl.uniform2f(u.uRes, W, H);
+    gl.uniform1f(u.uTime, V.time);
+    gl.uniform1f(u.uOff, V.off);
+    gl.uniform1f(u.uFold, V.fold);
+    gl.uniform1f(u.uScale, V.scale);
+    gl.uniform2f(u.uKick, V.kx, V.ky);
+    gl.uniform1f(u.uBurst, V.burst);
+    gl.uniform1f(u.uJitter, V.jitter);
+    gl.uniform1f(u.uSpin, V.spin);
+    gl.uniform1f(u.uGrid, this.grid);
+    gl.uniform1f(u.uPoint, Math.max(1, 1.15 * this.dpr));
+    gl.uniform1f(u.uAlpha, V.alpha);
+    gl.uniform3f(u.uColA, V.ca[0], V.ca[1], V.ca[2]);
+    gl.uniform3f(u.uColB, V.cb[0], V.cb[1], V.cb[2]);
+    gl.drawArrays(gl.POINTS, 0, this.count);
+    gl.disable(gl.BLEND);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(P.down.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.tA.fb);
+    gl.viewport(0, 0, bw, bh);
+    gl.bindTexture(gl.TEXTURE_2D, this.tScene.tex);
+    gl.uniform1i(P.down.u.uTex, 0);
+    gl.uniform2f(P.down.u.uTexel, 1 / W, 1 / H);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.useProgram(P.blur.p);
+    gl.uniform1i(P.blur.u.uTex, 0);
+    const pass = (src, dst, dx, dy) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+      gl.bindTexture(gl.TEXTURE_2D, src.tex);
+      gl.uniform2f(P.blur.u.uDir, dx, dy);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    };
+    pass(this.tA, this.tB, 1.4 / bw, 0);
+    pass(this.tB, this.tA, 0, 1.4 / bh);
+    pass(this.tA, this.tB, 3.2 / bw, 0);
+    pass(this.tB, this.tA, 0, 3.2 / bh);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    gl.useProgram(P.comp.p);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.tScene.tex);
+    gl.uniform1i(P.comp.u.uScene, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.tA.tex);
+    gl.uniform1i(P.comp.u.uBloom, 1);
+    gl.uniform1f(P.comp.u.uBloomK, V.bloomK);
+    gl.uniform1f(P.comp.u.uExposure, V.exposure);
+    gl.uniform1f(P.comp.u.uFlash, V.flash);
+    gl.uniform1f(P.comp.u.uAb, V.ab);
+    gl.uniform1f(P.comp.u.uSeed, (this.frames % 64) * 7.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /* ---------- mapa de energia em matriz de pontos ---------- */
+  drawMaps() {
+    if (!this.root) return;
+    const ok = (el) => el && el.isConnected;
+    if (!this.mapEls || !ok(this.mapEls.bar)) this.mapEls = { bar: this.root.querySelector('canvas[data-map="bar"]'), fs: this.root.querySelector('canvas[data-map="fs"]'), mini: this.root.querySelector('canvas[data-map="mini"]') };
+    if (!this.mapCol) {
+      const cs = getComputedStyle(this.root);
+      const v = (k, d) => cs.getPropertyValue(k).trim() || d;
+      this.mapCol = { fg: v('--fg', '#f2f2f3'), dim: v('--fg-4', '#46464c'), lv: [v('--en-calm', '#e9eefb'), v('--en-mid', '#3d7bff'), v('--en-hot', '#ff3348')] };
+    }
+    if (!this.state.mini) this.drawMap(this.mapEls.bar, this.mapCol, this.mapHover);
+    else this.drawMap(this.mapEls.mini, this.mapCol, null);
+    if (this.state.full) this.drawMap(this.mapEls.fs, { fg: '#f4f4f5', dim: 'rgba(255,255,255,.24)', lv: this.state.tema === 'mono' ? ['#f4f4f5', '#f4f4f5', '#f4f4f5'] : [this.mapCol.lv[0] === '#6b7385' ? '#e9eefb' : this.mapCol.lv[0], this.mapCol.lv[1], this.mapCol.lv[2]] }, null);
+  }
+  /* 3. As seções ficam separadas por um vão; a seção atual se acende como karaokê e as anteriores ficam a 50%.
+     Perto do cursor as colunas crescem; arrastando, a agulha resiste nas pontas. */
+  drawMap(cv, col, hover) {
+    if (!cv) return;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if (!w || !h) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = Math.round(w * dpr), Hh = Math.round(h * dpr);
+    if (cv.width !== W || cv.height !== Hh) { cv.width = W; cv.height = Hh; }
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, Hh);
+    const s = this.state, mid = Hh / 2, pitch = 5 * dpr, rad = 1.25 * dpr, rp = 4.6 * dpr;
+    const rows = Math.max(3, Math.min(5, Math.floor(h / 4.6)));
+    const count = Math.floor(W / pitch);
+    const dot = (x, y, c, r) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill(); };
+    if (s.cenario === 'vazio') { for (let i = 0; i < count; i++) dot((i + 0.5) * pitch, mid, col.dim, rad); return; }
+    const tr = this.curTrack(), cur = tr.curve, n = cur.length;
+    const prog = Math.max(0, Math.min(1, this.sim.t / tr.dur));
+    const live = s.cenario === 'escuta';
+    const px = prog * W;
+    const curSec = Component.sectionAt(tr, this.sim.t);
+    const bound = {};
+    tr.secs.forEach((sec, k) => { if (k > 0) bound[Math.round(sec.a / tr.dur * count - 0.5)] = true; });
+    const hx = hover != null ? hover * dpr : null;
+    for (let i = 0; i < count; i++) {
+      const x = (i + 0.5) * pitch;
+      const tc = (i + 0.5) / count * tr.dur;
+      const past = x <= px;
+      const known = !live || past;
+      if (known && bound[i]) continue;
+      let r = rad;
+      if (hx != null) { const d = (x - hx) / (14 * dpr); r = rad * (1 + 0.7 * Math.exp(-d * d)); }
+      if (!known) { dot(x, mid, col.dim, r); continue; }
+      const e = cur[Math.min(n - 1, Math.floor((i + 0.5) / count * n))];
+      const k = Math.max(1, Math.min(rows, Math.round(Math.pow(e, 1.35) * rows + 0.3)));
+      const c = past ? col.lv[e < 0.43 ? 0 : e < 0.83 ? 1 : 2] : col.dim;
+      ctx.globalAlpha = past && tc < curSec.a ? 0.5 : 1;
+      for (let j = 0; j < k; j++) dot(x, mid + (j - (k - 1) / 2) * rp, c, r);
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = col.fg;
+    const bwid = Math.max(2, Math.round(2 * dpr));
+    const ph = px + (cv.getAttribute('data-map') === 'bar' ? (this.scrubRub || 0) * dpr : 0);
+    ctx.fillRect(Math.round(ph - bwid / 2), 0, bwid, Hh);
+  }
+  tipFor(x, width) {
+    const tr = this.curTrack();
+    const t = x / width * tr.dur;
+    const future = this.state.cenario === 'escuta' && t > this.sim.t + 0.5;
+    return { x: Math.round(x), t: Component.fmt(t), l: future ? 'ainda não tocou' : Component.SEC_NOME[Component.sectionAt(tr, t).k] };
+  }
+  mapMove(e) {
+    const el = e.currentTarget;
+    if (!el || this.state.cenario === 'vazio' || this.scrub) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+    this.mapHover = x;
+    const now = performance.now();
+    if (now - (this.tipAt || 0) < 33) return;
+    this.tipAt = now;
+    this.setState({ mapTip: this.tipFor(x, r.width) });
+  }
+  mapDown(e) {
+    const el = e.currentTarget;
+    if (!el || this.state.cenario === 'vazio' || (e.button && e.button !== 0)) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    e.preventDefault();
+    this.wake();
+    const apply = (cx) => {
+      const raw = cx - r.left, x = Math.max(0, Math.min(r.width, raw)), over = raw - x;
+      this.scrubRub = over ? Math.sign(over) * Component.rubber(Math.abs(over), 24) : 0;
+      this.mapHover = x;
+      this.seek(x / r.width * this.curTrack().dur);
+      this.setState({ tNow: this.sim.t, mapTip: this.tipFor(x, r.width) });
+    };
+    this.scrub = true;
+    apply(e.clientX);
+    const move = (ev) => apply(ev.clientX);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); this.scrub = false; this.mapHover = null; this.setState({ mapTip: null }); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  /* ---------- ações ---------- */
+  makeHandlers() {
+    const H = {};
+    H.onKey = (e) => this.onKey(e);
+    H.onMove = () => { this.lastMove = performance.now(); this.wake(); if (this.state.fsIdle) this.setState({ fsIdle: false }); };
+    H.togglePlay = () => { if (this.state.cenario !== 'vazio') this.setState({ playing: !this.state.playing }); };
+    H.next = () => this.nextTrack(1);
+    H.prev = () => this.nextTrack(-1);
+    H.openPalette = () => this.openPalette();
+    H.closePalette = () => { this.setState({ palOpen: false }); this.focusRoot(); };
+    H.onPalQuery = (e) => this.setState({ palQuery: e.target.value, palIdx: 0 });
+    H.onPalKey = (e) => this.onPalKey(e);
+    H.goHome = () => this.closeSheet();
+    H.closeSheet = () => this.closeSheet();
+    H.openBib = () => this.openSheet('biblioteca');
+    H.openStoreModules = () => { this.setState({ lojaTab: 'modulos', srcMenu: false }); this.openSheet('loja'); };
+    H.openLojaTemas = () => { this.setState({ lojaTab: 'temas' }); this.openSheet('loja'); };
+    H.openAjustesRail = () => (this.state.tela === 'ajustes' && !this.state.closing ? this.closeSheet() : this.openSheet('ajustes'));
+    H.openAjustesVisual = () => { this.setState({ ajTab: 'visual' }); this.openSheet('ajustes'); };
+    H.ajAbout = () => this.setState({ ajTab: this.state.ajTab === 'sobre' ? 'visual' : 'sobre' });
+    H.toggleEdit = () => this.toggleEdit();
+    H.toggleFull = () => this.toggleFull();
+    H.toggleMini = () => this.toggleMini();
+    H.toggleReactive = () => this.setState({ reactive: !this.state.reactive });
+    H.toggleSafe = () => this.setState({ safe: !this.state.safe });
+    H.onColA = (e) => this.setState({ colA: e.target.value, preset: null });
+    H.onColB = (e) => this.setState({ colB: e.target.value, preset: null });
+    H.onSync = (e) => this.setState({ sync: Number(e.target.value) || 0 });
+    H.onBibQuery = (e) => this.setState({ bibQuery: e.target.value });
+    H.bibFaixas = () => this.setState({ bibTab: 'faixas' });
+    H.bibPastas = () => this.setState({ bibTab: 'pastas' });
+    H.undo = () => this.undo();
+    H.holdResetDown = (e) => { if (e && e.button) return; this.holdStart('reset', () => { this.resetLayout(); this.toastMsg('Layout restaurado', 'O visual e os módulos voltaram ao lugar padrão.'); }); };
+    H.holdResetKey = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); H.holdResetDown(); } };
+    H.holdCancel = () => this.holdCancel();
+    H.rzBento = (e) => this.startResize(e);
+    H.gripHero = (e) => this.startSwap('hero', e);
+    H.gp = {};
+    Object.keys(Component.SPANS).forEach((k) => { H.gp[k] = (e) => this.startSwap(k, e); });
+    H.mapDown = (e) => this.mapDown(e);
+    H.mapMove = (e) => this.mapMove(e);
+    H.mapLeave = () => { this.mapHover = null; if (this.state.mapTip && !this.scrub) this.setState({ mapTip: null }); };
+    H.mapKey = (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault(); e.stopPropagation();
+      this.seek(this.sim.t + (e.key === 'ArrowRight' ? 5 : -5));
+      this.setState({ tNow: this.sim.t });
+    };
+    H.volDown = (e) => this.volDown(e);
+    H.volKey = (e) => this.volKey(e);
+    H.cancelPerm = () => this.setState({ permFor: null });
+    H.confirmPerm = () => { this.setState({ permFor: null }); this.runInstall('lastfm'); };
+    H.closeToast = () => this.setState({ toast: null });
+    H.toastAction = () => {
+      const t = this.state.toast;
+      if (t && t.act === 'lfmLogin') this.lfmLogin();
+      else if (t && t.act.indexOf('applyTheme:') === 0) this.setState({ tema: t.act.slice(11), toast: null });
+      else this.setState({ toast: null });
+    };
+    H.lfmLogin = () => this.lfmLogin();
+    H.openDrawer = () => this.setState({ drawer: true });
+    H.closeDrawer = () => this.setState({ drawer: false });
+    H.playFromEmpty = () => { this.seek(0, this.tracks.demo, 'escuta'); this.setState({ cenario: 'escuta', src: 'spotify', track: 'demo', playing: true, tfx: this.nextFx() }); };
+    H.resetVisual = () => this.setState({ reactive: true, safe: false, colA: '#ffffff', colB: '#8a8a8a', preset: 'mono', sync: 0 });
+    H.toggleSrcMenu = () => this.setState({ srcMenu: !this.state.srcMenu });
+    H.toggleBento = () => {
+      const s = this.state;
+      if (s.narrow && !s.tiny) this.setState({ panelDrawer: !(s.panelDrawer || s.tela === 'ajustes'), tela: s.tela === 'ajustes' ? 'inicio' : s.tela });
+      else this.setState({ layout: s.layout === 'padrao' ? 'foco' : 'padrao' });
+    };
+    H.pinSpotify = () => this.pickSource('spotify', 'Spotify');
+    H.pinSkin = () => this.cycleSkin();
+    return H;
+  }
+  nextFx() { return this.state.tfx === 'tfx-a' ? 'tfx-b' : 'tfx-a'; }
+  focusRoot() { if (this.root && !this.isStatic) { try { this.root.focus({ preventScroll: true }); } catch (e) { /* sem foco */ } } }
+  openSheet(t) {
+    clearTimeout(this.tClose);
+    if (t === 'stats') this.statsSeen = true;
+    this.setState({ tela: t, closing: false, drawer: false, full: false, editing: false, srcMenu: false, mini: false });
+  }
+  closeSheet() {
+    if (this.state.tela === 'inicio' || this.state.closing) return;
+    this.setState({ closing: true, drawer: false });
+    clearTimeout(this.tClose);
+    this.tClose = setTimeout(() => { if (this.alive) this.setState({ tela: 'inicio', closing: false }); }, 170);
+  }
+  selTrack(id) {
+    const s = this.state;
+    this.setState({ bibSel: id, panelDrawer: s.narrow && !s.tiny ? true : s.panelDrawer });
+  }
+  openPalette() { this.setState({ palOpen: true, palQuery: '', palIdx: 0, drawer: false, srcMenu: false }); }
+  toggleEdit() {
+    const on = !this.state.editing;
+    this.setState({ editing: on, full: false, mini: false, drawer: false, srcMenu: false, tela: on ? 'inicio' : this.state.tela, closing: false, layout: on && this.state.layout !== 'padrao' ? 'padrao' : this.state.layout });
+  }
+  toggleFull() {
+    this.lastMove = performance.now();
+    this.setState({ full: !this.state.full, mini: false, editing: false, srcMenu: false, tela: 'inicio', closing: false, fsIdle: false });
+  }
+  toggleMini() {
+    this.setState({ mini: !this.state.mini, full: false, editing: false, srcMenu: false, palOpen: false, drawer: false });
+    this.needResize = true;
+  }
+  escape() {
+    const s = this.state;
+    if (s.permFor) this.setState({ permFor: null });
+    else if (s.srcMenu) this.setState({ srcMenu: false });
+    else if (s.drawer) this.setState({ drawer: false });
+    else if (s.mini) this.toggleMini();
+    else if (s.full) this.toggleFull();
+    else if (s.editing) this.toggleEdit();
+    else if (s.tela !== 'inicio') this.closeSheet();
+    else if (s.panelDrawer) this.setState({ panelDrawer: false });
+    else if (s.toast) this.setState({ toast: null });
+  }
+  /* 8. Segurar para confirmar: 1,2 s; soltar antes cancela */
+  holdStart(key, fn) {
+    if (this.state.hold) return;
+    clearTimeout(this.tHold);
+    this.setState({ hold: key });
+    this.tHold = setTimeout(() => { if (!this.alive) return; this.setState({ hold: null }); fn(); }, 1200);
+    const up = () => { window.removeEventListener('pointerup', up); this.holdCancel(); };
+    window.addEventListener('pointerup', up);
+  }
+  holdCancel() { if (!this.state.hold) return; clearTimeout(this.tHold); this.setState({ hold: null }); }
+  /* 4. Volume elástico: arrastar além do fim estica e volta com mola; a roda ajusta 2% */
+  volDown(e) {
+    const el = e.currentTarget;
+    if (!el || (e.button && e.button !== 0)) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    e.preventDefault(); e.stopPropagation();
+    try { el.focus({ preventScroll: true }); } catch (er) { /* sem foco */ }
+    const apply = (cx) => {
+      const raw = cx - r.left, x = Math.max(0, Math.min(r.width, raw));
+      this.setState({ vol: Math.round(x / r.width * 100), volOver: raw - x, volDrag: true });
+    };
+    apply(e.clientX);
+    const move = (ev) => apply(ev.clientX);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); this.setState({ volDrag: false, volOver: 0 }); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  volKey(e) {
+    const d = { ArrowRight: 2, ArrowUp: 2, ArrowLeft: -2, ArrowDown: -2, PageUp: 10, PageDown: -10, Home: -100, End: 100 }[e.key];
+    if (d === undefined) return;
+    e.preventDefault(); e.stopPropagation();
+    this.setState({ vol: Math.max(0, Math.min(100, this.state.vol + d)) });
+  }
+  bindWheel(el) {
+    if (!el || el.__wheel) return;
+    el.__wheel = true;
+    el.addEventListener('wheel', (ev) => { ev.preventDefault(); this.setState({ vol: Math.max(0, Math.min(100, this.state.vol + (ev.deltaY < 0 ? 2 : -2))) }); }, { passive: false });
+  }
+  /* 10. Aviso que se arrasta: um gesto rápido (acima de 0,11 px/ms) ou 120 px fecham pela mesma borda */
+  bindSwipe(el) {
+    if (!el || el.__swipe) return;
+    el.__swipe = true;
+    let x0 = 0, dx = 0, on = false, samples = [];
+    const ease = 'cubic-bezier(.23, 1, .32, 1)';
+    el.addEventListener('pointerdown', (ev) => {
+      if (ev.target.closest && ev.target.closest('button')) return;
+      on = true; x0 = ev.clientX; dx = 0; samples = [[performance.now(), 0]];
+      try { el.setPointerCapture(ev.pointerId); } catch (er) { /* sem captura */ }
+      clearTimeout(this.tToast);
+    });
+    el.addEventListener('pointermove', (ev) => {
+      if (!on) return;
+      dx = ev.clientX - x0;
+      samples.push([performance.now(), dx]);
+      if (samples.length > 6) samples.shift();
+      el.style.transform = 'translateX(' + dx + 'px)';
+      el.style.opacity = String(1 - Math.min(0.6, Math.abs(dx) / 400));
+    });
+    const end = () => {
+      if (!on) return;
+      on = false;
+      const a = samples[0], b = samples[samples.length - 1];
+      const v = (b[1] - a[1]) / Math.max(1, b[0] - a[0]);
+      if (Math.abs(v) > 0.11 || Math.abs(dx) > 120) {
+        const dir = Math.sign(v || dx) || 1;
+        const an = el.animate([{ transform: 'translateX(' + dx + 'px)', opacity: el.style.opacity || '1' }, { transform: 'translateX(' + dir * (el.offsetWidth + 80) + 'px)', opacity: '0' }], { duration: 200, easing: ease, fill: 'forwards' });
+        const done = () => { if (this.alive && this.state.toast) this.setState({ toast: null }); };
+        an.onfinish = done;
+        setTimeout(done, 240);
+      } else {
+        el.animate([{ transform: 'translateX(' + dx + 'px)' }, { transform: 'translateX(0)' }], { duration: 260, easing: ease });
+        el.style.transform = ''; el.style.opacity = '';
+        this.tToast = setTimeout(() => { if (this.alive) this.setState({ toast: null }); }, 2600);
+      }
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+  setTheme(k) { this.setState({ tema: k }); }
+  themesAvail() { return Component.TEMAS.filter((k) => k !== 'mono' || this.state.themes.mono); }
+  installTheme(k) {
+    if (this.state.themes[k] || this.state.installing[k]) return;
+    this.setState({ installing: Object.assign({}, this.state.installing, { [k]: 'Baixando' }) });
+    setTimeout(() => {
+      if (!this.alive) return;
+      const ins = Object.assign({}, this.state.installing);
+      delete ins[k];
+      this.setState({ installing: ins, themes: Object.assign({}, this.state.themes, { [k]: true }) });
+      this.toastMsg('Tema ' + Component.TEMA_NOME[k] + ' baixado', 'Ele aparece em Aparência e no atalho T.', 'Aplicar', 'applyTheme:' + k);
+    }, 1100);
+  }
+  cycleTheme() {
+    const T = this.themesAvail();
+    const k = T[(T.indexOf(this.state.tema) + 1) % T.length];
+    this.setState({ tema: k });
+    this.toastMsg('Tema ' + Component.TEMA_NOME[k], 'Trocado ao vivo, sem reiniciar.');
+  }
+  cycleSkin() {
+    const k = this.state.skin === 'blocos' ? 'imersiva' : 'blocos';
+    this.setState({ skin: k });
+    this.toastMsg('Skin ' + (k === 'blocos' ? 'Blocos' : 'Imersiva'), 'A mesma interface com outra aparência.');
+  }
+  toastMsg(title, text, action, act) {
+    this.setState({ toast: { title: title, text: text, action: action || '', act: act || '' } });
+    clearTimeout(this.tToast);
+    this.tToast = setTimeout(() => { if (this.alive) this.setState({ toast: null }); }, action ? 7000 : 2600);
+  }
+  lfmLogin() {
+    this.setState({ lfmUser: true });
+    this.toastMsg('Conectado ao Last.fm', 'O que você ouvir a partir de agora entra no histórico.');
+  }
+  install(k) {
+    if (this.state.installed[k] || this.state.installing[k]) return;
+    if (k === 'lastfm') { this.setState({ permFor: 'lastfm' }); return; }
+    this.runInstall(k);
+  }
+  uninstall(k) {
+    const name = (Component.ESC_MODS.find((m) => m.k === k) || { name: k }).name;
+    this.setState({ installed: Object.assign({}, this.state.installed, { [k]: false }) });
+    this.toastMsg(name + ' removido', 'Dá para instalar de novo quando quiser.');
+  }
+  toggleClock() {
+    const m = this.state.mods.slice(), i = m.indexOf('relogio');
+    if (i >= 0) { m.splice(i, 1); this.setState({ mods: m }); this.toastMsg('Relógio removido do painel', 'Ele continua na Loja.'); }
+    else { m.push('relogio'); this.setState({ mods: m }); this.toastMsg('Relógio no painel', 'Ele aparece depois dos outros módulos.'); }
+  }
+  runInstall(k) {
+    const name = k === 'lastfm' ? 'Last.fm' : (Component.ESC_MODS.find((m) => m.k === k) || { name: k }).name;
+    this.setState({ installing: Object.assign({}, this.state.installing, { [k]: 'Baixando' }) });
+    setTimeout(() => { if (this.alive) this.setState({ installing: Object.assign({}, this.state.installing, { [k]: 'Conferindo' }) }); }, 650);
+    setTimeout(() => {
+      if (!this.alive) return;
+      const ins = Object.assign({}, this.state.installing);
+      delete ins[k];
+      this.setState({ installing: ins, installed: Object.assign({}, this.state.installed, { [k]: true }) });
+      if (k === 'lastfm') this.toastMsg('Last.fm instalado', 'A página Estatísticas apareceu na barra de ícones.', 'Entrar', 'lfmLogin');
+      else this.toastMsg(name + ' instalado', 'Abra o app e o visual passa a ouvir só ele.');
+    }, 1400);
+  }
+  pickSource(k, name) {
+    const s = this.state;
+    this.setState({ srcMenu: false });
+    if (k === 'arquivos') { this.openSheet('biblioteca'); return; }
+    if (k === 'spotify' || k === 'sistema') {
+      if (s.cenario !== 'escuta') { this.seek(0, this.tracks.demo, 'escuta'); this.setState({ cenario: 'escuta', track: 'demo', src: k, playing: true, tfx: this.nextFx() }); }
+      else this.setState({ src: k });
+      return;
+    }
+    this.toastMsg('Abra o ' + name, 'Assim que ele tocar, o visual passa a ouvir só ele.');
+  }
+  playTrack(id) {
+    const tr = this.tracks.byId[id];
+    if (!tr) return;
+    this.seek(0, tr, 'arquivo');
+    this.setState({ cenario: 'arquivo', src: 'arquivos', track: id, playing: true, bibSel: id, tfx: this.nextFx() });
+  }
+  nextTrack(dir) {
+    const s = this.state;
+    if (s.cenario === 'vazio') return;
+    if (dir < 0 && this.sim.t > 3) { this.seek(0); this.setState({ tNow: 0 }); return; }
+    if (s.cenario === 'arquivo') {
+      const L = this.tracks.lib;
+      const i = L.findIndex((t) => t.id === s.track);
+      this.playTrack(L[(i + dir + L.length) % L.length].id);
+      return;
+    }
+    const E = this.tracks.esc;
+    const i = E.findIndex((t) => t.id === s.track);
+    const cur = this.curTrack(), nt = E[(i + dir + E.length) % E.length];
+    this.seek(0, nt);
+    this.setState({ track: nt.id, playing: true, tfx: this.nextFx(), escHist: dir > 0 ? [{ title: cur.title, artist: cur.artist, cover: cur.cover, ago: 'agora' }].concat(s.escHist).slice(0, 4) : s.escHist });
+  }
+  onKey(e) {
+    const k = e.key, s = this.state;
+    const tag = (e.target && e.target.tagName) || '';
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && (k === 'k' || k === 'K')) { e.preventDefault(); if (s.palOpen) { this.setState({ palOpen: false }); this.focusRoot(); } else this.openPalette(); return; }
+    if (s.palOpen) return;
+    if (k === 'Escape') { e.preventDefault(); this.escape(); return; }
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (ctrl && (k === 'z' || k === 'Z')) { if (s.editing) { e.preventDefault(); this.undo(); } return; }
+    if (ctrl || e.altKey) return;
+    const role = e.target && e.target.getAttribute ? e.target.getAttribute('role') : '';
+    if (k === ' ') { if (tag !== 'BUTTON' && role !== 'slider') { e.preventDefault(); this.h.togglePlay(); } }
+    else if (k === 'e' || k === 'E') this.toggleEdit();
+    else if (k === 'f' || k === 'F') this.toggleFull();
+    else if (k === 'm' || k === 'M') this.toggleMini();
+    else if (k === 't' || k === 'T') this.cycleTheme();
+    else if (k === 's' || k === 'S') this.cycleSkin();
+    else if (k === 'F1') { e.preventDefault(); this.setState({ ajTab: 'atalhos' }); this.openSheet('ajustes'); }
+  }
+  onPalKey(e) {
+    const items = this.palItems || [];
+    const n = items.length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (n) this.setState({ palIdx: (Math.min(this.state.palIdx, n - 1) + 1) % n }); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (n) this.setState({ palIdx: (Math.min(this.state.palIdx, n - 1) - 1 + n) % n }); }
+    else if (e.key === 'Enter') { e.preventDefault(); const it = items[Math.min(this.state.palIdx, n - 1)]; if (it) this.runPal(it); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.setState({ palOpen: false }); this.focusRoot(); }
+  }
+  runPal(it) {
+    this.setState({ palOpen: false, palQuery: '' });
+    this.focusRoot();
+    setTimeout(() => { if (this.alive) it.run(); }, 0);
+  }
+  paletteItems() {
+    const s = this.state, I = Component.ICONS, q = Component.norm(s.palQuery.trim());
+    const T = this.themesAvail();
+    const nextTheme = Component.TEMA_NOME[T[(T.indexOf(s.tema) + 1) % T.length]];
+    const cmds = [
+      { grp: 'Ações', id: 'player.tocar-pausar', label: s.playing ? 'Pausar' : 'Tocar', icon: s.playing ? I.pause : I.play, fill: true, kbd: 'Espaço', run: () => this.h.togglePlay() },
+      { grp: 'Ações', id: 'player.proxima', label: 'Próxima faixa', icon: I.next, fill: true, run: () => this.nextTrack(1) },
+      { grp: 'Ações', id: 'visual.tela-cheia', label: 'Tela cheia', icon: I.full, kbd: 'F', run: () => this.toggleFull() },
+      { grp: 'Ações', id: 'janela.mini-player', label: 'Mini player', hint: 'sempre por cima', icon: I.pip, kbd: 'M', run: () => this.toggleMini() },
+      { grp: 'Ações', id: 'layout.editar', label: 'Editar o layout', icon: I.grid, kbd: 'E', run: () => this.toggleEdit() },
+      { grp: 'Visual', id: 'visual.cores-reativas', label: s.reactive ? 'Desligar as cores reativas' : 'Ligar as cores reativas', icon: I.drop, run: () => this.h.toggleReactive() },
+      { grp: 'Visual', id: 'visual.modo-seguro', label: s.safe ? 'Desligar o modo seguro' : 'Ligar o modo seguro', hint: 'fotossensibilidade', icon: I.shield, run: () => this.h.toggleSafe() },
+      { grp: 'Visual', id: 'pagina.abrir ajustes', label: 'Ajustes do visual', icon: I.sliders, run: () => this.h.openAjustesVisual() },
+      { grp: 'Aparência', id: 'tema.proximo', label: 'Trocar o tema', hint: 'próximo: ' + nextTheme, icon: I.tone, kbd: 'T', run: () => this.cycleTheme() },
+      { grp: 'Aparência', id: 'skin.proxima', label: 'Trocar a skin', hint: s.skin === 'blocos' ? 'próxima: Imersiva' : 'próxima: Blocos', icon: I.layers, kbd: 'S', run: () => this.cycleSkin() },
+      { grp: 'Ir para', id: 'pagina.abrir biblioteca', label: 'Biblioteca', icon: I.lib, run: () => this.openSheet('biblioteca') },
+      { grp: 'Ir para', id: 'pagina.abrir loja', label: 'Loja', icon: I.store, run: () => this.openSheet('loja') },
+    ];
+    if (s.installed.lastfm) cmds.push({ grp: 'Ir para', id: 'pagina.abrir estatisticas', label: 'Estatísticas', icon: I.stats, run: () => this.openSheet('stats') });
+    else cmds.push({ grp: 'Loja', id: 'loja.instalar lastfm', label: 'Instalar o Last.fm', hint: 'scrobble e estatísticas', icon: I.download, run: () => { this.setState({ lojaTab: 'modulos' }); this.openSheet('loja'); this.install('lastfm'); } });
+    if (!q) return cmds;
+    const out = cmds.filter((c) => Component.norm(c.label + ' ' + c.id + ' ' + (c.hint || '')).indexOf(q) >= 0);
+    this.tracks.lib.forEach((t) => {
+      if (Component.norm(t.title + ' ' + t.artist + ' ' + t.genre).indexOf(q) >= 0) out.push({ grp: 'Biblioteca', id: 'biblioteca.tocar ' + t.id, label: 'Tocar “' + t.title + '”', hint: t.artist, icon: I.play, fill: true, run: () => this.playTrack(t.id) });
+    });
+    return out;
+  }
+
+  /* ---------- modo edição ---------- */
+  pushHist() {
+    const s = this.state;
+    this.histStack.push({ cols: s.cols.slice(), mods: s.mods.slice(), bentoW: s.bentoW });
+    if (this.histStack.length > 40) this.histStack.shift();
+    this.setState({ undoN: this.histStack.length });
+  }
+  undo() {
+    const h = this.histStack.pop();
+    if (!h) return;
+    this.setState(Object.assign({}, h, { undoN: this.histStack.length }));
+    this.needResize = true;
+  }
+  resetLayout() {
+    this.pushHist();
+    const mods = Component.DEFAULT_MODS.slice();
+    if (this.state.mods.indexOf('relogio') >= 0) mods.push('relogio');
+    this.setState({ cols: ['hero', 'bento'], mods: mods, bentoW: 380 });
+    this.needResize = true;
+  }
+  startResize(e) {
+    if (!this.state.editing) return;
+    e.preventDefault(); e.stopPropagation();
+    const s = this.state, startX = e.clientX, start = s.bentoW;
+    const dir = s.cols[0] === 'bento' ? 1 : -1;
+    this.pushHist();
+    this.setState({ rz: true });
+    const move = (ev) => this.setState({ bentoW: Math.round(Math.max(320, Math.min(480, start + dir * (ev.clientX - startX)))) });
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); this.setState({ rz: false }); this.needResize = true; };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  /* 13. O módulo levanta ao ser pego; troca só com outro do mesmo tamanho */
+  startSwap(id, e) {
+    if (!this.state.editing || !this.root) return;
+    e.preventDefault(); e.stopPropagation();
+    const SP = Component.SPANS;
+    const isCol = id === 'hero' || id === 'bento';
+    const rr = this.root.getBoundingClientRect(), rects = {};
+    if (isCol) {
+      ['hero', 'bento'].forEach((k) => { const el = this.root.querySelector('[data-tile="' + k + '"]'); if (el) rects[k] = el.getBoundingClientRect(); });
+    } else {
+      this.root.querySelectorAll('.mods > .mod').forEach((el) => {
+        const k = el.getAttribute('data-mod');
+        if (k && SP[k] === SP[id]) rects[k] = el.getBoundingClientRect();
+      });
+    }
+    const at = (ev) => {
+      let t = null;
+      Object.keys(rects).forEach((k) => { const r = rects[k]; if (ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) t = k; });
+      return t === id ? null : t;
+    };
+    const move = (ev) => this.setState({ drag: { id: id, x: ev.clientX - rr.left, y: ev.clientY - rr.top, target: at(ev) } });
+    const up = (ev) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const t = at(ev);
+      if (t) {
+        this.pushHist();
+        if (isCol) this.setState({ cols: this.state.cols.slice().reverse(), drag: null });
+        else {
+          const o = this.state.mods.slice(), a = o.indexOf(id), b = o.indexOf(t);
+          o[a] = t; o[b] = id;
+          this.setState({ mods: o, drag: null });
+        }
+        this.needResize = true;
+      } else this.setState({ drag: null });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    this.setState({ drag: { id: id, x: e.clientX - rr.left, y: e.clientY - rr.top, target: null } });
+  }
+
+  /* ---------- valores do template ---------- */
+  renderVals() {
+    const s = this.state, H = this.h, I = Component.ICONS, BR = Component.BRANDS, CV = Component.COVERS;
+    const tr = this.curTrack();
+    const fmt = Component.fmt;
+    const vazio = s.cenario === 'vazio', escuta = s.cenario === 'escuta', arquivo = s.cenario === 'arquivo';
+    const playingNow = s.playing && !vazio;
+    const activeTela = s.closing ? 'inicio' : s.tela;
+    const showBib = s.tela === 'biblioteca', showLoja = s.tela === 'loja', showStats = s.tela === 'stats', showAj = s.tela === 'ajustes';
+    const narrow = !!s.narrow, tiny = !!s.tiny;
+    const bentoOn = s.layout === 'padrao';
+    const panelShown = bentoOn || showAj || showBib;
+    const railOn = s.layout !== 'mini';
+    const colW = { hero: 'minmax(0, 1fr)', bento: s.bentoW + 'px' };
+    const visCols = s.cols.filter((k) => k === 'hero' || panelShown);
+    const appCols = (railOn ? '72px ' : '') + visCols.map((k) => colW[k]).join(' ');
+    const base = railOn ? 2 : 1;
+    const heroCol = String(base + visCols.indexOf('hero'));
+    const bentoCol = panelShown ? String(base + visCols.indexOf('bento')) : String(base);
+    const spanCol = base + ' / -1';
+    const enLvl = vazio ? 0 : s.lbl === 'Intensa' ? 2 : s.lbl === 'Agitada' ? 1 : 0;
+    const drawerMode = narrow && !tiny;
+    const panelOpen = drawerMode && (s.panelDrawer || showAj);
+    const panelVisible = drawerMode ? true : panelShown;
+    const BC = Component.BRAND_COLORS;
+    const rootCls = ['frame', 'lay-' + s.layout, 'skin-' + s.skin, 'en-' + enLvl, s.editing ? 'editing' : '', s.full ? 'full' : '', s.drawer ? 'drawer' : '', s.drag ? 'dragging' : '', s.mini ? 'is-mini' : '', panelOpen ? 'panel-open' : ''].filter(Boolean).join(' ');
+    const pages = { inicio: ['Início', I.home], biblioteca: ['Biblioteca', I.lib], loja: ['Loja', I.store], stats: ['Estatísticas', I.stats], ajustes: ['Ajustes', I.sliders] };
+    const pg = pages[activeTela] || pages.inicio;
+    const dotIco = (on, d, df) => { const dp = on ? Component.dotPath(d) : ''; return { icon: on ? (dp || df || d) : d, cls: on ? (dp ? 'ico ico-24 ico-dots' : 'ico ico-24 ico-fill') : 'ico ico-24' }; };
+
+    /* barra de ícones: o ativo vira pontos */
+    const navDefs = [{ k: 'inicio', label: 'Início', icon: I.home, iconF: I.homeF }, { k: 'biblioteca', label: 'Biblioteca', icon: I.lib, iconF: I.libF }, { k: 'loja', label: 'Loja', icon: I.store, iconF: I.storeF }];
+    if (s.installed.lastfm) navDefs.push({ k: 'stats', label: 'Estatísticas', icon: I.stats, iconF: I.statsF, isNew: !this.statsSeen });
+    const navItems = navDefs.map((n) => {
+      const on = n.k === activeTela && !s.editing;
+      const di = dotIco(on, n.icon, n.iconF);
+      return { label: n.label, icon: di.icon, icoCls: di.cls, isNew: !!n.isNew, cls: 'rail-it' + (on ? ' on' : ''), cur: on ? 'page' : 'false', click: () => (n.k === 'inicio' ? this.closeSheet() : this.openSheet(n.k)) };
+    });
+    const ajOn = showAj && !s.closing;
+    const editDi = dotIco(s.editing, I.grid), ajDi = dotIco(ajOn, I.sliders);
+
+    /* fontes */
+    const srcDefs = [
+      { k: 'spotify', name: 'Spotify', brand: BR.spotify, color: BC.spotify, st: 'Ouvindo só este app' },
+      { k: 'sistema', name: 'Som do sistema', icon: I.wave, st: 'Ouvindo todos os apps' },
+      { k: 'arquivos', name: 'Arquivos locais', icon: I.folder, st: this.tracks.lib.length + ' faixas pré-analisadas' },
+    ];
+    Component.ESC_MODS.forEach((m) => { if (m.k !== 'spotify' && s.installed[m.k]) srcDefs.push({ k: m.k, name: m.name, brand: BR[m.brand], color: BC[m.brand], st: 'Fechado', dim: true }); });
+    const curSrc = vazio ? null : srcDefs.find((d) => d.k === (arquivo ? 'arquivos' : s.src));
+    const srcItems = srcDefs.map((d) => {
+      const on = curSrc && curSrc.k === d.k;
+      return { name: d.name, st: d.st, brand: d.brand || '', color: d.color || '', icon: d.icon || '', isBrand: !!d.brand, isIcon: !d.brand, on: !!on, cls: 'pop-it' + (d.dim ? ' dim' : ''), click: () => this.pickSource(d.k, d.name) };
+    });
+    let srcName, srcBrand = '', srcIcon = '', srcColor = '';
+    if (vazio) { srcName = 'Nada tocando'; srcIcon = I.headphones; }
+    else if (arquivo) { srcName = 'Arquivo local'; srcIcon = I.folder; }
+    else if (s.src === 'sistema') { srcName = 'Som do sistema'; srcIcon = I.wave; }
+    else { srcName = 'Spotify'; srcBrand = BR.spotify; srcColor = BC.spotify; }
+    const srcLive = playingNow && !arquivo;
+    const npTitle = vazio ? 'Nada tocando' : tr.title;
+    const npSub = vazio ? 'Toque em qualquer app' : tr.artist;
+    const npLabel = vazio ? 'Nada tocando. Abrir as fontes' : tr.title + ', de ' + tr.artist + ', em ' + srcName + '. Abrir as fontes';
+
+    /* painel: módulos */
+    const E = s.E;
+    let histItems;
+    if (arquivo) {
+      const L = this.tracks.lib, i = L.findIndex((t) => t.id === s.track);
+      histItems = [1, 2, 3].map((k) => L[(i + k) % L.length]).map((t) => ({ title: t.title, artist: t.artist, cover: CV[t.cover], right: t.bpm ? t.bpm + ' BPM' : 'Sem pulso', canPlay: true, play: () => this.playTrack(t.id), playLabel: 'Tocar ' + t.title }));
+    } else if (!vazio) histItems = s.escHist.slice(0, 3).map((h) => ({ title: h.title, artist: h.artist, cover: CV[h.cover], right: h.ago, canPlay: false, play: null, playLabel: '' }));
+    else histItems = [];
+    const beats = [0, 1, 2, 3].map((i) => ({ cls: (i === s.beatIdx ? 'on' : '') + (i === 0 ? ' first' : '') }));
+    const hist = s.enHist && s.enHist.length ? s.enHist : [];
+    const enCols = [];
+    for (let i = 0; i < 16; i++) {
+      const v = hist[hist.length - 16 + i] || 0;
+      const k = vazio ? 0 : Math.max(1, Math.min(5, Math.round(Math.pow(v, 1.2) * 5 + 0.2)));
+      const dots = [];
+      for (let j = 0; j < 5; j++) dots.push({ cls: j < k ? 'on' : '' });
+      enCols.push({ cls: 'en-col lv' + (v < 0.43 ? 0 : v < 0.83 ? 1 : 2) + (i === 15 ? ' now' : ''), dots: dots });
+    }
+    const SP = Component.SPANS, MC = Component.MOD_CLS;
+    const mo = {}, modCls = {}, dt = {};
+    Object.keys(SP).forEach((k) => {
+      const i = s.mods.indexOf(k);
+      mo[k] = i >= 0 ? i + 1 : 99;
+      modCls[k] = 'mod m-' + MC[k] + (SP[k] === 2 ? ' span2' : '') + (s.drag && s.drag.id === k ? ' lift' : '');
+      dt[k] = !!(s.drag && s.drag.target === k);
+    });
+    const bpmDigits = (tr.bpm && !vazio ? String(tr.bpm) : '').split('').map((d) => ({ ty: (-Number(d)) + 'em' }));
+
+    /* estrutura da faixa: no Modo Escuta as seções aparecem enquanto toca */
+    let stSegs = [], stName = 'Nada tocando', stRange = '', stRight = '';
+    if (!vazio) {
+      const t = s.tNow, cur = Component.sectionAt(tr, t);
+      tr.secs.forEach((sec) => {
+        if (escuta && sec.a > t) return;
+        const isCur = sec === cur, past = !isCur && t >= sec.b;
+        const b = escuta && isCur ? t : sec.b;
+        const p = isCur ? (escuta ? 1 : (t - sec.a) / Math.max(0.001, sec.b - sec.a)) : past ? 1 : 0;
+        stSegs.push({ cls: 'st-seg k-' + sec.k + (isCur ? ' cur' : past ? ' past' : ''), w: Math.max(0.6, b - sec.a).toFixed(2), p: Math.max(0, Math.min(1, p)).toFixed(3) });
+      });
+      if (escuta && tr.dur - t > 0.5) stSegs.push({ cls: 'st-seg unk', w: (tr.dur - t).toFixed(2), p: '0' });
+      stName = Component.SEC_NOME[cur.k];
+      stRange = escuta ? 'desde ' + fmt(cur.a) : fmt(cur.a) + ' a ' + fmt(cur.b);
+      if (escuta) stRight = 'Ao vivo';
+      else {
+        const nd = tr.drops.find((d) => d.t > t + 0.2);
+        const left = nd ? nd.t - t : 0;
+        stRight = nd ? 'Drop em ' + (left < 60 ? Math.ceil(left) + ' s' : fmt(left)) : 'Sem drop pela frente';
+      }
+    }
+
+    /* Biblioteca e detalhe no painel */
+    let libRows = [], det = null;
+    const q = Component.norm(s.bibQuery.trim());
+    const selId = s.bibSel || (arquivo ? s.track : this.tracks.lib[0].id);
+    if (showBib) {
+      const L = this.tracks.lib;
+      libRows = L.filter((t) => !q || Component.norm(t.title + ' ' + t.artist + ' ' + t.genre).indexOf(q) >= 0).map((t) => {
+        const playing = arquivo && s.track === t.id, isSel = t.id === selId, n = L.indexOf(t) + 1;
+        return { n: String(n), title: t.title, artist: t.artist, genre: t.genre, bpm: t.bpm ? String(t.bpm) : '—', lic: t.lic, cover: CV[t.cover], cls: 'lib-r' + (isSel ? ' sel' : '') + (playing ? ' playing' : ''), isSel: isSel ? 'true' : 'false', playing: playing, p10: (t.p[0] * 100).toFixed(1), span: ((t.p[2] - t.p[0]) * 100).toFixed(1), p50: (t.p[1] * 100).toFixed(1), rngTitle: 'Energia: p10 ' + Component.dec(t.p[0]) + ', mediana ' + Component.dec(t.p[1]) + ', p90 ' + Component.dec(t.p[2]), sel: () => this.selTrack(t.id), play: () => this.playTrack(t.id), playLabel: 'Tocar ' + t.title };
+      });
+      const t = this.tracks.byId[selId] || L[0];
+      const isCurTrack = arquivo && s.track === t.id;
+      const d0 = t.drops[0];
+      det = {
+        title: t.title, artist: t.artist, cover: CV[t.cover], genre: t.genre, dur: fmt(t.dur), lic: t.lic, src: t.src || '', hasSrc: !!t.src, nSecs: String(t.secs.length),
+        bpm: t.bpm ? t.bpm + ' BPM' : 'Sem pulso', energy: 'Energia ' + Component.dec(t.p[1]), drop: d0 ? 'Drop em ' + fmt(d0.t) : 'Sem drop',
+        isPlaying: isCurTrack && s.playing, notPlaying: !(isCurTrack && s.playing),
+        btnCls: 'btn ' + (isCurTrack ? 'btn-sec' : 'btn-pri'), btnLabel: isCurTrack ? (s.playing ? 'Tocando' : 'Continuar') : 'Tocar',
+        play: () => (isCurTrack ? this.h.togglePlay() : this.playTrack(t.id)),
+      };
+    }
+
+    /* Loja */
+    let lojaTabs = [], escCards = [], themeCards = [], skinCards = [], layoutCards = [], packCards = [];
+    let lfm = { cls: '', click: null, disabled: false, busy: false, done: false, idle: true, label: '', ringOff: '37.7' };
+    const LT = [['modulos', 'Módulos', 7], ['temas', 'Temas', 4], ['skins', 'Skins', 2], ['layouts', 'Layouts', 3], ['pacotes', 'Pacotes', 2]];
+    const ring = (busy) => (37.7 * (1 - (busy === 'Baixando' ? 0.45 : busy === 'Conferindo' ? 0.85 : 0))).toFixed(1);
+    const btnState = (k, idleLabel) => {
+      const inst = !!s.installed[k], busy = s.installing[k];
+      return { busy: !!busy, done: inst && !busy, idle: !inst && !busy, disabled: inst || !!busy, ringOff: ring(busy), cls: 'btn ' + (inst ? 'btn-ok' : busy ? 'btn-sec busy' : 'btn-pri'), label: busy ? busy + '…' : inst ? 'Instalado' : idleLabel, click: () => this.install(k) };
+    };
+    const hasClock = s.mods.indexOf('relogio') >= 0;
+    let clockBtn = { cls: '', click: null, done: false, label: '' };
+    if (showLoja) {
+      lojaTabs = LT.map((x) => ({ label: x[1], n: String(x[2]), on: s.lojaTab === x[0], cls: s.lojaTab === x[0] ? 'on' : '', click: () => this.setState({ lojaTab: x[0] }) }));
+      const lb = btnState('lastfm', 'Instalar');
+      lfm = Object.assign(lb, { cls: lb.cls + ' lg' });
+      escCards = Component.ESC_MODS.map((m) => {
+        const b = btnState(m.k, 'Instalar');
+        const holding = s.hold === 'rm:' + m.k;
+        const start = () => this.holdStart('rm:' + m.k, () => this.uninstall(m.k));
+        return { name: m.name, desc: m.desc, brand: BR[m.brand], color: BC[m.brand], busy: b.busy, done: b.done, disabled: b.disabled, ringOff: b.ringOff, btnCls: b.cls + ' sm', btnLabel: b.label, click: b.click, canRemove: b.done, rmCls: 'btn btn-sec sm hold danger' + (holding ? ' holding' : ''), rmLabel: holding ? 'Segure…' : 'Remover', rmDown: (e) => { if (e && e.button) return; start(); }, rmKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); start(); } } };
+      });
+      clockBtn = { cls: 'btn sm ' + (hasClock ? 'btn-ok' : 'btn-pri'), done: hasClock, label: hasClock ? 'No painel' : 'Adicionar', click: () => this.toggleClock() };
+      const TH = Component.THEMES;
+      const pick = (on) => ({ cls: 'pick' + (on ? ' on' : ''), on: on, badge: on ? 'Em uso' : 'Aplicar', badgeCls: 'badge' + (on ? ' on' : '') });
+      themeCards = Component.TEMAS.map((k) => {
+        const has = k !== 'mono' || s.themes.mono, busy = s.installing[k], on = s.tema === k;
+        const badge = on ? 'Em uso' : busy ? 'Baixando…' : has ? 'Aplicar' : 'Baixar';
+        return Object.assign(pick(on), { name: TH[k].name, meta: TH[k].meta, wall: TH[k].wall, tpCls: 'tp blocos t-' + k, badge: badge, cells: [{ cls: 'tp-rail', bg: '' }, { cls: 'tp-top', bg: '' }, { cls: 'tp-vis', bg: '' }, { cls: 'tp-pan', bg: '' }, { cls: 'tp-bar', bg: TH[k].dock }], click: () => (has ? this.setTheme(k) : this.installTheme(k)) });
+      });
+      const five = [{ cls: 'tp-rail' }, { cls: 'tp-top' }, { cls: 'tp-vis' }, { cls: 'tp-pan' }, { cls: 'tp-bar' }];
+      skinCards = [['blocos', 'Blocos', 'Moldura preta, palco e painel separados por filete'], ['imersiva', 'Imersiva', 'O visual vira o fundo e os painéis viram vidro']].map((x) => Object.assign({ name: x[1], meta: x[2], prev: 'tp r169 ' + x[0], cells: five, click: () => this.setState({ skin: x[0] }) }, pick(s.skin === x[0])));
+      layoutCards = [['padrao', 'Padrão', 'Visual e painel', 'tp blocos', five], ['foco', 'Foco', 'Só o visual e o dock', 'tp foco', [{ cls: 'tp-rail' }, { cls: 'tp-top' }, { cls: 'tp-vis' }, { cls: 'tp-bar' }]], ['mini', 'Enxuto', 'Sem a barra de ícones', 'tp mini', [{ cls: 'tp-vis' }, { cls: 'tp-bar' }]]].map((x) => Object.assign({ name: x[1], meta: x[2], prev: x[3], cells: x[4], click: () => this.setState({ layout: x[0] }) }, pick(s.layout === x[0])));
+      packCards = [
+        { name: 'Noite completo', meta: 'Noite, Blocos e Padrão', color: '#3d7bff', prev: 'tp r169 blocos', set: { tema: 'noite', skin: 'blocos', layout: 'padrao' } },
+        { name: 'Vidro escuro', meta: 'Grafite, Imersiva e Foco', color: '#b9c3d6', prev: 'tp r169 imersiva', set: { tema: 'grafite', skin: 'imersiva', layout: 'foco' } },
+      ].map((p) => {
+        const on = s.tema === p.set.tema && s.skin === p.set.skin && s.layout === p.set.layout;
+        return { name: p.name, meta: p.meta, color: p.color, prev: p.prev, cells: five, on: on, cls: 'pick stacked' + (on ? ' on' : ''), badge: on ? 'Em uso' : 'Aplicar', badgeCls: 'badge' + (on ? ' on' : ''), click: () => { this.setState(p.set); this.toastMsg('Pacote ' + p.name + ' aplicado', 'Tema, skin e layout trocados de uma vez.'); } };
+      });
+    }
+
+    /* Ajustes no painel */
+    let ajTabs = [], presets = [], temaSeg = [], skinSeg = [], layoutSeg = [], shortcuts = [];
+    const AT = [['visual', 'Visual'], ['aparencia', 'Aparência'], ['atalhos', 'Atalhos']];
+    const ajIdx = AT.findIndex((x) => x[0] === s.ajTab);
+    const themesAv = this.themesAvail();
+    if (showAj) {
+      ajTabs = AT.map((x) => ({ label: x[1], on: s.ajTab === x[0], cls: s.ajTab === x[0] ? 'on' : '', click: () => this.setState({ ajTab: x[0] }) }));
+      presets = Component.PRESETS.map((p) => ({ name: p.name, a: p.a, b: p.b, cls: 'pair' + (s.preset === p.id ? ' on' : ''), click: () => this.setState({ colA: p.a, colB: p.b, preset: p.id }) }));
+      const seg = (list, cur, fn) => list.map((x) => ({ label: x[1], cls: cur === x[0] ? 'on' : '', click: () => fn(x[0]) }));
+      temaSeg = seg(themesAv.map((k) => [k, k === 'mono' ? 'Mono' : Component.TEMA_NOME[k]]), s.tema, (k) => this.setTheme(k));
+      skinSeg = seg([['blocos', 'Blocos'], ['imersiva', 'Imersiva']], s.skin, (k) => this.setState({ skin: k }));
+      layoutSeg = seg([['padrao', 'Padrão'], ['foco', 'Foco'], ['mini', 'Enxuto']], s.layout, (k) => this.setState({ layout: k }));
+      shortcuts = [['Tocar ou pausar', ['Espaço']], ['Paleta de comandos', ['Ctrl', 'K']], ['Tela cheia', ['F']], ['Mini player', ['M']], ['Editar o layout', ['E']], ['Trocar o tema', ['T']], ['Trocar a skin', ['S']], ['Desfazer no modo edição', ['Ctrl', 'Z']], ['Fechar ou sair', ['Esc']]].map((x) => ({ label: x[0], keys: x[1].map((k) => ({ k: k })) }));
+    }
+    const syncPct = (s.sync + 250) / 5;
+
+    let heatRows = [], tops = [];
+    if (showStats && s.lfmUser) {
+      heatRows = Component.DIAS_C.map((d, di) => ({ day: d, cells: Array.from({ length: 24 }, (_, h) => ({ o: Component.heat(di, h) })) }));
+      tops = [['Lume', 128, 'orbit'], ['Tremor', 96, 'glow'], ['Orla', 81, 'scan'], ['Coletivo Sal', 77, 'silk'], ['Ana Fiori', 64, 'contour']].map((x) => ({ name: x[0], plays: String(x[1]), w: Math.round(x[1] / 128 * 100), cover: CV[x[2]] }));
+    }
+
+    let palEntries = [];
+    let palEmpty = false;
+    if (s.palOpen) {
+      const items = this.paletteItems();
+      this.palItems = items;
+      const idx = Math.min(s.palIdx, Math.max(0, items.length - 1));
+      let g = null;
+      items.forEach((it, i) => {
+        if (it.grp !== g) { g = it.grp; palEntries.push({ isHead: true, isItem: false, label: g, hint: '', id: '', icon: '', icoCls: 'ico', hasKbd: false, kbd: '', cls: '', run: null, hover: null }); }
+        palEntries.push({ isHead: false, isItem: true, label: it.label, hint: it.hint || '', id: it.id, icon: it.icon, icoCls: it.fill ? 'ico ico-fill' : 'ico', hasKbd: !!it.kbd, kbd: it.kbd || '', cls: 'pal-it' + (i === idx ? ' on' : ''), run: () => this.runPal(it), hover: () => { if (this.state.palIdx !== i) this.setState({ palIdx: i }); } });
+      });
+      palEmpty = items.length === 0;
+    }
+
+    const toast = s.toast;
+    const MN = Component.MOD_NOME;
+    const prog = vazio ? 0 : Math.max(0, Math.min(1, s.tNow / tr.dur));
+    const eqH = s.eqH || [4, 4, 4];
+    const holdingReset = s.hold === 'reset';
+
+    return Object.assign({}, H, {
+      uid: this.uid, rootRef: this.rootRef, volRef: this.volRef, toastRef: this.toastRef, ic: I, br: BR, mark: Component.MARK,
+      rootCls: rootCls, tema: s.tema, tone: s.tone, toneSoft: s.toneSoft, appCols: appCols, spanCol: spanCol, heroCol: heroCol, bentoCol: bentoCol,
+      railCls: railOn ? '' : 'is-hidden',
+      notEditing: !s.editing, editing: s.editing, noUndo: s.undoN === 0,
+      holdResetCls: 'btn btn-sec sm hold' + (holdingReset ? ' holding' : ''), holdResetLabel: holdingReset ? 'Segure…' : 'Restaurar',
+      hasPage: activeTela !== 'inicio' && !s.editing, pageName: pg[0], pageIcon: pg[1], navItems: navItems,
+      editRailCls: 'rail-it' + (s.editing ? ' on' : ''), editIcon: editDi.icon, editIcoCls: editDi.cls.replace('ico-24', 'ico-22'),
+      ajRailCls: 'rail-it' + (ajOn ? ' on' : ''), ajIcon: ajDi.icon, ajIcoCls: ajDi.cls.replace('ico-24', 'ico-22'),
+      pinProfCls: 'rail-it' + (escuta && s.src === 'spotify' ? ' pinned-on' : ''), pinSkinCls: 'rail-it' + (s.skin === 'imersiva' ? ' pinned-on' : ''), isImersiva: s.skin === 'imersiva',
+      noGL: s.noGL, hasTrack: !vazio, isVazio: vazio, isArquivo: arquivo, tfx: s.tfx,
+      heroSrc: srcName, srcIsBrand: !!srcBrand, srcIsIcon: !srcBrand, srcBrand: srcBrand, srcIcon: srcIcon, srcColor: srcColor || 'var(--fg)', srcLive: srcLive,
+      np: { title: tr.title, artist: tr.artist, cover: CV[tr.cover] }, npTitle: npTitle, npSub: npSub, npLabel: npLabel,
+      showBib: showBib, showLoja: showLoja, showStats: showStats, showAj: showAj,
+      sheetCls: 'sheet' + (s.closing ? ' out' : ''), sheetOY: String(Component.NAV_Y[s.tela] || 24),
+      panelCls: 'tile panel' + (panelVisible ? '' : ' is-hidden'), panelLabel: showAj ? 'Ajustes' : showBib ? 'Detalhe da faixa' : 'Módulos',
+      pnMods: !showAj && !showBib, pnAj: showAj, pnDet: !showAj && showBib, pnCls: 'pn' + (s.closing ? ' out' : ''),
+      mo: mo, modCls: modCls, dt: dt, dtHero: !!(s.drag && s.drag.target === 'hero'), dtBento: !!(s.drag && s.drag.target === 'bento'),
+      bentoRz: 'rz ' + (s.cols[0] === 'hero' ? 'l' : 'r') + (s.rz ? ' drag' : ''),
+      hasPulse: !vazio && tr.bpm > 0, noPulse: vazio || !tr.bpm, noPulseTxt: vazio ? 'Esperando uma música.' : 'Sem pulso marcado. O visual segue a energia.',
+      bpmTxt: tr.bpm ? String(tr.bpm) : '—', bpmDigits: bpmDigits, beats: beats,
+      lbl: vazio ? 'Silêncio' : s.lbl, energyTxt: vazio ? '' : Component.dec(Math.max(0, Math.min(1, E))), enCols: enCols,
+      stSegs: stSegs, stName: stName, stRange: stRange, stRight: stRight,
+      hasClock: hasClock, clock: s.clock, clockH: s.clock.slice(0, 2), clockM: s.clock.slice(3, 5), dateLong: s.dateLong, clockBtn: clockBtn,
+      qReactCls: 'qbtn' + (s.reactive ? ' on' : ''), qSafeCls: 'qbtn' + (s.safe ? ' on' : ''),
+      reactive: s.reactive, notReactive: !s.reactive, safe: s.safe,
+      reactDesc: s.reactive ? 'A cor acompanha a energia da música.' : 'A energia mexe na forma e na luz. O tom fica com as suas cores.',
+      histLabel: arquivo ? 'A seguir' : 'Nesta sessão', histIcon: arquivo ? I.queue : I.history, histCount: vazio ? '' : String(histItems.length), histItems: histItems, histEmpty: histItems.length === 0,
+      srcMenu: s.srcMenu, srcItems: srcItems,
+      noTrack: vazio, playing: playingNow, paused: !playingNow, playLabel: playingNow ? 'Pausar' : 'Tocar', playCls: 'play' + (playingNow ? ' is-playing' : ''),
+      ringOff: (144.5 * (1 - prog)).toFixed(1),
+      tTxt: vazio ? '–:––' : fmt(s.tNow), durTxt: vazio ? '–:––' : fmt(tr.dur),
+      showTip: !!s.mapTip, tipX: s.mapTip ? s.mapTip.x : 0, tipT: s.mapTip ? s.mapTip.t : '', tipL: s.mapTip ? s.mapTip.l : '',
+      bentoBtnCls: 'ib' + ((drawerMode ? panelOpen : bentoOn) ? ' on' : ''), bentoOn: drawerMode ? panelOpen : bentoOn, vol: s.vol,
+      volCls: 'vtrack' + (s.volDrag ? ' drag' : ''), volDrag: !!s.volDrag, volOrigin: s.volOver < 0 ? 'right' : 'left',
+      volXf: s.volOver ? 'scaleX(' + (1 + Component.rubber(Math.abs(s.volOver), 40) / 110).toFixed(4) + ')' : 'none',
+      fsCls: 'fs-ui' + (s.fsIdle ? ' idle' : ''), drawer: s.drawer,
+      libCount: String(this.tracks.lib.length), bibQuery: s.bibQuery, isFaixas: s.bibTab === 'faixas', isPastas: s.bibTab === 'pastas',
+      segFaixas: s.bibTab === 'faixas' ? 'on' : '', segPastas: s.bibTab === 'pastas' ? 'on' : '', bibSegI: s.bibTab === 'pastas' ? '1' : '0',
+      eqCls: 'eq' + (playingNow ? '' : ' paused'), eqA: eqH[0], eqB: eqH[1], eqC: eqH[2], libRows: libRows, libEmpty: showBib && libRows.length === 0, det: det || {},
+      lojaTabs: lojaTabs, lojaI: String(Math.max(0, LT.findIndex((x) => x[0] === s.lojaTab))), lojaModulos: s.lojaTab === 'modulos', lojaTemas: s.lojaTab === 'temas', lojaSkins: s.lojaTab === 'skins', lojaLayouts: s.lojaTab === 'layouts', lojaPacotes: s.lojaTab === 'pacotes',
+      lfm: lfm, escCards: escCards, themeCards: themeCards, skinCards: skinCards, layoutCards: layoutCards, packCards: packCards,
+      ajTabs: ajTabs, ajI: ajIdx < 0 ? '0; opacity: 0' : String(ajIdx), ajVisual: s.ajTab === 'visual', ajAparencia: s.ajTab === 'aparencia', ajAtalhos: s.ajTab === 'atalhos', ajSobre: s.ajTab === 'sobre',
+      aboutBtnCls: 'ib' + (s.ajTab === 'sobre' ? ' on' : ''),
+      colA: s.colA, colB: s.colB, colAU: s.colA.toUpperCase(), colBU: s.colB.toUpperCase(), presets: presets,
+      flashTxt: s.flashRate.toFixed(1).replace('.', ','), flashPct: Math.min(100, s.flashRate / 4 * 100).toFixed(1),
+      sync: s.sync, syncPct: syncPct, syncFillL: Math.min(50, syncPct), syncFillW: Math.abs(syncPct - 50),
+      syncTxt: s.sync === 0 ? '0 ms' : (s.sync > 0 ? '+' : '−') + Math.abs(s.sync) + ' ms',
+      temaSeg: temaSeg, temaI: String(Math.max(0, themesAv.indexOf(s.tema))), temaN: String(themesAv.length),
+      skinSeg: skinSeg, skinI: s.skin === 'imersiva' ? '1' : '0', layoutSeg: layoutSeg, layoutI: String(Math.max(0, ['padrao', 'foco', 'mini'].indexOf(s.layout))), shortcuts: shortcuts,
+      lfmUser: !!s.lfmUser, lfmNoUser: !s.lfmUser, heatRows: heatRows, tops: tops, sealPath: Component.SEAL,
+      palOpen: s.palOpen, palQuery: s.palQuery, palEntries: palEntries, palEmpty: palEmpty,
+      showPerm: s.permFor === 'lastfm',
+      showToast: !!toast, toastTitle: toast ? toast.title : '', toastText: toast ? toast.text : '', toastHasAction: !!(toast && toast.action), toastActionLabel: toast && toast.action ? toast.action : '',
+      dragging: !!s.drag, dragX: s.drag ? Math.round(s.drag.x) : 0, dragY: s.drag ? Math.round(s.drag.y) : 0, dragLabel: s.drag ? MN[s.drag.id] : '',
+    });
+  }
+}
+</script>
+</body>
+</html>

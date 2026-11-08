@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Loja</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&amp;family=Doto:wght@500..800&amp;family=Fragment+Mono&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 100%; height: 100vh; background: #000; font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: #ececec">
+<dc-import name="Main" tela="loja" momento="20" estatico="true" hint-size="100%,100vh"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
