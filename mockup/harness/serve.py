@@ -50,5 +50,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    print(f'Prévia do mockup em http://127.0.0.1:{PORT}/harness/preview.html?f=Main.dc.html')
+    print(f'Prévia: http://127.0.0.1:{PORT}/harness/preview.html?f=Main.dc.html')
+    print(f'Pranchas (dc-import resolvido): ?f=Celular.dc.html  ?f=Mini.dc.html  ?f=Edicao.dc.html')
+    print(f'Tamanho: &w=390&h=844  ou  /harness/frame.html?f=Celular.dc.html')
     http.server.ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()

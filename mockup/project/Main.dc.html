@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&amp;family=Doto:wght@500..800&amp;family=Fragment+Mono&amp;display=swap">
 <style>body{margin:0}</style>
 </helmet>
-<div class="{{ rootCls }}" ref="{{ rootRef }}" data-theme="{{ tema }}" data-root="{{ uid }}" tabindex="0" onKeyDown="{{ onKey }}" onPointerMove="{{ onMove }}" style="font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: var(--fg); --tone: {{ tone }}; --tone-soft: {{ toneSoft }}">
+<div class="{{ rootCls }}" ref="{{ rootRef }}" data-theme="{{ tema }}" data-root="{{ uid }}" tabindex="0" onKeyDown="{{ onKey }}" onPointerMove="{{ onMove }}" style="font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif; color: var(--fg); --tone: {{ tone }}; --tone-soft: {{ toneSoft }}; --scrim-a: {{ scrimA }}; --scrim-b: {{ scrimB }}">
 <div class="app" style="grid-template-columns: {{ appCols }}">
 
 <nav class="rail {{ railCls }}" aria-label="Navegação">
@@ -28,8 +28,8 @@
 <button class="{{ pinSkinCls }}" aria-label="Fixado: skin Imersiva" aria-pressed="{{ isImersiva }}" data-tip="Skin Imersiva" data-tip-pos="right" onClick="{{ pinSkin }}"><span class="pin-skin"></span></button>
 </div>
 <div class="rail-end">
-<button class="{{ editRailCls }}" aria-label="Editar layout (E)" aria-pressed="{{ editing }}" data-tip="Editar layout (E)" data-tip-pos="right" onClick="{{ toggleEdit }}"><svg class="{{ editIcoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ editIcon }}"></path></svg></button>
-<button class="{{ ajRailCls }}" aria-label="Ajustes" data-tip="Ajustes" data-tip-pos="right" onClick="{{ openAjustesRail }}"><svg class="{{ ajIcoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ajIcon }}"></path></svg></button>
+<button class="{{ editRailCls }}" aria-label="Editar layout (E)" aria-pressed="{{ editing }}" data-tip="Editar layout (E)" data-tip-pos="up" onClick="{{ toggleEdit }}"><svg class="{{ editIcoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ editIcon }}"></path></svg></button>
+<button class="{{ ajRailCls }}" aria-label="Ajustes" data-tip="Ajustes" data-tip-pos="up" onClick="{{ openAjustesRail }}"><svg class="{{ ajIcoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ajIcon }}"></path></svg></button>
 </div>
 </nav>
 
@@ -47,8 +47,9 @@
 <button class="btn btn-pri sm" onClick="{{ toggleEdit }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.check }}"></path></svg>Concluir</button>
 </div>
 </sc-if>
-<div class="top-r">
+<div class="top-actions">
 <button class="ib sm show-sm" aria-label="Buscar ou executar um comando" onClick="{{ openPalette }}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.search }}"></path></svg></button>
+<!-- Caption decorativa do mockup; no app real = caption nativo (GPUI/WinUI). -->
 <div class="win" aria-hidden="true">
 <span><svg class="ico" viewBox="0 0 24 24"><path d="{{ ic.min }}"></path></svg></span>
 <span><svg class="ico" viewBox="0 0 24 24"><path d="{{ ic.max }}"></path></svg></span>
@@ -200,7 +201,7 @@
 </div>
 <div class="stats-grid">
 <div><div class="sec"><h3 class="t-head">Quando você ouve</h3></div><div class="heat"><sc-for list="{{ heatRows }}" as="hr" hint-placeholder-count="7"><div class="heat-r"><span>{{ hr.day }}</span><sc-for list="{{ hr.cells }}" as="hc" hint-placeholder-count="24"><i class="heat-c" style="opacity: {{ hc.o }}"></i></sc-for></div></sc-for></div><div class="heat-x"><span></span><span>0h</span><span>6h</span><span>12h</span><span>18h</span></div></div>
-<div><div class="sec"><h3 class="t-head">Quem você mais ouviu</h3></div><div class="tops"><sc-for list="{{ tops }}" as="tp" hint-placeholder-count="5"><div class="top-r"><img src="{{ tp.cover }}" alt=""><span style="min-width: 0"><span class="row-t" style="display: block">{{ tp.name }}</span><span class="top-bar" style="width: {{ tp.w }}%"></span></span><span class="micro">{{ tp.plays }} plays</span></div></sc-for></div></div>
+<div><div class="sec"><h3 class="t-head">Quem você mais ouviu</h3></div><div class="tops"><sc-for list="{{ tops }}" as="tp" hint-placeholder-count="5"><div class="tops-row"><img src="{{ tp.cover }}" alt=""><span style="min-width: 0"><span class="row-t" style="display: block">{{ tp.name }}</span><span class="top-bar" style="width: {{ tp.w }}%"></span></span><span class="micro">{{ tp.plays }} plays</span></div></sc-for></div></div>
 </div>
 </sc-if>
 </div>
@@ -214,6 +215,7 @@
 <aside class="{{ panelCls }}" data-tile="bento" style="grid-column: {{ bentoCol }}" aria-label="{{ panelLabel }}">
 <sc-if value="{{ pnMods }}" hint-placeholder-val="{{ true }}">
 <div class="mods fade-y">
+<sc-if value="{{ showEditCue }}" hint-placeholder-val="{{ false }}"><button class="edit-cue" onClick="{{ toggleEdit }}" aria-label="Personalizar o layout (E)"><svg class="ico ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grid }}"></path></svg><span>Personalizar o layout</span><span class="kbd">E</span></button></sc-if>
 <section class="{{ modCls.ritmo }}" data-mod="ritmo" style="order: {{ mo.ritmo }}" aria-label="Ritmo">
 <div class="mod-h"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.metro }}"></path></svg>Ritmo<button class="ec-grip" aria-label="Arrastar o módulo Ritmo" onPointerDown="{{ gp.ritmo }}"><svg class="ico grip" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.grip }}"></path></svg></button></div>
 <div class="mod-body">
@@ -375,6 +377,12 @@
 </div>
 </div>
 </footer>
+
+<nav class="bnav" aria-label="Navegação principal">
+<sc-for list="{{ bnavItems }}" as="n" hint-placeholder-count="4">
+<button class="{{ n.cls }}" aria-label="{{ n.label }}" aria-current="{{ n.cur }}" onClick="{{ n.click }}"><svg class="{{ n.icoCls }}" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ n.icon }}"></path></svg><span class="bnav-l">{{ n.label }}</span></button>
+</sc-for>
+</nav>
 </div>
 
 <div class="{{ fsCls }}">
@@ -387,7 +395,7 @@
 <button class="{{ playCls }}" aria-label="{{ playLabel }}" onClick="{{ togglePlay }}"><svg class="ico ico-fill i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg><svg class="ico ico-fill i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pause }}"></path></svg></button>
 <button class="ib" aria-label="Próxima" onClick="{{ next }}"><svg class="ico ico-fill ico-22" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.next }}"></path></svg></button>
 </div>
-<div class="timeline"><span class="time">{{ tTxt }}</span><span class="map" style="cursor: default"><canvas class="map-cv" data-map="fs"></canvas></span><span class="time end">{{ durTxt }}</span></div>
+<div class="timeline"><span class="time">{{ tTxt }}</span><span class="map map-static" aria-hidden="true"><canvas class="map-cv" data-map="fs"></canvas></span><span class="time end">{{ durTxt }}</span></div>
 </div>
 </div>
 
@@ -400,7 +408,7 @@
 <button class="ib sm" aria-label="Anterior" onClick="{{ prev }}" disabled="{{ noTrack }}"><svg class="ico ico-fill ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.prev }}"></path></svg></button>
 <button class="{{ playCls }}" aria-label="{{ playLabel }}" onClick="{{ togglePlay }}" disabled="{{ noTrack }}"><svg class="pring" viewBox="0 0 48 48" aria-hidden="true"><circle class="rb" cx="24" cy="24" r="23"></circle><circle class="rf" cx="24" cy="24" r="23" style="stroke-dashoffset: {{ ringOff }}"></circle></svg><svg class="ico ico-fill i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.play }}"></path></svg><svg class="ico ico-fill i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.pause }}"></path></svg></button>
 <button class="ib sm" aria-label="Próxima" onClick="{{ next }}" disabled="{{ noTrack }}"><svg class="ico ico-fill ico-18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ ic.next }}"></path></svg></button>
-<span class="map" style="cursor: default"><canvas class="map-cv" data-map="mini"></canvas></span>
+<span class="map map-static" aria-hidden="true"><canvas class="map-cv" data-map="mini"></canvas></span>
 </div>
 </div>
 </div>
@@ -408,6 +416,7 @@
 </div>
 
 <sc-if value="{{ drawer }}" hint-placeholder-val="{{ false }}"><button class="drawer-scrim" aria-label="Fechar o menu" onClick="{{ closeDrawer }}"></button></sc-if>
+<sc-if value="{{ showPanelScrim }}" hint-placeholder-val="{{ false }}"><button class="panel-scrim" aria-label="Fechar o painel" onClick="{{ closePanelDrawer }}"></button></sc-if>
 
 <sc-if value="{{ palOpen }}" hint-placeholder-val="{{ false }}">
 <div class="pal-wrap">
@@ -502,7 +511,7 @@ class Component extends DCLogic {
       escHist: Component.ESC_HIST.slice(),
       tNow: 0, E: 0.2, lbl: 'Calma', flashRate: 0, beatIdx: -1, enHist: [],
       clock: clk.clock, dateLong: clk.dateLong,
-      fsIdle: false, mapTip: null, noGL: false, undoN: 0,
+      fsIdle: false, mapTip: null, noGL: false, undoN: 0, keyNav: false, scrimA: '0.72', scrimB: '0.34',
     };
     this.t0 = Component.num(p.momento, cen === 'arquivo' ? 40 : 3);
     this.histStack = [];
@@ -1058,7 +1067,11 @@ class Component extends DCLogic {
   }
   toneStrings() {
     const T = (this.toneRGB || [0.067, 0.067, 0.075]).map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255));
-    return { tone: 'rgb(' + T.join(', ') + ')', toneSoft: 'rgba(' + T.join(', ') + ', .45)' };
+    const lum = (0.2126 * T[0] + 0.7152 * T[1] + 0.0722 * T[2]) / 255;
+    const E = this.sim ? this.sim.E : (this.state && this.state.E) || 0.2;
+    const a = Math.min(0.9, 0.58 + lum * 0.28 + E * 0.12);
+    const b = Math.min(0.55, 0.28 + lum * 0.18 + E * 0.08);
+    return { tone: 'rgb(' + T.join(', ') + ')', toneSoft: 'rgba(' + T.join(', ') + ', .45)', scrimA: a.toFixed(3), scrimB: b.toFixed(3) };
   }
   reducedMotion() { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } }
   /* 12. Um pulso por compasso no símbolo e no ponto de energia */
@@ -1533,6 +1546,10 @@ class Component extends DCLogic {
       if (s.narrow && !s.tiny) this.setState({ panelDrawer: !(s.panelDrawer || s.tela === 'ajustes'), tela: s.tela === 'ajustes' ? 'inicio' : s.tela });
       else this.setState({ layout: s.layout === 'padrao' ? 'foco' : 'padrao' });
     };
+    H.closePanelDrawer = () => {
+      if (this.state.tela === 'ajustes') this.closeSheet();
+      else this.setState({ panelDrawer: false });
+    };
     H.pinSpotify = () => this.pickSource('spotify', 'Spotify');
     H.pinSkin = () => this.cycleSkin();
     return H;
@@ -1544,11 +1561,17 @@ class Component extends DCLogic {
     if (t === 'stats') this.statsSeen = true;
     this.setState({ tela: t, closing: false, drawer: false, full: false, editing: false, srcMenu: false, mini: false });
   }
-  closeSheet() {
+  closeSheet(fromKey) {
     if (this.state.tela === 'inicio' || this.state.closing) return;
+    if (fromKey) this.armKeyNav();
     this.setState({ closing: true, drawer: false });
     clearTimeout(this.tClose);
     this.tClose = setTimeout(() => { if (this.alive) this.setState({ tela: 'inicio', closing: false }); }, 170);
+  }
+  armKeyNav() {
+    clearTimeout(this.tKeyNav);
+    this.setState({ keyNav: true });
+    this.tKeyNav = setTimeout(() => { if (this.alive) this.setState({ keyNav: false }); }, 240);
   }
   selTrack(id) {
     const s = this.state;
@@ -1569,13 +1592,14 @@ class Component extends DCLogic {
   }
   escape() {
     const s = this.state;
+    this.armKeyNav();
     if (s.permFor) this.setState({ permFor: null });
     else if (s.srcMenu) this.setState({ srcMenu: false });
     else if (s.drawer) this.setState({ drawer: false });
     else if (s.mini) this.toggleMini();
     else if (s.full) this.toggleFull();
     else if (s.editing) this.toggleEdit();
-    else if (s.tela !== 'inicio') this.closeSheet();
+    else if (s.tela !== 'inicio') this.closeSheet(true);
     else if (s.panelDrawer) this.setState({ panelDrawer: false });
     else if (s.toast) this.setState({ toast: null });
   }
@@ -1910,7 +1934,7 @@ class Component extends DCLogic {
     const panelOpen = drawerMode && (s.panelDrawer || showAj);
     const panelVisible = drawerMode ? true : panelShown;
     const BC = Component.BRAND_COLORS;
-    const rootCls = ['frame', 'lay-' + s.layout, 'skin-' + s.skin, 'en-' + enLvl, s.editing ? 'editing' : '', s.full ? 'full' : '', s.drawer ? 'drawer' : '', s.drag ? 'dragging' : '', s.mini ? 'is-mini' : '', panelOpen ? 'panel-open' : ''].filter(Boolean).join(' ');
+    const rootCls = ['frame', 'lay-' + s.layout, 'skin-' + s.skin, 'en-' + enLvl, s.editing ? 'editing' : '', s.full ? 'full' : '', s.drawer ? 'drawer' : '', s.drag ? 'dragging' : '', s.mini ? 'is-mini' : '', panelOpen ? 'panel-open' : '', s.keyNav ? 'key-nav' : ''].filter(Boolean).join(' ');
     const pages = { inicio: ['Início', I.home], biblioteca: ['Biblioteca', I.lib], loja: ['Loja', I.store], stats: ['Estatísticas', I.stats], ajustes: ['Ajustes', I.sliders] };
     const pg = pages[activeTela] || pages.inicio;
     const dotIco = (on, d, df) => { const dp = on ? Component.dotPath(d) : ''; return { icon: on ? (dp || df || d) : d, cls: on ? (dp ? 'ico ico-24 ico-dots' : 'ico ico-24 ico-fill') : 'ico ico-24' }; };
@@ -1925,6 +1949,11 @@ class Component extends DCLogic {
     });
     const ajOn = showAj && !s.closing;
     const editDi = dotIco(s.editing, I.grid), ajDi = dotIco(ajOn, I.sliders);
+    const bnavItems = navDefs.map((n) => {
+      const on = n.k === activeTela && !s.editing;
+      const di = dotIco(on, n.icon, n.iconF);
+      return { label: n.label, icon: di.icon, icoCls: (di.cls || '').replace('ico-24', 'ico-22'), cls: 'bnav-it' + (on ? ' on' : ''), cur: on ? 'page' : 'false', click: () => (n.k === 'inicio' ? this.closeSheet() : this.openSheet(n.k)) };
+    }).concat([{ label: 'Ajustes', icon: ajDi.icon, icoCls: (ajDi.cls || '').replace('ico-24', 'ico-22'), cls: 'bnav-it' + (ajOn ? ' on' : ''), cur: ajOn ? 'page' : 'false', click: () => (this.state.tela === 'ajustes' && !this.state.closing ? this.closeSheet() : this.openSheet('ajustes')) }]);
 
     /* fontes */
     const srcDefs = [
@@ -2105,9 +2134,10 @@ class Component extends DCLogic {
 
     return Object.assign({}, H, {
       uid: this.uid, rootRef: this.rootRef, volRef: this.volRef, toastRef: this.toastRef, ic: I, br: BR, mark: Component.MARK,
-      rootCls: rootCls, tema: s.tema, tone: s.tone, toneSoft: s.toneSoft, appCols: appCols, spanCol: spanCol, heroCol: heroCol, bentoCol: bentoCol,
+      rootCls: rootCls, tema: s.tema, tone: s.tone, toneSoft: s.toneSoft, scrimA: s.scrimA || '0.72', scrimB: s.scrimB || '0.34', appCols: appCols, spanCol: spanCol, heroCol: heroCol, bentoCol: bentoCol,
       railCls: railOn ? '' : 'is-hidden',
-      notEditing: !s.editing, editing: s.editing, noUndo: s.undoN === 0,
+      notEditing: !s.editing, editing: s.editing, noUndo: s.undoN === 0, showEditCue: !s.editing && activeTela === 'inicio' && !showAj && !showBib,
+      bnavItems: bnavItems,
       holdResetCls: 'btn btn-sec sm hold' + (holdingReset ? ' holding' : ''), holdResetLabel: holdingReset ? 'Segure…' : 'Restaurar',
       hasPage: activeTela !== 'inicio' && !s.editing, pageName: pg[0], pageIcon: pg[1], navItems: navItems,
       editRailCls: 'rail-it' + (s.editing ? ' on' : ''), editIcon: editDi.icon, editIcoCls: editDi.cls.replace('ico-24', 'ico-22'),
@@ -2139,7 +2169,8 @@ class Component extends DCLogic {
       bentoBtnCls: 'ib' + ((drawerMode ? panelOpen : bentoOn) ? ' on' : ''), bentoOn: drawerMode ? panelOpen : bentoOn, vol: s.vol,
       volCls: 'vtrack' + (s.volDrag ? ' drag' : ''), volDrag: !!s.volDrag, volOrigin: s.volOver < 0 ? 'right' : 'left',
       volXf: s.volOver ? 'scaleX(' + (1 + Component.rubber(Math.abs(s.volOver), 40) / 110).toFixed(4) + ')' : 'none',
-      fsCls: 'fs-ui' + (s.fsIdle ? ' idle' : ''), drawer: s.drawer,
+      fsCls: 'fs-ui' + (s.fsIdle ? ' idle' : ''), drawer: s.drawer, showPanelScrim: panelOpen,
+
       libCount: String(this.tracks.lib.length), bibQuery: s.bibQuery, isFaixas: s.bibTab === 'faixas', isPastas: s.bibTab === 'pastas',
       segFaixas: s.bibTab === 'faixas' ? 'on' : '', segPastas: s.bibTab === 'pastas' ? 'on' : '', bibSegI: s.bibTab === 'pastas' ? '1' : '0',
       eqCls: 'eq' + (playingNow ? '' : ' paused'), eqA: eqH[0], eqB: eqH[1], eqC: eqH[2], libRows: libRows, libEmpty: showBib && libRows.length === 0, det: det || {},

@@ -2,12 +2,13 @@
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&family=Doto:wght@500..800&family=Fragment+Mono&display=swap">
 <link rel="stylesheet" href="../project/app.css">
-<style>html,body{margin:0;background:#000;overflow:hidden} *,*::before,*::after{animation-duration:0s!important;animation-delay:0s!important;transition-duration:0s!important}</style>
+<style>html,body{margin:0;background:#000;overflow:hidden}</style>
 </head>
 <body>
 <div id="host"></div>
 <script>
 // Interpretador mínimo do formato .dc.html, só para conferência visual local.
+// Atualiza o DOM in-place (morph) para não destruir :hover a cada pushUI (~100 ms).
 if (/[?&]raf=timeout/.test(location.search)) window.requestAnimationFrame = function (f) { return setTimeout(function () { f(performance.now()); }, 16); };
 class DCLogic {
   constructor(p) { this.props = p || {}; this.state = {}; }
@@ -17,16 +18,46 @@ class DCLogic {
 </script>
 <script>
 (async function () {
+  try {
   const params = new URLSearchParams(location.search);
   const file = params.get('f') || 'Main.dc.html';
-  const src = await (await fetch('../project/' + file, { cache: 'no-store' })).text();
-  const doc = new DOMParser().parseFromString(src, 'text/html');
+  const camel = (k) => k.replace(/-([a-z])/g, (m, c) => c.toUpperCase());
+  const loadDoc = async (name) => new DOMParser().parseFromString(await (await fetch('../project/' + name, { cache: 'no-store' })).text(), 'text/html');
+  let doc = await loadDoc(file);
+  const props = {};
+  let previewW = +params.get('w') || 0, previewH = +params.get('h') || 0;
+  // Pranchas com <dc-import name="Main" …> → carrega Main + attrs + $preview
+  const imp = doc.querySelector('dc-import[name="Main"], dc-import[name=Main]');
+  if (imp) {
+    Array.from(imp.attributes).forEach((a) => {
+      if (a.name === 'name' || a.name === 'hint-size') return;
+      props[camel(a.name)] = a.value === '' ? 'true' : a.value;
+    });
+    try {
+      const dp = JSON.parse((doc.querySelector('script[data-dc-script]') || {}).getAttribute?.('data-props') || '{}');
+      if (dp.$preview) { previewW = previewW || +dp.$preview.width || 0; previewH = previewH || +dp.$preview.height || 0; }
+    } catch (e) { /* sem preview size */ }
+    doc = await loadDoc('Main.dc.html');
+  } else {
+    try {
+      const dp = JSON.parse((doc.querySelector('script[data-dc-script]') || {}).getAttribute?.('data-props') || '{}');
+      if (dp.$preview) { previewW = previewW || +dp.$preview.width || 0; previewH = previewH || +dp.$preview.height || 0; }
+    } catch (e) { /* ok */ }
+  }
   const code = doc.querySelector('script[data-dc-script]').textContent;
   (0, eval)(code + '\nwindow.__Component = Component;');
   const xdc = doc.querySelector('x-dc');
   const tpl = Array.from(xdc.children).find((n) => n.tagName.toLowerCase() !== 'helmet');
-  const props = {};
-  params.forEach((v, k) => { if (['f', 'w', 'h', 'name', 'wait'].indexOf(k) < 0) props[k.replace(/-([a-z])/g, (m, c) => c.toUpperCase())] = v; });
+  params.forEach((v, k) => { if (['f', 'w', 'h', 'name', 'wait'].indexOf(k) < 0) props[camel(k)] = v; });
+  if (previewW > 0 && previewH > 0) {
+    const host = document.getElementById('host');
+    document.documentElement.style.height = '100%';
+    document.body.style.cssText = 'margin:0;background:#111;overflow:auto;min-height:100%;display:flex;align-items:center;justify-content:center';
+    host.style.cssText = 'width:' + previewW + 'px;height:' + previewH + 'px;flex:none;overflow:hidden;position:relative;box-shadow:0 0 0 1px #222,0 24px 64px rgba(0,0,0,.55)';
+    const frameFit = document.createElement('style');
+    frameFit.textContent = '#host .frame{height:100%!important;min-height:0!important;max-height:100%}';
+    document.head.appendChild(frameFit);
+  }
   const C = window.__Component;
   if (C.COVERS) await Promise.all(Object.values(C.COVERS).map((u) => new Promise((ok) => { const im = new Image(); im.onload = im.onerror = ok; im.src = u; })));
   const comp = new C(props);
@@ -37,55 +68,239 @@ class DCLogic {
   const lit = (p) => (p === 'true' ? true : p === 'false' ? false : /^-?\d+(\.\d+)?$/.test(p) ? +p : undefined);
   const whole = (s) => { const m = /^\{\{\s*([^}]+?)\s*\}\}$/.exec(s); return m ? m[1] : null; };
   const evMap = { onclick: 'click', onpointerdown: 'pointerdown', onpointermove: 'pointermove', onpointerleave: 'pointerleave', onkeydown: 'keydown', onmouseenter: 'mouseenter', ondoubleclick: 'dblclick', onchange: 'input' };
-  function build(node, scope, out) {
-    if (node.nodeType === 3) { out.appendChild(document.createTextNode(evalStr(scope, node.nodeValue))); return; }
-    if (node.nodeType !== 1) return;
+  const BOOL_FALSE = new Set(['false', '0', 'null', 'undefined', '']);
+  const KEEP_SEL = 'canvas.gl, canvas[data-map="bar"], canvas[data-map="fs"], canvas[data-map="mini"]';
+
+  function bindHandlers(el, handlers) {
+    if (!el.__dcDispatch) {
+      el.__dcDispatch = Object.create(null);
+      el.__dcBound = Object.create(null);
+    }
+    const prev = el.__dcBound;
+    Object.keys(prev).forEach((type) => {
+      if (!(type in handlers)) {
+        el.removeEventListener(type, el.__dcDispatch[type]);
+        delete el.__dcDispatch[type];
+        delete prev[type];
+      }
+    });
+    Object.keys(handlers).forEach((type) => {
+      prev[type] = handlers[type];
+      if (!el.__dcDispatch[type]) {
+        el.__dcDispatch[type] = (e) => {
+          const fn = el.__dcBound && el.__dcBound[type];
+          if (typeof fn === 'function') fn(e);
+        };
+        el.addEventListener(type, el.__dcDispatch[type]);
+      }
+    });
+  }
+
+  function applyAttrs(el, attrs, handlers, isInput) {
+    attrs = attrs || Object.create(null);
+    handlers = handlers || Object.create(null);
+    const desired = Object.create(null);
+    Object.keys(attrs).forEach((name) => {
+      const val = attrs[name];
+      const lname = name.toLowerCase();
+      if (lname === 'disabled' || lname === 'checked' || lname === 'selected') {
+        if (val && val !== 'false') desired[lname] = '';
+        if (lname === 'checked' && isInput) el.checked = !!(val && val !== 'false');
+        return;
+      }
+      if (lname === 'value' && isInput) {
+        const s = val == null ? '' : String(val);
+        if (document.activeElement !== el && el.value !== s) el.value = s;
+        desired.value = s;
+        return;
+      }
+      if (lname === 'aria-current' || lname === 'aria-pressed' || lname === 'aria-selected' || lname === 'aria-checked' || lname === 'aria-expanded') {
+        if (val === false || val == null || BOOL_FALSE.has(String(val))) return;
+        desired[name] = String(val);
+        return;
+      }
+      if (val === false || val == null) return;
+      if (val === true) { desired[name] = ''; return; }
+      desired[name] = String(val);
+    });
+    Object.keys(desired).forEach((name) => {
+      if (el.getAttribute(name) !== desired[name]) el.setAttribute(name, desired[name]);
+    });
+    Array.from(el.attributes).forEach((a) => {
+      if (!(a.name in desired)) el.removeAttribute(a.name);
+    });
+    bindHandlers(el, handlers);
+  }
+
+  function vnodeFromDom(node, scope) {
+    if (node.nodeType === 3) return { type: 'text', text: evalStr(scope, node.nodeValue) };
+    if (node.nodeType !== 1) return null;
     const tag = node.tagName.toLowerCase();
-    if (tag === 'sc-if') { const p = whole(node.getAttribute('value')); const v = lit(p) !== undefined ? lit(p) : get(scope, p); if (v) node.childNodes.forEach((c) => build(c, scope, out)); return; }
-    if (tag === 'sc-for') { const list = get(scope, whole(node.getAttribute('list'))) || []; const as = node.getAttribute('as'); list.forEach((it, i) => { const sc = Object.create(scope); sc[as] = it; sc.$index = i; node.childNodes.forEach((c) => build(c, sc, out)); }); return; }
+    if (tag === 'sc-if') {
+      const p = whole(node.getAttribute('value'));
+      const v = lit(p) !== undefined ? lit(p) : get(scope, p);
+      if (!v) return { type: 'frag', kids: [] };
+      const kids = [];
+      node.childNodes.forEach((c) => { const vn = vnodeFromDom(c, scope); if (vn) kids.push(vn); });
+      return { type: 'frag', kids: flatten(kids) };
+    }
+    if (tag === 'sc-for') {
+      const list = get(scope, whole(node.getAttribute('list'))) || [];
+      const as = node.getAttribute('as');
+      const kids = [];
+      list.forEach((it, i) => {
+        const sc = Object.create(scope);
+        sc[as] = it;
+        sc.$index = i;
+        node.childNodes.forEach((c) => { const vn = vnodeFromDom(c, sc); if (vn) kids.push(vn); });
+      });
+      return { type: 'frag', kids: flatten(kids) };
+    }
     const isSvg = node.namespaceURI === 'http://www.w3.org/2000/svg';
-    const el = isSvg ? document.createElementNS('http://www.w3.org/2000/svg', node.tagName) : document.createElement(tag);
+    const attrs = Object.create(null);
+    const handlers = Object.create(null);
+    let refFn = null;
     for (const a of Array.from(node.attributes)) {
       const name = a.name, val = a.value, p = whole(val);
       const lname = name.toLowerCase();
-      if (evMap[lname]) { const fn = p ? get(scope, p) : null; if (typeof fn === 'function') el.addEventListener(evMap[lname], fn); continue; }
-      if (lname === 'ref') { const fn = p ? get(scope, p) : null; if (typeof fn === 'function') setTimeout(() => fn(el), 0); continue; }
+      if (evMap[lname]) {
+        const fn = p ? get(scope, p) : null;
+        if (typeof fn === 'function') handlers[evMap[lname]] = fn;
+        continue;
+      }
+      if (lname === 'ref') {
+        const fn = p ? get(scope, p) : null;
+        if (typeof fn === 'function') refFn = fn;
+        continue;
+      }
       if (p) {
         const v = lit(p) !== undefined ? lit(p) : get(scope, p);
-        if (lname === 'disabled') { if (v) el.setAttribute('disabled', ''); continue; }
-        if (lname === 'value' && (tag === 'input')) { el.value = v == null ? '' : v; el.setAttribute('value', v == null ? '' : v); continue; }
         if (v === undefined || v === null) continue;
-        el.setAttribute(name, String(v));
-      } else el.setAttribute(name, evalStr(scope, val));
+        attrs[name] = v;
+      } else attrs[name] = evalStr(scope, val);
     }
-    if (tag === 'img') { el.decoding = 'sync'; el.loading = 'eager'; }
-    node.childNodes.forEach((c) => build(c, scope, el));
-    out.appendChild(el);
+    const kids = [];
+    node.childNodes.forEach((c) => { const vn = vnodeFromDom(c, scope); if (vn) kids.push(vn); });
+    return { type: 'el', tag: tag, isSvg: isSvg, attrs: attrs, handlers: handlers, ref: refFn, kids: flatten(kids) };
   }
+
+  function flatten(list) {
+    const out = [];
+    (function walk(items) {
+      (items || []).forEach((vn) => {
+        if (!vn) return;
+        if (vn.type === 'frag') walk(vn.kids);
+        else out.push(vn);
+      });
+    })(list);
+    return out;
+  }
+
+  function create(vn) {
+    if (!vn || vn.type === 'frag') {
+      const f = document.createDocumentFragment();
+      flatten(vn && vn.kids ? vn.kids : vn ? [vn] : []).forEach((k) => f.appendChild(create(k)));
+      return f;
+    }
+    if (vn.type === 'text') return document.createTextNode(vn.text);
+    const el = vn.isSvg ? document.createElementNS('http://www.w3.org/2000/svg', vn.tag) : document.createElement(vn.tag);
+    const isInput = vn.tag === 'input' || vn.tag === 'textarea';
+    applyAttrs(el, vn.attrs, vn.handlers, isInput);
+    if (vn.tag === 'img') { el.decoding = 'sync'; el.loading = 'eager'; }
+    (vn.kids || []).forEach((k) => el.appendChild(create(k)));
+    if (vn.ref) Promise.resolve().then(() => vn.ref(el));
+    return el;
+  }
+
+  function isKeep(el) {
+    return el && el.nodeType === 1 && el.matches && el.matches(KEEP_SEL);
+  }
+
+  function morph(oldNode, vn) {
+    if (vn.type === 'text') {
+      if (oldNode && oldNode.nodeType === 3) {
+        if (oldNode.nodeValue !== vn.text) oldNode.nodeValue = vn.text;
+        return oldNode;
+      }
+      return create(vn);
+    }
+    if (!oldNode || oldNode.nodeType !== 1 || oldNode.tagName.toLowerCase() !== vn.tag) {
+      return create(vn);
+    }
+    if (isKeep(oldNode)) {
+      // preserve WebGL / map canvases; still refresh non-critical attrs like class/data-map
+      const cls = vn.attrs.class;
+      if (cls != null && oldNode.getAttribute('class') !== String(cls)) oldNode.setAttribute('class', String(cls));
+      bindHandlers(oldNode, vn.handlers);
+      return oldNode;
+    }
+    const isInput = vn.tag === 'input' || vn.tag === 'textarea';
+    applyAttrs(oldNode, vn.attrs, vn.handlers, isInput);
+    morphKids(oldNode, vn.kids);
+    return oldNode;
+  }
+
+  function morphKids(parent, kids) {
+    const olds = Array.from(parent.childNodes);
+    const next = [];
+    const used = new Set();
+    kids.forEach((vn, i) => {
+      let cand = olds[i];
+      // try same-index first; if mismatch, search unused sibling with same tag
+      if (vn.type === 'el') {
+        if (!cand || cand.nodeType !== 1 || cand.tagName.toLowerCase() !== vn.tag || used.has(cand)) {
+          cand = olds.find((n) => !used.has(n) && n.nodeType === 1 && n.tagName.toLowerCase() === vn.tag) || null;
+        }
+      } else if (vn.type === 'text') {
+        if (!cand || cand.nodeType !== 3 || used.has(cand)) {
+          cand = olds.find((n) => !used.has(n) && n.nodeType === 3) || null;
+        }
+      }
+      const node = morph(cand, vn);
+      if (cand && node === cand) used.add(cand);
+      next.push(node);
+    });
+    // remove leftovers
+    olds.forEach((n) => { if (!used.has(n) && !next.includes(n)) n.remove(); });
+    // ensure order
+    next.forEach((n, i) => {
+      const cur = parent.childNodes[i];
+      if (cur !== n) parent.insertBefore(n, cur || null);
+    });
+  }
+
   const host = document.getElementById('host');
   let pending = false;
-  const keep = {};
+  let mounted = null;
+
   function render() {
     pending = false;
     const vals = comp.renderVals();
-    const frag = document.createElement('div');
-    build(tpl, vals, frag);
-    const fresh = frag.firstElementChild;
-    const old = host.firstElementChild;
-    if (old) {
-      ['canvas.gl', 'canvas[data-map="bar"]', 'canvas[data-map="fs"]', 'canvas[data-map="mini"]'].forEach((sel) => { const o = old.querySelector(sel), n = fresh.querySelector(sel); if (o && n) n.replaceWith(o); });
-      const ae = document.activeElement;
-      host.replaceChild(fresh, old);
-    } else host.appendChild(fresh);
+    const tree = flatten([vnodeFromDom(tpl, vals)]);
+    const vn = tree[0];
+    if (!vn) return;
+    if (!mounted) {
+      mounted = create(vn);
+      host.appendChild(mounted);
+    } else {
+      const next = morph(mounted, vn);
+      if (next !== mounted) {
+        host.replaceChild(next, mounted);
+        mounted = next;
+      }
+    }
   }
-  let renders = 0;
-  window.__sched = () => { if (renders > 5000) return; if (!pending) { pending = true; renders++; requestAnimationFrame(render); } };
+
+  window.__sched = () => { if (!pending) { pending = true; requestAnimationFrame(render); } };
   render();
   comp.componentDidMount();
-  if (params.get('name')) {
-    // captura: roda quadros manualmente e salva a página inteira via html2canvas não disponível -> só sinaliza pronto
-  }
   document.title = 'READY';
+  } catch (err) {
+    console.error(err);
+    document.title = 'ERROR';
+    document.getElementById('host').innerHTML = '<pre style="color:#f88;padding:24px;white-space:pre-wrap;font:14px/1.4 monospace"></pre>';
+    document.querySelector('#host pre').textContent = String(err && err.stack || err);
+  }
 })();
 </script>
 </body></html>
