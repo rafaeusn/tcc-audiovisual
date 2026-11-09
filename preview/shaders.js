@@ -16,7 +16,7 @@ uniform sampler2D uPrev;
 uniform sampler2D uSpec;   // linha 0: espectro log (256), linha 1: forma de onda
 uniform vec2 uRes;
 uniform float uTime, uBass, uMid, uHigh, uLevel, uBeat;
-uniform float uIntensity, uWarp, uFeedback, uZoom, uRot;
+uniform float uIntensity, uWarp, uFeedback, uZoom, uRot, uSpeed;
 uniform vec3 uColA, uColB;
 uniform int uMode;
 
@@ -40,6 +40,12 @@ float fbm(vec2 p) {
 vec3 pal(float t) { return mix(uColA, uColB, smoothstep(0.0, 1.0, clamp(t, 0.0, 1.0))); }
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
+// ── Paleta cosseno (Quilez) para templates que precisam de degradê rico ─────────────────
+vec3 cosPal(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+  return a + b * cos(6.283185 * (c * t + d));
+}
+
+// ── Template 0: Spectral (anel) ──────────────────────────────────────────────────────────
 vec3 spectral(vec2 p) {
   float r = length(p);
   float a = atan(p.y, p.x);
@@ -67,6 +73,7 @@ vec3 spectral(vec2 p) {
   return col;
 }
 
+// ── Template 1: Fluxo (domain warping simples) ──────────────────────────────────────────
 vec3 fluxo(vec2 p) {
   p *= 1.6;
   float t = uTime * 0.15;
@@ -86,19 +93,28 @@ vec3 fluxo(vec2 p) {
   return col;
 }
 
-vec3 barras(vec2 uv) {
-  float x = abs(uv.x - 0.5) * 2.0;
-  float N = 72.0;
-  float id = floor(x * N);
-  float fx = fract(x * N);
-  float s = spec((id + 0.5) / N);
-  float h = s * 0.42 * uIntensity + 0.004;
-  float y = abs(uv.y - 0.5);
+// ── Template 2: Warp Profundo (3 estágios Quilez) ────────────────────────────────────────
+// Nebulosa orgânica/lava. Três níveis de fBm aninhado (q→r→f).
+// uBass → amplitude do warp; uHigh → roughness; uBeat → flash de saturação.
+vec3 warpProfundo(vec2 p) {
+  p *= 1.4;
+  float t = uTime * 0.08 * uSpeed;
+  float warpMult = 2.0 + uBass * uIntensity * 4.5 * uWarp;
 
-  float body = step(y, h) * smoothstep(0.0, 0.18, fx) * (1.0 - smoothstep(0.82, 1.0, fx));
-  float glow = exp(-max(y - h, 0.0) * 25.0) * s * 0.5;
-  vec3 col = pal(id / N) * (body * (0.35 + 0.9 * y / h) + glow);
-  col += pal(0.5) * uBeat * 0.08 * max(1.0 - y * 2.0, 0.0);
+  vec2 q = vec2(fbm(p + vec2(0.0,  t)),
+                fbm(p + vec2(5.2, 1.3) - t * 0.5));
+  vec2 r = vec2(fbm(p + warpMult * q + vec2(1.7, 9.2) + 0.4 * t),
+                fbm(p + warpMult * q + vec2(8.3, 2.8) - 0.3 * t));
+  float f = fbm(p + warpMult * r);
+
+  vec3 col = mix(uColA * 0.4, uColA, smoothstep(0.1, 0.9, q.x * q.y * 4.0));
+  col = mix(col, uColB,          smoothstep(0.3, 1.0, r.x * 0.5 + uMid * 0.3));
+  col = mix(col, vec3(1.0),      smoothstep(0.7, 1.0, f * f * 2.5) * uBeat * 0.7);
+  col *= f * 1.5 + uLevel * uIntensity * 0.5;
+
+  // Linhas de contorno (derivadas do fBm)
+  float contour = smoothstep(0.94, 1.0, fract(f * 5.0 - uTime * 0.1 * uSpeed));
+  col += pal(f) * contour * (0.05 + uHigh * 0.6) * uIntensity;
   return col;
 }
 
@@ -115,9 +131,10 @@ void main() {
   vec3 prev = texture(uPrev, c + 0.5).rgb * uFeedback;
 
   vec3 col;
-  if (uMode == 0) col = spectral(p);
+  if      (uMode == 0) col = spectral(p);
   else if (uMode == 1) col = fluxo(p);
-  else col = barras(vUv);
+  else if (uMode == 2) col = warpProfundo(p);
+  else                  col = vec3(0.0);
 
   fragColor = vec4(max(col, prev), 1.0);
 }`;

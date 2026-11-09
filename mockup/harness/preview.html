@@ -26,6 +26,7 @@ class DCLogic {
   let doc = await loadDoc(file);
   const props = {};
   let previewW = +params.get('w') || 0, previewH = +params.get('h') || 0;
+  const explicitFrame = params.has('w') || params.has('h');
   // Pranchas com <dc-import name="Main" …> → carrega Main + attrs + $preview
   const imp = doc.querySelector('dc-import[name="Main"], dc-import[name=Main]');
   if (imp) {
@@ -38,24 +39,27 @@ class DCLogic {
       if (dp.$preview) { previewW = previewW || +dp.$preview.width || 0; previewH = previewH || +dp.$preview.height || 0; }
     } catch (e) { /* sem preview size */ }
     doc = await loadDoc('Main.dc.html');
-  } else {
-    try {
-      const dp = JSON.parse((doc.querySelector('script[data-dc-script]') || {}).getAttribute?.('data-props') || '{}');
-      if (dp.$preview) { previewW = previewW || +dp.$preview.width || 0; previewH = previewH || +dp.$preview.height || 0; }
-    } catch (e) { /* ok */ }
   }
+  // Main aberto direto preenche a janela. O $preview 1440×900 é a prancha do editor, não o browser.
   const code = doc.querySelector('script[data-dc-script]').textContent;
   (0, eval)(code + '\nwindow.__Component = Component;');
   const xdc = doc.querySelector('x-dc');
   const tpl = Array.from(xdc.children).find((n) => n.tagName.toLowerCase() !== 'helmet');
   params.forEach((v, k) => { if (['f', 'w', 'h', 'name', 'wait'].indexOf(k) < 0) props[camel(k)] = v; });
-  if (previewW > 0 && previewH > 0) {
+  if ((imp || explicitFrame) && previewW > 0 && previewH > 0) {
     const host = document.getElementById('host');
     document.documentElement.style.height = '100%';
     document.body.style.cssText = 'margin:0;background:#111;overflow:auto;min-height:100%;display:flex;align-items:center;justify-content:center';
     host.style.cssText = 'width:' + previewW + 'px;height:' + previewH + 'px;flex:none;overflow:hidden;position:relative;box-shadow:0 0 0 1px #222,0 24px 64px rgba(0,0,0,.55)';
     const frameFit = document.createElement('style');
     frameFit.textContent = '#host .frame{height:100%!important;min-height:0!important;max-height:100%}';
+    document.head.appendChild(frameFit);
+  } else {
+    document.documentElement.style.height = '100%';
+    document.body.style.cssText = 'margin:0;background:#000;overflow:hidden;height:100%';
+    document.getElementById('host').style.cssText = 'width:100%;height:100%;overflow:hidden';
+    const frameFit = document.createElement('style');
+    frameFit.textContent = '#host .frame{width:100%;height:100%;min-height:0;max-height:100%}';
     document.head.appendChild(frameFit);
   }
   const C = window.__Component;

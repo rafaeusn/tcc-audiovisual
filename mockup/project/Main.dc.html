@@ -1937,9 +1937,9 @@ class Component extends DCLogic {
     const rootCls = ['frame', 'lay-' + s.layout, 'skin-' + s.skin, 'en-' + enLvl, s.editing ? 'editing' : '', s.full ? 'full' : '', s.drawer ? 'drawer' : '', s.drag ? 'dragging' : '', s.mini ? 'is-mini' : '', panelOpen ? 'panel-open' : '', s.keyNav ? 'key-nav' : ''].filter(Boolean).join(' ');
     const pages = { inicio: ['Início', I.home], biblioteca: ['Biblioteca', I.lib], loja: ['Loja', I.store], stats: ['Estatísticas', I.stats], ajustes: ['Ajustes', I.sliders] };
     const pg = pages[activeTela] || pages.inicio;
-    const dotIco = (on, d, df) => { const dp = on ? Component.dotPath(d) : ''; return { icon: on ? (dp || df || d) : d, cls: on ? (dp ? 'ico ico-24 ico-dots' : 'ico ico-24 ico-fill') : 'ico ico-24' }; };
+    const dotIco = (on, d, df) => ({ icon: on && df ? df : d, cls: (on && df ? 'ico ico-24 ico-fill' : 'ico ico-24') });
 
-    /* barra de ícones: o ativo vira pontos */
+    /* barra de ícones: o ativo usa o ícone preenchido, o traço fica igual */
     const navDefs = [{ k: 'inicio', label: 'Início', icon: I.home, iconF: I.homeF }, { k: 'biblioteca', label: 'Biblioteca', icon: I.lib, iconF: I.libF }, { k: 'loja', label: 'Loja', icon: I.store, iconF: I.storeF }];
     if (s.installed.lastfm) navDefs.push({ k: 'stats', label: 'Estatísticas', icon: I.stats, iconF: I.statsF, isNew: !this.statsSeen });
     const navItems = navDefs.map((n) => {
