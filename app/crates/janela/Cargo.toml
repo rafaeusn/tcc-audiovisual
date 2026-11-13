@@ -1,0 +1,20 @@
+[package]
+name = "janela"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Camada do visual por baixo da interface (DirectComposition, sem cópia de pixels)."
+
+[dependencies]
+nucleo.workspace = true
+visual.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+log.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_DirectComposition", "Win32_Graphics_Dxgi"] }
+
+[lints]
+workspace = true

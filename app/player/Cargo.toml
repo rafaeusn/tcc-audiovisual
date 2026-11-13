@@ -1,0 +1,35 @@
+[package]
+name = "player"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "O Player: interface em GPUI, Modo Escuta e os visuais."
+build = "build.rs"
+
+[dependencies]
+nucleo.workspace = true
+audio.workspace = true
+analise.workspace = true
+sessao.workspace = true
+visual.workspace = true
+janela.workspace = true
+historico.workspace = true
+letras.workspace = true
+integracao.workspace = true
+modulos.workspace = true
+servicos.workspace = true
+tocador.workspace = true
+biblioteca.workspace = true
+souvlaki = { version = "0.8", default-features = false }
+gpui.workspace = true
+image.workspace = true
+smallvec.workspace = true
+raw-window-handle.workspace = true
+log.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_SystemInformation", "Win32_System_Threading", "Wdk_System_SystemServices"] }
+
+[lints]
+workspace = true

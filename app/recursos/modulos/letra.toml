@@ -1,0 +1,24 @@
+id = "player.letra"
+nome = "Letra"
+versao = "1.0.0"
+codigo = 1
+autor = "Player"
+categoria = "letras"
+descricao = "Mostra a letra da música no painel, linha a linha, acompanhando o que toca. A letra vem do LRCLIB, um acervo aberto mantido pela comunidade."
+
+[[acoes]]
+nome = "tocando.ler"
+motivo = "Saber qual música está tocando e em que ponto ela está"
+
+[[acoes]]
+nome = "rede"
+motivo = "Buscar a letra: envia título, artista, álbum e duração"
+enderecos = ["lrclib.net"]
+
+[[acoes]]
+nome = "dados.guardar"
+motivo = "Guardar as letras já buscadas, para não pedir de novo"
+
+[[acoes]]
+nome = "painel.modulo"
+motivo = "Mostrar a letra num módulo do painel"

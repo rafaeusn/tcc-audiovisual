@@ -1,0 +1,18 @@
+[package]
+name = "letras"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Letras sincronizadas: leitura do formato LRC e busca no LRCLIB (aberto, sem chave)."
+
+[dependencies]
+nucleo.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json = "1"
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+native-tls = "0.2"
+
+[lints]
+workspace = true

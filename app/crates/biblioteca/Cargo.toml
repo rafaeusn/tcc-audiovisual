@@ -1,0 +1,16 @@
+[package]
+name = "biblioteca"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "As músicas do computador: varre as pastas escolhidas, lê as etiquetas e guarda num acervo local com busca."
+
+[dependencies]
+nucleo.workspace = true
+log.workspace = true
+rusqlite = { version = "0.37", features = ["bundled"] }
+lofty = "0.22"
+
+[lints]
+workspace = true

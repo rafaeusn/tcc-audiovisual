@@ -1,0 +1,18 @@
+[package]
+name = "tocador"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Toca arquivos de música: decodifica (MP3, FLAC, WAV, OGG, M4A), ajusta a taxa e entrega para a saída de som."
+
+[dependencies]
+nucleo.workspace = true
+log.workspace = true
+cpal.workspace = true
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "wav", "pcm", "ogg", "vorbis", "aac", "isomp4"] }
+rubato = "0.16"
+rtrb = "0.3"
+
+[lints]
+workspace = true

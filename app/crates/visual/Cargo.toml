@@ -1,0 +1,21 @@
+[package]
+name = "visual"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Os visuais da v1 em wgpu: Spectral (porte do TouchDesigner), Fluxo e Barras, com o limitador do modo seguro."
+
+[dependencies]
+nucleo.workspace = true
+analise.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+log.workspace = true
+pollster.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+
+[lints]
+workspace = true

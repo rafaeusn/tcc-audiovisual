@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "player"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.88"
+
+[workspace.dependencies]
+nucleo = { path = "crates/nucleo" }
+audio = { path = "crates/audio" }
+analise = { path = "crates/analise" }
+sessao = { path = "crates/sessao" }
+visual = { path = "crates/visual" }
+janela = { path = "crates/janela" }
+historico = { path = "crates/historico" }
+letras = { path = "crates/letras" }
+integracao = { path = "crates/integracao" }
+modulos = { path = "crates/modulos" }
+servicos = { path = "crates/servicos" }
+tocador = { path = "crates/tocador" }
+biblioteca = { path = "crates/biblioteca" }
+
+# O GPUI ainda é pré-1.0: a versão exata fica presa aqui e no Cargo.lock.
+gpui = "=0.2.2"
+wgpu = "30"
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }
+cpal = "0.18"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+thiserror = "2"
+log = { version = "0.4", features = ["std"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+smallvec = "1"
+raw-window-handle = "0.6"
+windows = "0.62"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+dbg_macro = "warn"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+
+# Dependências otimizadas mesmo em debug: shaders, áudio e FFT ficam rápidos durante o desenvolvimento.
+[profile.dev.package."*"]
+opt-level = 2

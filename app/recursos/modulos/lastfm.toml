@@ -1,0 +1,24 @@
+id = "player.lastfm"
+nome = "Last.fm"
+versao = "1.0.0"
+codigo = 1
+autor = "Player"
+categoria = "historico"
+descricao = "Faz scrobble do que você ouve em qualquer app para a sua conta no Last.fm: avisa quando a música começa e conta quando ela passa da metade. Se o app de origem já envia ao Last.fm (o Spotify, por exemplo), desligue lá, ou a música conta duas vezes."
+
+[[acoes]]
+nome = "tocando.ler"
+motivo = "Saber qual música contar e quando ela passou da metade"
+
+[[acoes]]
+nome = "rede"
+motivo = "Enviar cada música ouvida para a sua conta"
+enderecos = ["ws.audioscrobbler.com", "www.last.fm"]
+
+[[acoes]]
+nome = "conta.entrar"
+motivo = "Abrir a página do Last.fm para você autorizar o Player"
+
+[[acoes]]
+nome = "dados.guardar"
+motivo = "Guardar a autorização da conta, cifrada pelo Windows"

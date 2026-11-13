@@ -7,6 +7,8 @@ Atualizado em 07/11/2026. Responda sempre em **pt-BR**.
 **Clone local:** `C:\Users\rafae\Desktop\tcc-audiovisual\`
 
 ### Como o próximo agente deve começar
+0. **Ler primeiro o [`AGENTS.md`](AGENTS.md)**: regras, ambiente, arquitetura, estado atual e próximas fases do app
+   em Rust (atualizado em 13/11/2026). Este arquivo guarda a história e as decisões de produto.
 1. Ler este arquivo inteiro + `docs/plano-v1.md` + `docs/port-spectral-td.md`.
 2. Rodar a prévia (`preview/serve.py`) e validar template 4 + diretor.
 3. Seguir o **plano da v1** (`docs/plano-v1.md`): app em Rust + GPUI, Windows, fases 0–6.
@@ -206,6 +208,36 @@ A lista antiga (React/Electron/Supabase) foi substituída pelo **plano da v1** e
 
 Depois da v1: Audius/Jamendo, modo para surdos, mais templates (pipeline TD → MCP), Studio.
 
+### Estado do app em Rust (13/11/2026)
+
+O app está em `app/` (ver `app/README.md`). Rodar com `cargo run -p player` dentro de `app/`. Já tem:
+
+- Modo Escuta com o som do sistema ou de um app só (captura por processo, escolhida nos Ajustes), "tocando
+  agora" via SMTC (filtrado pelo mesmo app), diretor ao vivo.
+- Três visuais em wgpu na camada de baixo: Spectral TD (512x512 partículas), Fluxo e Barras; modo seguro.
+- Interface GPUI responsiva (largo, gaveta, empilhado), 4 temas, skin padrão e imersiva, fontes do mockup.
+- Painel em módulos (Ritmo, Energia, Estrutura, Letra, Nesta sessão, Visual, Relógio) com modo edição (E).
+- Histórico local em SQLite (`crates/historico`, thread própria) e a página Biblioteca com as estatísticas.
+- Módulo Letra (`crates/letras`): busca no LRCLIB, guarda no banco, acompanha a posição informada pelo SMTC.
+- Player de arquivos locais (`crates/tocador`, `crates/biblioteca`, `player/src/local.rs`): aba Músicas da
+  Biblioteca com pastas como categorias, "Todas" sem repetir, busca e fila; a faixa é publicada no controle de
+  mídia do Windows.
+- Integração com o Windows (`crates/integracao`): botões na miniatura da barra de tarefas, bandeja (com a opção
+  de continuar rodando ao fechar), janela mini (N) e relatório de diagnóstico nos Ajustes.
+- Barra de comandos (Ctrl K), Loja (temas, skins, layouts, pacotes; módulos baixáveis como "Em breve"),
+  volume do sistema no dock, micro-interações do artefato "Micro-interações do Player".
+
+Dos passos acima: o 0 está feito menos a CI; o 1 está feito menos as skins KDL carregadas de arquivo; o 2 está
+feito; o 3 falta o medidor de flashes; 4, 5 (download e WASM) e 6 não começaram. O Spectral do
+mockup (`mockup/project/Main.dc.html`) ainda é o antigo: falta portar o Spectral TD para lá.
+
+A varredura de 12 repositórios de streaming (o que reaproveitar, o que não, e a ordem sugerida) está em
+`docs/pesquisa-repos-streaming.md`. Dela já saíram o histórico, a letra, a integração com o Windows e o formato
+dos módulos da Loja (`crates/modulos`: manifesto, ações com motivo, aceite, bloqueio). Os módulos Last.fm e
+Discord têm código (`crates/servicos`), mas ainda não foram vistos funcionando de ponta a ponta: faltam as chaves
+(`LASTFM_API_KEY`, `LASTFM_API_SECRET`, `DISCORD_APP_ID`, só por variável de ambiente). O ListenBrainz saiu do
+plano a pedido do Rafael (12/11/2026).
+
 ### Não fazer
 - Baixar áudio do YouTube/Spotify (yt-dlp etc.) — viola ToS.
 - Embutir runtime TouchDesigner no app (não existe; TD é só laboratório).
@@ -236,6 +268,10 @@ Depois da v1: Audius/Jamendo, modo para surdos, mais templates (pipeline TD → 
 # Prévia
 cd C:\Users\rafae\Desktop\tcc-audiovisual\preview
 python serve.py
+
+# App em Rust
+cd C:\Users\rafae\Desktop\tcc-audiovisual\app
+cargo run -p player
 
 # Verificar MCP TD
 .\scripts\verificar-mcp.ps1

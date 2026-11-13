@@ -1,0 +1,15 @@
+id = "player.discord"
+nome = "Discord"
+versao = "1.0.0"
+codigo = 1
+autor = "Player"
+categoria = "presenca"
+descricao = "Mostra no seu perfil do Discord a música que está tocando, com a barra de progresso. Fala só com o Discord aberto neste computador."
+
+[[acoes]]
+nome = "tocando.ler"
+motivo = "Saber qual música mostrar no seu perfil"
+
+[[acoes]]
+nome = "programa.local"
+motivo = "Entregar o cartão ao Discord que está aberto neste computador"
