@@ -11,6 +11,7 @@ mod acervo;
 mod leitura;
 
 pub use acervo::Acervo;
+pub use leitura::numero_da_etiqueta;
 pub use leitura::{EXTENSOES, capa, ler, varrer};
 
 use std::path::PathBuf;
@@ -26,30 +27,65 @@ pub struct Musica {
     pub numero: u32,
     /// 0 quando não deu para medir.
     pub duracao_s: f64,
+    /// ReplayGain da faixa, em dB, quando o arquivo traz (igualar o volume entre músicas).
+    pub ganho_db: Option<f32>,
+    /// O pico da faixa (1 = o máximo sem distorcer), quando o arquivo traz.
+    pub pico: Option<f32>,
 }
 
-/// Forma de comparar e buscar: minúsculas, sem acento, um espaço entre as palavras.
-pub fn normalizar(s: &str) -> String {
-    let mut saida = String::with_capacity(s.len());
-    for c in s.chars().flat_map(char::to_lowercase) {
-        let c = match c {
-            'á' | 'à' | 'â' | 'ã' | 'ä' | 'å' => 'a',
-            'é' | 'è' | 'ê' | 'ë' => 'e',
-            'í' | 'ì' | 'î' | 'ï' => 'i',
-            'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
-            'ú' | 'ù' | 'û' | 'ü' => 'u',
-            'ç' => 'c',
-            'ñ' => 'n',
-            outro => outro,
-        };
-        if c.is_alphanumeric() {
-            saida.push(c);
-        } else if !saida.ends_with(' ') && !saida.is_empty() {
-            saida.push(' ');
+impl Musica {
+    /// O ganho para tocar esta música com o volume igualado: o ReplayGain mais `preamp_db`, sem deixar o pico
+    /// passar de 1. Sem ReplayGain no arquivo, 1 (como está).
+    pub fn ganho_igualado(&self, preamp_db: f32) -> f32 {
+        let Some(db) = self.ganho_db else { return 1.0 };
+        let ganho = 10f32.powf((db + preamp_db) / 20.0);
+        match self.pico.filter(|p| *p > 0.0) {
+            Some(pico) => ganho.min(1.0 / pico),
+            None => ganho,
         }
     }
-    saida.trim_end().to_string()
 }
+
+/// O que a lista de músicas mostra: de onde vêm as músicas e os filtros por cima.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Filtro {
+    pub consulta: String,
+    pub origem: Origem,
+    /// Só as deste álbum (nome como está nas etiquetas).
+    pub album: Option<String>,
+    /// Só as deste artista.
+    pub artista: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Origem {
+    /// Todas as pastas, cada música uma vez.
+    #[default]
+    Todas,
+    Pasta(PathBuf),
+    /// Uma playlist, na ordem dela.
+    Playlist(i64),
+}
+
+/// Um álbum ou um artista, com quantas músicas tem e um arquivo de exemplo (para a capa).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Grupo {
+    pub nome: String,
+    /// No álbum, o artista; no artista, vazio.
+    pub detalhe: String,
+    pub quantas: u32,
+    pub exemplo: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Playlist {
+    pub id: i64,
+    pub nome: String,
+    pub quantas: u32,
+}
+
+/// Forma de comparar e buscar (a mesma das letras, no `nucleo`).
+pub use nucleo::texto::normalizar;
 
 #[cfg(test)]
 mod testes {

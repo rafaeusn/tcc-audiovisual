@@ -21,6 +21,10 @@ Por cima disso: painel em módulos (ritmo, energia, letra...), histórico e esta
 Loja de temas e módulos, integração com o Windows (bandeja, janela mini, botões da barra de tarefas) e módulos
 Last.fm e Discord.
 
+Desde 16/11/2026 o projeto é **gratuito e aberto (GPL-3.0-or-later)**. Os serviços de streaming entram como
+provedores opcionais da Loja ([`docs/plano-v2.md`](docs/plano-v2.md)). Código copiado de outro projeto mantém no
+topo a origem e a licença e entra em [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
+
 O código está em **`app/`** (workspace Cargo). O resto do repositório é material anterior: `preview/` (protótipo
 WebGL em JS, gabarito do visual e do diretor), `mockup/` (mockup da UI), `prototypes/`, `touchdesigner-mcp/` e
 `docs/`.
@@ -29,9 +33,12 @@ WebGL em JS, gabarito do visual e do diretor), `mockup/` (mockup da UI), `protot
 
 ## 2. Regras que não se negociam
 
-1. **Nunca baixar áudio do YouTube ou do Spotify** (yt-dlp e parecidos). Viola os termos de uso.
-2. **Spotify só pelo Modo Escuta** (captura do som + SMTC). Nada de API do Spotify nem de "Soloist", porque a
-   política deles proíbe sincronizar visual com o conteúdo pela API.
+1. **O núcleo não usa nenhum serviço de streaming sozinho.** Tudo o que vem de um serviço (Spotify, YouTube Music,
+   SoundCloud, Shazam...) passa por um **provedor da Loja**, instalado e conectado pelo usuário, desligado por padrão
+   e com aviso de responsabilidade. Cache e download offline só se o provedor oferecer e o usuário ligar, sempre
+   cifrados no computador dele. O áudio nunca é enviado a terceiros: ouvir junto sincroniza, não transmite.
+2. **Spotify por provedor**, com o login do app do próprio usuário (Client ID dele). O Modo Escuta continua
+   funcionando sem provedor nenhum. (Regras 1 e 2 reescritas em 16/11/2026, com o projeto aberto sob GPL-3.)
 3. **Nenhum segredo no código nem no git.** As chaves `LASTFM_API_KEY`, `LASTFM_API_SECRET` e `DISCORD_APP_ID`
    vêm só de variável de ambiente (lidas ao abrir o app ou por `option_env!` na compilação). Nunca pedir nem
    colar chave no chat.
@@ -53,9 +60,10 @@ Dentro de `app/`:
 ```bash
 cargo run -p player                      # abre o app (debug)
 cargo build --release -p player          # release (D:/Rust/target/release/player.exe)
-cargo test --workspace                   # 173 testes em 13/11/2026, todos passando
+cargo test --workspace                   # 239 testes em 17/11/2026 (fora o `visual --test desenho`), todos passando
 cargo clippy --workspace --all-targets   # tem que sair sem aviso
 cargo fmt --all
+cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 ```
 
 - A pasta de build é `D:/Rust/target`, e o cache do cargo fica em `D:/Rust/cargo`.
@@ -67,6 +75,18 @@ cargo fmt --all
     lado do Player do Rafael.
   - `TCCPLAYER_MUDO=1`: o player local toca sem som.
   - `TCCPLAYER_PASTA=<pasta1>;<pasta2>`: pastas de música que entram na Biblioteca ao abrir.
+  - `TCCPLAYER_ILHA_ABERTA=1`: a Ilha fica aberta como se o mouse estivesse em cima (para fotografar a forma
+    aberta sem mexer no mouse); `TCCPLAYER_ILHA_PAGINA=<0 a 4>` abre numa página. A Ilha vem desligada: ponha
+    `ilha = true` (e `ilha-posicao = 0.2`, para não cobrir a Ilha do Player do Rafael) no `ajustes.toml` da pasta de
+    teste. Fotografe a Ilha com `PrintWindow` (a janela dela), não a tela: o Rafael costuma estar usando o PC.
+  - `TCCPLAYER_ILHA_ESCONDIDA=1`: a janela da Ilha fica acima da borda de cima da tela (fora da vista) e não some
+    com tela cheia de outro app; `PrintWindow` ainda a fotografa. Com `Start-Process -WindowStyle Hidden` e a janela
+    principal posta fora da tela (`SetWindowPos` sem ativar, depois `ShowWindow(4)`), a cópia inteira roda sem
+    cobrir a tela do Rafael nem roubar o foco. Se a Ilha da cópia não aparece, confira `SHQueryUserNotificationState`:
+    com vídeo ou jogo em tela cheia (estado 2 ou 3) ela some de propósito.
+  - `TCCPLAYER_ILHA_DIAGNOSTICO=1`: registra, quadro a quadro durante as transições da Ilha, as medidas da forma, a
+    posição do conteúdo depois do layout (`LAYOUT`), as trocas de região (`REGIAO`) e os movimentos da janela
+    (`MOVER`), com o prefixo `ilha-diag` no `player.log`.
 - Teste manual da captura por app: `cargo run -p audio --example ouvir_app -- opera.exe spotify.exe`.
 - Registro: `<pasta de dados>/registros/player.log`. A pasta de dados padrão é `%APPDATA%\TccPlayer`.
 
@@ -86,11 +106,12 @@ cargo fmt --all
 | `janela` | Camada DirectComposition por baixo da interface, onde o visual é desenhado sem cópia |
 | `historico` | SQLite local: execuções, estatísticas e cache de letras |
 | `letras` | Formato LRC e cliente do LRCLIB |
-| `integracao` | Windows: botões na miniatura da barra de tarefas, bandeja, janela mini (subclasse da janela) |
+| `integracao` | Windows: botões na miniatura da barra de tarefas, bandeja, janela mini (subclasse da janela); a janela da Ilha (`ilha.rs` + `sistema_ilha.rs`: sempre por cima, sem ativar, posição no topo do monitor, tela cheia de outro app, movimento reduzido) |
 | `modulos` | Formato dos módulos da Loja: manifesto TOML, catálogo fechado de ações com motivo, aceite, bloqueio, instalados |
 | `servicos` | Last.fm (autorização desktop e scrobble), Discord (Rich Presence pelo canal local), cofre DPAPI |
-| `tocador` | Decodifica (`symphonia`), converte a taxa (`rubato`) e entrega à saída (`cpal`) por uma fila SPSC (`rtrb`) |
-| `biblioteca` | Varre pastas, lê etiquetas (`lofty`) e guarda no acervo SQLite (`faixas`, chave `(caminho, pasta)`) |
+| `tocador` | Decodifica (`symphonia`), converte a taxa (`rubato`), mistura (`mistura.rs`: sem intervalo, crossfade, ganho, EQ, limitador) e entrega à saída (`cpal`) por uma fila SPSC (`rtrb`) |
+| `preanalise` | Pré-análise (porte de `preview/preanalysis.js`, em `pista.rs`): batidas por programação dinâmica, tempo forte, clareza do pulso, trechos por novidade, energia calibrada, drops e subida; tom (`tom.rs`); LUFS; o modo arquivo do diretor (`condutor.rs`); `cache::Cache` em `analises.db` (vale enquanto tamanho, data e `VERSAO` batem) |
+| `biblioteca` | Varre pastas, lê etiquetas e ReplayGain (`lofty`) e guarda no acervo SQLite (`faixas` com chave `(caminho, pasta)`, `playlists`, `playlist_itens`); consultas por `Filtro` (origem, busca, álbum, artista) |
 | `player` | O app em GPUI 0.2.2: estado em `app.rs`, telas em `ui/*.rs` |
 
 ### Princípio das threads
@@ -104,12 +125,29 @@ thread.** Pedidos seguem por canal (`mpsc`).
 
 - `app.rs`: o `Player` (estado de tudo), `executar(Comando)`, `quadro()` (roda a cada frame), teclado.
 - `escuta.rs`: thread do Modo Escuta; `Fonte::{Tudo, App(exe), Proprio}`.
-- `local.rs`: player local (fila, tocador, publicação no SMTC via `souvlaki`, thread da biblioteca).
+- `local.rs`: player local (thread da biblioteca, tocador com a seguinte pré-carregada, SMTC via `souvlaki` com
+  a capa).
+- `preanalista.rs`: thread da pré-análise (prioridade: a de agora e as duas seguintes; depois a biblioteca, em
+  prioridade baixa; análise da biblioteca interrompida quando chega prioridade).
+- `fila.rs`: a fila (aleatório que guarda a ordem original, repetir, a seguir, mover, tirar), só lógica e testada.
+- `ilha.rs`: a lógica da Ilha (formas, esperas para abrir e fechar, fila de avisos, medidas), testada; a vista é
+  `ui/ilha.rs`, numa segunda janela GPUI (`WindowKind::PopUp`, fundo transparente, tamanho fixo da maior forma)
+  aberta por `Player::sincronizar_ilha`. A forma é um caminho (`PathBuilder`) com ombros côncavos; a região da
+  janela (`integracao::ilha::regiao`) acompanha a forma, para os cliques fora dela passarem. Aberta, tem páginas
+  (`ilha::Pagina`); a página Visual usa uma segunda `janela::Camada` na janela da Ilha, preparada em outra thread
+  quando a Ilha abre (`Camada::preparar_transparente`, depois `CamadaPendente::pronta` a cada quadro), e desenha o
+  visual por baixo de um recorte (furo) da forma. A página Letra e o módulo Letra enchem a linha cantada com
+  `ui::letra_enchendo` (destaques de cor do `StyledText`) a partir de `letras::cantado`. Arrastar muda `ajustes.ilha_posicao`. A Ilha chama
+  `Player::atualizar_estado` (a parte do quadro que não depende da janela), então o estado anda com a janela
+  principal minimizada ou na bandeja.
+- `ui/configuracoes.rs`: a página Configurações (seções numa coluna, ou abas em janela estreita). Os blocos vêm de
+  `painel::blocos_de_ajuste`; o painel lateral mostra só os módulos.
 - `diario.rs`, `letrista.rs`, `servicos.rs`: as pontes para histórico, letras e Last.fm/Discord.
 - `arranjo.rs`: layout responsivo (largo, gaveta, empilhado, mini).
-- `ui/`: `casca` (topo e trilho), `heroi`, `painel` (módulos e Ajustes), `dock`, `paleta` (Ctrl K),
-  `busca_letra`, `campo` (campo de texto), `biblioteca`, `musicas`, `loja`, `modulo` (ficha), `mod.rs`
-  (botões, dicas e ajudantes).
+- `ui/`: `casca` (topo e trilho), `heroi`, `painel` (módulos e Ajustes), `reproducao` (crossfade, volume
+  igualado e equalizador nos Ajustes), `dock`, `paleta` (Ctrl K), `busca_letra`, `campo` (campo de texto),
+  `biblioteca`, `musicas` (categorias, visões, ações da linha), `fila`, `playlist` (janela), `loja`, `modulo`
+  (ficha), `mod.rs` (botões, dicas e ajudantes).
 - `recursos/`: fontes, ícones SVG e os manifestos dos módulos (`recursos/modulos/*.toml`).
 
 ### Convenções
@@ -158,6 +196,55 @@ thread.** Pedidos seguem por canal (`mpsc`).
   silêncio.
 - Depois que a fila local acaba, o Windows guarda a última faixa do Player como "parada". `Local::e_resto`
   impede que ela volte como "tocando agora".
+- "Tocando agora": `Player::escolher_origem` decide entre a música local e os outros apps (quem toca vence; os
+  dois tocando ou parados, quem tocou por último) e grava em `origem_local`. Todo controle (dock, atalhos,
+  bandeja, miniatura) segue essa origem; nunca use `local.ativo()` para decidir a quem mandar o comando. A sessão
+  do próprio Player (`local::NOME_NO_SISTEMA`) é tirada do "outro" em `ler_outro`. No crate `sessao`, sem filtro,
+  `smtc::escolher` prefere um app tocando ao "atual" parado.
+- Sessões de mídia sem música (launchers como o Riot Client) são cortadas no crate `sessao`
+  (`e_midia_de_verdade`, usada em `smtc::escolher` e `do_app`); artista com cara de identificador de programa
+  vira vazio. "Nesta sessão" só registra depois de `SOM_PARA_A_SESSAO` segundos tocando com som
+  (`Player::contar_para_a_sessao`).
+- A interface não desenha com a janela escondida ou minimizada. O que precisa andar assim (player local) é
+  atendido também por `manter_o_player_local_andando` (relógio de 200 ms).
+- `tocador`: se a saída de som cai, `Motor::saida_caiu` guarda arquivo, posição e estado, e `tentar_retomar`
+  reabre na saída nova a cada 1 s.
+- **Calibração do diretor**: o corpus usou mono do ffmpeg (+3 dB sobre a média dos canais). `analise::Motor`
+  compensa com √2 e a pré-análise faz o mono `(L+R)·0,707`. Não mude isso sem recalibrar
+  (`docs/diretor-calibracao.md`, seção 8). Para comparar com a prévia: `cargo run --release -p preanalise
+  --example diagnostico -- faixa.mp3` e `node tools/simulate.mjs faixa.mp3` (precisa de ffmpeg).
+- Música local pré-analisada: o visual é conduzido por `preanalise::condutor::Condutor` (modo arquivo), chamado
+  em `Player::aplicar_preanalise`; o ao vivo só dá o espectro. O impulso da forma soma os dois sem salto
+  (`impulso_saida`).
+- Varredura: pasta que não existe (`!is_dir()`) é pulada; varrer vazia apagaria as músicas dela do acervo.
+- **Duas janelas**: `on_window_closed` só encerra o app quando a janela principal some (fechar a Ilha não sai). O
+  `Process.MainWindowHandle` do .NET passa a apontar às vezes para a Ilha: nos scripts de teste, ache a janela
+  principal pelo título "Player" (ou pelo tamanho) antes de mandar cliques.
+- **A Ilha se move por mensagem** (`integracao::ilha::mover`), nunca de dentro de um evento do GPUI. A janela tem
+  o tamanho da maior forma e a forma desliza dentro dela. **O GPUI reserva uma borda de redimensionar** (8 px dos
+  lados e embaixo, 1 px em cima) em janelas sem barra de título: a subclasse da Ilha responde `WM_NCCALCSIZE` (área
+  de desenho = janela inteira) e `WM_NCHITTEST` (`HTCLIENT`). Sem isso, sobrava a "barra fina" em cima e a forma
+  perdia as pontas. A troca de origem (local ↔ outro app) apaga a faixa por um
+  instante: a Ilha só some depois de 2 s sem faixa (`ilha::SEM_FAIXA_SOME`).
+- **GPUI arredonda cada elemento em relação ao pai.** Um pai numa posição fracionária que muda a cada quadro faz
+  os filhos pularem 1 px para lá e para cá, mesmo parados na tela (era a tremida da Ilha, 17/11/2026). O que se move
+  com mola e tem filhos parados vai em pixels inteiros (`ilha::caixas`).
+- **A Ilha e a "tremida"**: a janela tem sempre o tamanho do maior tamanho da Ilha (trocar o tamanho não a
+  redimensiona) e folga para o quique (`FOLGA_DOS_LADOS`, `FOLGA_EMBAIXO`; o teste
+  `o_quique_cabe_na_janela` confere). Enquanto as molas andam, a região da janela só cresce (caixa de agora, a do
+  alvo e uma folga, `ilha::unir_regioes`); só fica justa quando a forma assenta, e sem pedir redesenho
+  (`SetWindowRgn(.., false)`). Encolher a região a cada quadro cortava a forma nos quadros em que a tela ainda
+  mostrava o desenho anterior. O conteúdo de antes sai num esmaecimento curto, não some de um quadro para o outro.
+- **O visual da Ilha (camada transparente)**: o recorte da forma só abre depois de o visual estar na tela há um
+  quadro (`quadros_com_visual >= 2`); o visual é desenhado na área inteira da página, 4 px maior que o recorte e
+  por baixo do preto (senão as bordas suavizadas das duas camadas deixam ver a área de trabalho); a camada é limpa
+  um quadro depois de o recorte fechar e logo depois de criada ou redimensionada (o conteúdo novo de uma superfície
+  é indefinido). Criar a camada na thread da janela travava a troca para a página Visual (abrir a placa de vídeo e
+  compilar os shaders).
+- Player local: a fila fica em `Local`; o tocador só conhece "esta" (`Tocar`) e "a seguinte" (`Seguinte`).
+  Quando a seguinte entra sozinha, `Situacao::avancou` muda e a fila anda; quando nada vem depois (ou o arquivo
+  não abre), `terminadas` muda. Os marcos da mistura (`Marco::Comecou`, `Marco::Fim`) só valem quando a placa
+  chega neles (`painel.tocados`), não quando são produzidos, porque há meio segundo de som na fila da placa.
 
 ---
 
@@ -167,10 +254,77 @@ thread.** Pedidos seguem por canal (`mpsc`).
 app); três visuais e modo seguro; interface responsiva com 4 temas e 2 skins; painel em módulos com modo edição;
 histórico e estatísticas; Letra com busca automática e manual; bandeja, janela mini e dicas; barra de comandos;
 Loja com fichas de módulo; player local com categorias por pasta, "Todas" sem repetir, busca e fila;
-publicação da música local no SMTC.
+publicação da música local no SMTC; fila com aleatório, repetir, a seguir e reordenar; troca sem intervalo e
+fim da fila; álbuns, artistas e playlists; Ajustes de crossfade, volume igualado e equalizador (gravados).
+
+**Auditoria (13/11/2026):** volume do dock não passa mais da borda; "Desfazer" no aviso (fila, playlist, pasta);
+origem do "tocando agora" refeita; bandeja e miniatura seguem a origem; player local atendido com a janela
+escondida; retomada após troca de saída de som; pasta fora do ar não apaga músicas; contagem de playlist só
+com músicas do acervo; clique numa música confere o arquivo (a lista pode ter mudado); janela mini fecha
+janelas por cima.
+
+**Análise musical (15/11/2026), conferida no app** com duas faixas de hardstyle reais: "Pré-analisada", BPM
+150/170, tom com Camelot, tempo do compasso aceso, "Intensa" (vermelho) no instante de cada drop e o visual
+explodindo nele; a troca para o Spotify (Modo Escuta) seguiu sozinha. O ganho automático do ao vivo só foi
+medido no diagnóstico com arquivos (não com o Spotify ouvido por um tempo longo).
+
+**Auditoria (17/11/2026)**, em [`docs/auditoria-2026-11-17.md`](docs/auditoria-2026-11-17.md): a tremida da Ilha
+achada e corrigida com o diagnóstico quadro a quadro (posições fracionárias arredondadas pelo GPUI, região trocada a
+cada quadro e a janela redimensionada na troca de tamanho); contraste do texto terciário corrigido sobre blocos e
+seleção; a janela principal respeita o "Efeitos de animação" do Windows e o modo seguro; atalhos H, B e L; piso de
+11 px no texto da Ilha; `normalizar` e `smoothstep` repetidos juntados; no empilhado, Biblioteca e Loja ficam com o
+meio inteiro (`Pedido::pagina_cheia`) e o cabeçalho delas fica compacto em janela estreita. Conferido: os números
+antes e depois, os testes e a cópia de teste por `PrintWindow` (380, 900 e 1280 px). Não conferido: a tremida e a
+fresta na tela de verdade.
+
+**A Ilha, quarta passada (16/11/2026, a pedido do Rafael)**: o visual da página Visual é preparado em outra
+thread quando a Ilha abre (a troca de página não trava), desenhado 4 px maior por baixo do recorte (sem fresta), e o
+recorte só abre com ele já na tela; a janela ganhou folga para o quique e a região só fica justa quando a forma
+assenta (sem a "tremida" e sem cortar os cantos de baixo); o conteúdo de antes sai num esmaecimento curto; os
+blocos ligados dos Ajustes ficam brancos; a letra (Ilha e painel) rola numa mola e a linha cantada enche como num
+karaokê, palavra por palavra quando o LRC traz os tempos (`letras::Palavra`, `letras::cantado`,
+`ui::letra_enchendo`). Conferido na cópia de teste fora da vista (`TCCPLAYER_ILHA_ESCONDIDA`), por `PrintWindow`:
+o karaokê na Ilha e no painel com uma letra inventada posta no cache de teste (enchendo no meio da palavra certa),
+o Spectral animando no recorte, "Cores reativas" branco nos Ajustes, a página Tocando, a camada da Ilha nascendo em
+segundo plano e a janela no tamanho novo (640x242). Não conferido: a fresta e a tremida na tela de verdade (o
+`PrintWindow` pinta o transparente de preto e foto parada não mostra tremida), a troca para a página Visual sentida
+com o mouse e uma letra real do LRCLIB com tempos por palavra.
+
+**A Ilha, terceira versão (16/11/2026)**: arrastar pelo topo (ímã no centro, lembra o lugar), some com o Player
+maximizado ou em tela cheia na frente, tamanhos mínima/padrão/grande, páginas Tocando, Letra, Visual (o visual de
+verdade num recorte), Ritmo e Ajustes, abre em 30 ms e fecha em 200 ms, encostada de verdade no topo (sem a borda do
+GPUI). Configurações responsivas (no painel em janela estreita, fichas no topo em janela média) e troca de tema
+rápida. Conferido na cópia de teste: a borda do topo (a primeira linha da tela fica preta), as cinco páginas (o
+Spectral aparece dentro da Ilha), a área de desenho igual à janela, o arrasto com ímã e a posição gravada (o mouse
+do Rafael passou por ela durante o teste) e as Configurações a 380 px. Não conferido: sumir com o Player
+maximizado na frente (precisaria trazer a janela de teste para a frente), o hover real e a troca de tema na tela.
+
+**A Ilha refeita (16/11/2026, a pedido do Rafael: "muito delay", "nada UX")**, no estilo do Nusa e do island:
+entalhe preso ao topo com ombros, abre em 60 ms e fecha em 250 ms, cresce com quique, letra ao lado, × para
+fechar, opcional (desligada por padrão) com botão no dock e seção nas Configurações, que viraram uma página. Na
+cópia de teste: forma em repouso e aberta vistas na tela de verdade (ombros conferidos ampliando), página
+Configurações e seção Ilha. Não conferido: o hover real com o mouse, a letra ao lado com uma música que tenha letra
+sincronizada, e a região de clique deixando passar cliques para outro app.
+
+**A primeira versão da Ilha (16/11/2026), conferida numa cópia de teste** (com a tela do PC bloqueada, só por captura da própria
+janela): aparece no topo ao tocar; avisa a música nova (alarga para 340 px) e o drop ("Drop em 3" a 2,7 s do drop
+da pré-análise); abre com um clique; pausar e tocar por ela agem no Player; com a janela principal minimizada ela
+segue andando (o tempo avança e toca pela Ilha); "abrir o Player" restaura a janela; fechar a janela principal
+encerra o app junto com a Ilha; some após 30 s parada. **Não conferido:** abrir com o mouse parado em cima (não
+dá para mexer no mouse do Rafael), a transparência e os cantos na tela de verdade, sumir com jogo ou vídeo em
+tela cheia, o aviso de volume e o "Efeitos de animação" do Windows desligado.
+
+**Player local, parte 2 (13/11/2026), sem conferir no app:** o som de verdade do crossfade e do equalizador (as
+cópias de teste rodam mudas; a mistura tem testes de unidade), o ReplayGain em arquivos reais, a capa da música
+local no controle de mídia do Windows e arrastar nas barras do equalizador (só o clique foi testado).
 
 **Feito, mas não visto funcionando de ponta a ponta:**
-- Last.fm e Discord: faltam as chaves (o Rafael ainda não criou; ver `app/README.md`, "Chaves dos serviços").
+- Last.fm e Discord: as chaves existem desde 14/11/2026 (variáveis de usuário do Windows; programas abertos antes
+  não as veem). **Last.fm conferido de ponta a ponta em 14/11/2026** (autorização no navegador, conta
+  conectada, scrobble visto na conta). O Discord ainda não: o app de desktop do Discord precisa estar aberto (a
+  versão no navegador não tem o canal local); o Player procura o Discord a cada 10 s. **Cartão visto no perfil
+  do Rafael em 14/11/2026** (sem capa). A capa (Deezer, `servicos::capas`) e a leitura das respostas do Discord
+  estão no código e nos testes, mas ainda não numa release testada: falta compilar e conferir no perfil.
 - Som real do player local e arquivos MP3, FLAC e M4A: os testes usaram WAVs sintéticos, sem som.
 - Janela de escolher pasta, capa embutida nas músicas locais, contagem das músicas locais no histórico.
 - Clique nos botões da miniatura da barra de tarefas e aparência do menu da bandeja.
@@ -178,6 +332,8 @@ publicação da música local no SMTC.
 - Captura por app em Windows anteriores ao 10 21H1 (deve cair num aviso, sem travar).
 
 **Dívidas conhecidas:**
+- O teste `visual --test desenho` (usa a placa de vídeo) travou uma vez por 50 min em 14/11/2026, com um jogo
+  aberto; os outros testes passam. Se travar, rode `cargo test --workspace --exclude visual` e o dele à parte.
 - Sem CI.
 - Skins KDL carregadas de arquivo (plano da fase 1) não existem; os temas estão no código.
 - Medidor de flashes do modo seguro (fase 3) não existe.
@@ -186,28 +342,30 @@ publicação da música local no SMTC.
 
 ---
 
-## 8. Próximas fases (escolha do Rafael; nenhuma começou)
+## 8. Próximas fases (plano v2, aprovado em 16/11/2026)
 
-1. **Player local, parte 2**: sem intervalo entre faixas, volume igualado (ReplayGain/R128), crossfade,
-   equalizador, tela da fila, visões por álbum e artista, playlists próprias, capa local no Windows.
-2. **Pré-análise das músicas locais**: analisar o arquivo antes de tocar (BPM, seções, drop), com cache, para o
-   diretor antecipar o drop.
-3. **Análise musical melhor**: modelo *Beat This!* (batida e compasso), tom, confiança do BPM, novidade por
-   compasso.
-4. **Modo seguro completo**: medidor de flashes.
-5. **Loja de verdade**: catálogo assinado, download de módulos, registro no GitHub, módulos WASM, skins de
-   arquivo, paleta do papel de parede.
-6. **Last.fm e Discord de ponta a ponta**, quando houver as chaves.
-7. **Importar histórico** do Spotify (arquivo de dados pessoais) e do Last.fm.
-8. **Rádios online legais.**
-9. **Controle remoto**: API local, QR code no celular, MCP, ganchos de evento.
-10. **Diferenciais pesados**: separar voz e instrumental, reconhecer música pelo som, ouvir junto.
-11. **Acabamento e avaliação do TCC**: instalador, CI, medições de desempenho, teste com usuários (SUS).
-12. **Mockup**: levar o Spectral TD para o mockup.
+O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`](docs/plano-v2.md). Ordem:
 
-O que reaproveitar de outros projetos em cada área (com licenças) está em
-[`docs/pesquisa-repos-streaming.md`](docs/pesquisa-repos-streaming.md). O ListenBrainz saiu do plano a pedido
-do Rafael.
+| # | Fase | Situação |
+| --- | --- | --- |
+| F0 | Base aberta: GPL-3, `LICENSE`, `THIRD-PARTY-NOTICES.md`, regras novas, `app/deny.toml`, README e CONTRIBUTING | Feita em 16/11/2026 (o `cargo-deny` não instala neste PC: o erro 4551 bloqueia os build scripts dele; as licenças foram conferidas pelo `cargo metadata`) |
+| F1 | Núcleo de provedores: protocolo, modelos, fila com vários serviços, motor tocando streams, cache de análise por ID/ISRC, casador entre serviços | |
+| F2 | Páginas unificadas e layouts (Palco, Estante), molas no `anim.rs` | |
+| F3 | Provedor YouTube Music (limusic `innertube`/`potoken`) | |
+| F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | |
+| F5 | **A Ilha** (Dynamic Island): janela flutuante no topo, estados repouso/alerta/expandida | Feita em 16/11/2026 (ver seção 7) |
+| F6 | Provedor Spotify (Web Playback SDK em WebView2, Connect, via YouTube Music, librespot opcional) | |
+| F7 | Modo Escuta preciso + Shazam (SongRec): reconhecer, pré-analisar e alinhar ao som ao vivo | |
+| F8 | Som e fila: crossfade no compasso, modo DJ, smart shuffle, lixeira, A-B, timer, AutoEq | |
+| F9 | Juntos e controle: salas, controle pelo celular, MCP, overlay OBS, Chromecast | |
+| F10 | Loja de verdade: registro no GitHub, temas em arquivo, Material dinâmico, plugins | |
+| F11 | Mais provedores: SoundCloud, rádios, podcasts, sem perdas | |
+| F12 | Extras: retrospectiva, backup, atualização automática, atalhos globais, offline, MilkDrop, karaokê, medidor de flashes | |
+
+Sobras das fases antigas que continuam valendo: renomear playlist, arrastar para reordenar, capas nos álbuns,
+ReplayGain de álbum, R128 para quem não tem etiqueta, *Beat This!* e compassos que não são 4/4, importar
+histórico (vai na F12), acabamento (instalador, CI, medições, teste com usuários). O ListenBrainz saiu do plano a
+pedido do Rafael.
 
 ---
 

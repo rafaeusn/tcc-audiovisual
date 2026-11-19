@@ -98,6 +98,21 @@ impl Player {
                         Comando::AlternarPainel,
                         cx,
                     ))
+                    .child(self.dock_botao(
+                        "dock-fila",
+                        "icones/queue.svg",
+                        self.pagina == nucleo::Pagina::Biblioteca
+                            && self.aba_biblioteca == crate::app::AbaBiblioteca::Fila,
+                        Comando::AbrirFila,
+                        cx,
+                    ))
+                    .child(self.dock_botao(
+                        "dock-ilha",
+                        "icones/ilha.svg",
+                        self.ajustes.ilha,
+                        Comando::AlternarIlha,
+                        cx,
+                    ))
                     .child(self.dock_botao("dock-mini", "icones/pip.svg", false, Comando::AlternarMini, cx))
                     .child(self.dock_botao("dock-cheia", "icones/full.svg", false, Comando::TelaCheia, cx))
                     .child(self.dock_botao("dock-mudo", self.icone_do_volume(), false, Comando::Silenciar, cx))
@@ -254,14 +269,43 @@ impl Player {
         } else {
             tocar.opacity(0.4)
         };
+        // Aleatório e repetir só existem para as músicas do computador: os outros apps têm os deles.
+        let local = self.origem_local;
+        let modo = |id: &'static str, caminho: &'static str, comando: Comando, ligado: bool, cx: &mut Context<Self>| {
+            self.botao(
+                Botao {
+                    id,
+                    icone: caminho,
+                    tamanho: 34.0,
+                    tamanho_icone: 18.0,
+                    raio: 999.0,
+                    cor: if ligado { c.texto } else { c.texto_3 },
+                    fundo: ligado.then_some(com_alfa(c.texto, 0.1)),
+                    realce: com_alfa(c.texto, 0.1),
+                    afunda: 0.94,
+                },
+                cx,
+            )
+            .on_click(self.ao_clicar(comando, cx))
+            .on_hover(self.ao_pairar(id, Some(comando), "", cx))
+        };
+        let (aleatorio, repetir) = (self.local.fila.aleatorio, self.local.fila.repetir);
+        let icone_repetir = if repetir == nucleo::Repetir::Faixa { "icones/repeat-1.svg" } else { "icones/repeat.svg" };
+        let botao_aleatorio =
+            local.then(|| modo("dock-aleatorio", "icones/shuffle.svg", Comando::AlternarAleatorio, aleatorio, cx));
+        let botao_repetir = local.then(|| {
+            modo("dock-repetir", icone_repetir, Comando::AlternarRepetir, repetir != nucleo::Repetir::Nada, cx)
+        });
         div()
             .flex()
             .flex_none()
             .items_center()
             .gap(px(8.0))
+            .children(botao_aleatorio)
             .child(lateral("dock-anterior", "icones/prev.svg", Comando::Anterior, cx))
             .child(tocar)
             .child(lateral("dock-proxima", "icones/next.svg", Comando::Proxima, cx))
+            .children(botao_repetir)
     }
 
     /// Tempo decorrido, mapa de energia e duração. O mapa mostra a energia de cada trecho já ouvido.
@@ -324,7 +368,7 @@ impl Player {
                     .min_w(px(0.0))
                     .h(px(24.0))
                     .flex()
-                    .when(self.local.ativo(), |d| d.cursor_pointer())
+                    .when(self.origem_local, |d| d.cursor_pointer())
                     .child(mapa)
                     .child(self.marca("dock-mapa"))
                     .on_mouse_down(

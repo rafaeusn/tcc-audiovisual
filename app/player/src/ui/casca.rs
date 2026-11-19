@@ -26,7 +26,7 @@ fn nome_curto(dispositivo: &str) -> &str {
 
 impl Player {
     fn pagina_ativa(&self, p: Pagina) -> bool {
-        self.pagina == p && !(self.painel_ajustes && self.arranjo.modo == Modo::Empilhado)
+        self.pagina == p
     }
 
     fn item_do_trilho(
@@ -83,7 +83,7 @@ impl Player {
             .child(self.item_do_trilho(
                 "nav-ajustes",
                 "icones/sliders.svg",
-                self.painel_ajustes,
+                self.pagina == Pagina::Configuracoes,
                 Comando::AbrirAjustes,
                 cx,
             ))
@@ -298,7 +298,13 @@ impl Player {
             let ativo = self.pagina_ativa(pagina);
             itens.push((id, rotulo, if ativo { cheio } else { normal }, ativo, Comando::AbrirPagina(pagina)));
         }
-        itens.push(("bnav-ajustes", "Ajustes", "icones/sliders.svg", self.painel_ajustes, Comando::AbrirAjustes));
+        itens.push((
+            "bnav-ajustes",
+            "Configurações",
+            "icones/sliders.svg",
+            self.pagina == Pagina::Configuracoes,
+            Comando::AbrirAjustes,
+        ));
         for (id, rotulo, caminho, ativo, comando) in itens {
             let e = self.pressao(id, 0.96);
             let cor = if ativo { c.texto } else { c.texto_2 };

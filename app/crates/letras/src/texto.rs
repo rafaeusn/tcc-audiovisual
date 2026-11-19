@@ -20,31 +20,8 @@ const RUIDO: [&str; 16] = [
     "4k",
 ];
 
-fn sem_acento(c: char) -> char {
-    match c {
-        'á' | 'à' | 'â' | 'ã' | 'ä' | 'å' => 'a',
-        'é' | 'è' | 'ê' | 'ë' => 'e',
-        'í' | 'ì' | 'î' | 'ï' => 'i',
-        'ó' | 'ò' | 'ô' | 'õ' | 'ö' => 'o',
-        'ú' | 'ù' | 'û' | 'ü' => 'u',
-        'ç' => 'c',
-        'ñ' => 'n',
-        outro => outro,
-    }
-}
-
-/// Forma de comparar: minúsculas, sem acento, só letras e números, um espaço entre as palavras.
-pub fn normalizar(s: &str) -> String {
-    let mut saida = String::with_capacity(s.len());
-    for c in s.chars().flat_map(char::to_lowercase).map(sem_acento) {
-        if c.is_alphanumeric() {
-            saida.push(c);
-        } else if !saida.ends_with(' ') && !saida.is_empty() {
-            saida.push(' ');
-        }
-    }
-    saida.trim_end().to_string()
-}
+/// Forma de comparar (a mesma da biblioteca, no `nucleo`).
+pub use nucleo::texto::normalizar;
 
 fn tem_ruido(trecho: &str) -> bool {
     let n = normalizar(trecho);

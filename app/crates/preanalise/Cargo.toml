@@ -1,0 +1,19 @@
+[package]
+name = "preanalise"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pré-análise das músicas do computador: energia, trechos, drops, BPM e sonoridade (LUFS), com cache."
+
+[dependencies]
+nucleo.workspace = true
+analise.workspace = true
+tocador.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+[lints]
+workspace = true

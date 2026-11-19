@@ -43,6 +43,13 @@ visual sem cópia via camada DirectComposition + skins KDL recarregadas ao vivo 
 
 ## 2. Decisões de arquitetura já tomadas
 
+> **Mudança de rumo (15–16/11/2026):** o projeto passa a ser gratuito e de código aberto (GPL-3.0-or-later); o
+> "Studio pago" saiu. O núcleo (Modo Escuta, player local, visual, análise, temas) não usa serviço de streaming
+> sozinho; Spotify, YouTube Music, SoundCloud, Shazam e afins entram como **provedores opcionais da Loja**, que o
+> usuário instala, conecta e pelos quais se responsabiliza. A tabela de fontes abaixo é a decisão antiga, mantida
+> como história. O plano em vigor é [`docs/plano-v2.md`](docs/plano-v2.md); os riscos, em
+> [`docs/relatorio-codigo-aberto.md`](docs/relatorio-codigo-aberto.md).
+
 ### Plataformas
 - **Agora:** desktop Windows, app nativo em **Rust + GPUI** (decidido em 07/11/2026; ver `docs/plano-v1.md`).
 - **Mobile:** futuro (modo Player viável; modo Escuta limitado/impossível no iOS).
@@ -220,8 +227,9 @@ O app está em `app/` (ver `app/README.md`). Rodar com `cargo run -p player` den
 - Histórico local em SQLite (`crates/historico`, thread própria) e a página Biblioteca com as estatísticas.
 - Módulo Letra (`crates/letras`): busca no LRCLIB, guarda no banco, acompanha a posição informada pelo SMTC.
 - Player de arquivos locais (`crates/tocador`, `crates/biblioteca`, `player/src/local.rs`): aba Músicas da
-  Biblioteca com pastas como categorias, "Todas" sem repetir, busca e fila; a faixa é publicada no controle de
-  mídia do Windows.
+  Biblioteca com pastas e playlists como categorias, "Todas" sem repetir, álbuns, artistas, busca, fila
+  (aleatório, repetir, a seguir), troca sem intervalo, crossfade, volume igualado e equalizador; a faixa é
+  publicada no controle de mídia do Windows, com a capa.
 - Integração com o Windows (`crates/integracao`): botões na miniatura da barra de tarefas, bandeja (com a opção
   de continuar rodando ao fechar), janela mini (N) e relatório de diagnóstico nos Ajustes.
 - Barra de comandos (Ctrl K), Loja (temas, skins, layouts, pacotes; módulos baixáveis como "Em breve"),

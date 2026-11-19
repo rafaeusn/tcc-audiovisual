@@ -11,4 +11,4 @@
 mod camada;
 
 #[cfg(windows)]
-pub use camada::Camada;
+pub use camada::{Camada, CamadaPendente};

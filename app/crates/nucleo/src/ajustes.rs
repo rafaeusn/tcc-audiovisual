@@ -130,6 +130,110 @@ impl Skin {
     }
 }
 
+/// A borda da tela onde a Ilha fica presa: no topo (o padrão), embaixo ou de um dos lados, como uma barra lateral.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BordaIlha {
+    #[default]
+    Topo,
+    Baixo,
+    Esquerda,
+    Direita,
+}
+
+impl BordaIlha {
+    pub const TODAS: [BordaIlha; 4] = [Self::Topo, Self::Baixo, Self::Esquerda, Self::Direita];
+
+    pub fn nome(self) -> &'static str {
+        match self {
+            Self::Topo => "No topo",
+            Self::Baixo => "Embaixo",
+            Self::Esquerda => "À esquerda",
+            Self::Direita => "À direita",
+        }
+    }
+
+    /// Dos lados, a Ilha fica em pé (uma barra lateral); no topo e embaixo, deitada.
+    pub fn de_pe(self) -> bool {
+        matches!(self, Self::Esquerda | Self::Direita)
+    }
+}
+
+/// O tamanho da Ilha: mínima (só o essencial), padrão ou grande.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TamanhoIlha {
+    Minima,
+    #[default]
+    Padrao,
+    Grande,
+}
+
+impl TamanhoIlha {
+    pub const TODOS: [TamanhoIlha; 3] = [Self::Minima, Self::Padrao, Self::Grande];
+
+    pub fn nome(self) -> &'static str {
+        match self {
+            Self::Minima => "Mínima",
+            Self::Padrao => "Padrão",
+            Self::Grande => "Grande",
+        }
+    }
+
+    /// Quanto tudo na Ilha cresce ou encolhe em relação ao padrão.
+    pub fn escala(self) -> f32 {
+        match self {
+            Self::Minima => 0.86,
+            Self::Padrao => 1.0,
+            Self::Grande => 1.22,
+        }
+    }
+
+    pub fn proximo(self) -> Self {
+        match self {
+            Self::Minima => Self::Padrao,
+            Self::Padrao => Self::Grande,
+            Self::Grande => Self::Minima,
+        }
+    }
+}
+
+/// Repetir, no player de músicas do computador.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Repetir {
+    #[default]
+    Nada,
+    /// A fila inteira: depois da última, volta à primeira.
+    Fila,
+    /// A música de agora, de novo e de novo.
+    Faixa,
+}
+
+impl Repetir {
+    pub fn proximo(self) -> Self {
+        match self {
+            Self::Nada => Self::Fila,
+            Self::Fila => Self::Faixa,
+            Self::Faixa => Self::Nada,
+        }
+    }
+}
+
+/// Bandas do equalizador (o tocador usa as mesmas, em Hz).
+pub const BANDAS_EQ: usize = 10;
+
+/// Equalizadores prontos: nome e ganho de cada banda, em dB (31 Hz a 16 kHz).
+pub const PRESETS_EQ: [(&str, [f32; BANDAS_EQ]); 7] = [
+    ("Plano", [0.0; BANDAS_EQ]),
+    ("Graves", [6.0, 5.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("Agudos", [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0]),
+    ("Voz", [-2.0, -2.0, -1.0, 1.0, 3.0, 4.0, 3.0, 1.0, 0.0, -1.0]),
+    ("Rock", [4.0, 3.0, 2.0, 0.0, -1.0, -1.0, 1.0, 3.0, 4.0, 4.0]),
+    ("Eletrônica", [5.0, 4.0, 1.0, 0.0, -2.0, 1.0, 0.0, 1.0, 4.0, 5.0]),
+    ("Acústico", [3.0, 2.0, 1.0, 1.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]),
+];
+
 /// Uma paleta pronta para quando as cores reativas estão desligadas.
 #[derive(Clone, Copy, Debug)]
 pub struct Paleta {
@@ -166,8 +270,35 @@ pub struct Ajustes {
     pub dicas: bool,
     /// Fechar a janela só a esconde: o app continua na bandeja, ouvindo e contando o histórico.
     pub fechar_na_bandeja: bool,
+    /// A Ilha: a pílula com o que toca, presa ao topo da tela. Opcional, como a janela mini (desligada por padrão).
+    pub ilha: bool,
+    /// A Ilha abre ao parar o mouse em cima; desligado, só com um clique.
+    pub ilha_ao_pairar: bool,
+    /// A Ilha avisa música nova, mudança de volume e a contagem do drop.
+    pub ilha_avisos: bool,
+    pub ilha_tamanho: TamanhoIlha,
+    /// Onde a Ilha fica ao longo da borda: o centro dela, de 0 a 1 do comprimento da borda (da esquerda para a
+    /// direita no topo e embaixo, de cima para baixo dos lados).
+    pub ilha_posicao: f32,
+    /// A borda onde a Ilha fica presa (quando solta, a última em que esteve: travar a devolve para lá).
+    pub ilha_borda: BordaIlha,
+    /// Travada, a Ilha não sai do lugar. Destravada, arrasta-se livre pela tela e gruda na borda de que chega perto.
+    pub ilha_travada: bool,
+    /// Solta (destravada e longe das bordas): o centro dela, em frações da área de trabalho (0 a 1).
+    pub ilha_solta: Option<[f32; 2]>,
     /// O que o Modo Escuta ouve: vazio = todo o som do PC; senão, o executável de um app (`spotify.exe`).
     pub escuta_app: String,
+    /// Músicas do computador: segundos de crossfade entre uma e outra (0 = sem; a troca continua sem intervalo).
+    pub crossfade_s: f32,
+    /// Igualar o volume entre as músicas pelo ReplayGain do arquivo.
+    pub volume_igualado: bool,
+    /// Equalizador ligado e o ganho de cada banda, em dB.
+    pub eq_ligado: bool,
+    pub eq: Vec<f32>,
+    pub aleatorio: bool,
+    pub repetir: Repetir,
+    /// Analisar as músicas da biblioteca em segundo plano (a de agora e as próximas são analisadas sempre).
+    pub analisar_biblioteca: bool,
     /// Módulos visíveis no painel, na ordem em que aparecem.
     pub modulos: Vec<Modulo>,
     pub janela_largura: f32,
@@ -187,7 +318,22 @@ impl Default for Ajustes {
             skin: Skin::Padrao,
             dicas: true,
             fechar_na_bandeja: false,
+            ilha: false,
+            ilha_ao_pairar: true,
+            ilha_avisos: true,
+            ilha_tamanho: TamanhoIlha::Padrao,
+            ilha_posicao: 0.5,
+            ilha_borda: BordaIlha::Topo,
+            ilha_travada: true,
+            ilha_solta: None,
             escuta_app: String::new(),
+            crossfade_s: 0.0,
+            volume_igualado: true,
+            eq_ligado: false,
+            eq: vec![0.0; BANDAS_EQ],
+            aleatorio: false,
+            repetir: Repetir::Nada,
+            analisar_biblioteca: true,
             modulos: vec![Modulo::Ritmo, Modulo::Energia, Modulo::Estrutura, Modulo::Sessao, Modulo::Visual],
             janela_largura: 1440.0,
             janela_altura: 900.0,
@@ -198,6 +344,12 @@ impl Default for Ajustes {
 impl Ajustes {
     /// Corrige valores fora da faixa (arquivo editado à mão ou de uma versão antiga).
     pub fn validar(mut self) -> Self {
+        self.ilha_posicao = if self.ilha_posicao.is_finite() { self.ilha_posicao.clamp(0.0, 1.0) } else { 0.5 };
+        // Solta só destravada, e dentro da tela; um número estragado volta a Ilha para a borda.
+        self.ilha_solta = self
+            .ilha_solta
+            .filter(|p| !self.ilha_travada && p.iter().all(|v| v.is_finite()))
+            .map(|p| p.map(|v| v.clamp(0.0, 1.0)));
         if self.paleta >= PALETAS.len() {
             self.paleta = Self::default().paleta;
         }
@@ -213,6 +365,11 @@ impl Ajustes {
         self.escuta_app = self.escuta_app.trim().to_lowercase();
         if self.escuta_app.len() > 120 || self.escuta_app.contains(['/', '\\']) {
             self.escuta_app.clear();
+        }
+        self.crossfade_s = if self.crossfade_s.is_finite() { self.crossfade_s.clamp(0.0, 12.0) } else { 0.0 };
+        self.eq.resize(BANDAS_EQ, 0.0);
+        for g in &mut self.eq {
+            *g = if g.is_finite() { g.clamp(-12.0, 12.0) } else { 0.0 };
         }
         let faixa = |v: f32, min: f32, max: f32, padrao: f32| if v.is_finite() { v.clamp(min, max) } else { padrao };
         self.janela_largura = faixa(self.janela_largura, 360.0, 7680.0, 1440.0);
@@ -290,6 +447,15 @@ mod testes {
         let a: Ajustes = toml::from_str("modelo = \"fluxo\"").expect("toml");
         assert_eq!(a.modelo, Modelo::Fluxo);
         assert!(a.cores_reativas);
+        assert!(!a.ilha, "a Ilha é opcional: arquivo antigo a abre desligada");
+        assert!(a.ilha_ao_pairar && a.ilha_avisos);
+        assert_eq!(a.ilha_tamanho, TamanhoIlha::Padrao);
+        assert_eq!(a.ilha_posicao, 0.5);
+        assert_eq!(
+            (a.ilha_borda, a.ilha_travada, a.ilha_solta),
+            (BordaIlha::Topo, true, None),
+            "presa no topo e travada"
+        );
     }
 
     #[test]
@@ -298,6 +464,17 @@ mod testes {
         assert_eq!(a.paleta, 1);
         assert_eq!(a.janela_largura, 1440.0);
         assert_eq!(a.janela_altura, 560.0);
+        let fora = Ajustes { ilha_posicao: 3.0, ..Default::default() }.validar();
+        assert_eq!(fora.ilha_posicao, 1.0);
+        let nan = Ajustes { ilha_posicao: f32::NAN, ..Default::default() }.validar();
+        assert_eq!(nan.ilha_posicao, 0.5);
+        // Solta: só destravada, com números válidos, dentro da tela.
+        let solta = Ajustes { ilha_travada: false, ilha_solta: Some([1.4, -0.2]), ..Default::default() }.validar();
+        assert_eq!(solta.ilha_solta, Some([1.0, 0.0]));
+        let travada = Ajustes { ilha_travada: true, ilha_solta: Some([0.5, 0.5]), ..Default::default() }.validar();
+        assert_eq!(travada.ilha_solta, None, "travada, a Ilha fica na borda");
+        let estragada = Ajustes { ilha_travada: false, ilha_solta: Some([f32::NAN, 0.5]), ..Default::default() };
+        assert_eq!(estragada.validar().ilha_solta, None);
     }
 
     #[test]

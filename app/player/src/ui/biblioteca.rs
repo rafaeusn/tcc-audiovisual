@@ -171,8 +171,10 @@ impl Player {
         let lado = if largo { 32.0 } else { 16.0 };
         let largura = a.heroi.w - 2.0 * lado;
 
-        if self.aba_biblioteca == crate::app::AbaBiblioteca::Musicas {
-            return self.ver_musicas(cx);
+        match self.aba_biblioteca {
+            crate::app::AbaBiblioteca::Musicas => return self.ver_musicas(cx),
+            crate::app::AbaBiblioteca::Fila => return self.ver_fila(cx),
+            crate::app::AbaBiblioteca::Historico => {}
         }
         let abas = self.abas_da_biblioteca(largura, cx);
         let escolhido = Periodo::TODOS.iter().position(|p| *p == self.periodo).unwrap_or(0);

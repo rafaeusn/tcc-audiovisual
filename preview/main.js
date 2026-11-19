@@ -1,4 +1,4 @@
-import { vert, sceneFrag, displayFrag } from './shaders.js?v=3';
+import { vert, sceneFrag, displayFrag } from './shaders.js?v=6';
 import { AudioEngine } from './audio.js?v=3';
 import { createSpectralTD } from './spectralTD.js?v=6';
 import { Director, DIRECTED_KEYS } from './director.js';
@@ -11,12 +11,21 @@ const showError = (msg) => {
 };
 
 // ---------- Parâmetros (schema gera a interface) ----------
-const TEMPLATES = ['Spectral', 'Fluxo', 'Barras', 'Spectral TD (original)'];
+const TEMPLATES = [
+  'Spectral (Anel)',
+  'Fluxo',
+  'Warp Profundo',
+  'Spectral TD (TouchDesigner)',
+];
 const TD = 3;
 const TEMPLATE_DEFAULTS = [
-  { feedback: 0.86, zoom: 1.5, rot: 0.4, warp: 0.6 },
-  { feedback: 0.35, zoom: 0.3, rot: 0, warp: 1.0 },
-  { feedback: 0.8, zoom: -1.2, rot: 0, warp: 0.3 },
+  // 0 Spectral (Anel)
+  { feedback: 0.86, zoom: 1.5, rot: 0.4, warp: 0.6, colA: '#ff2d55', colB: '#3df2ff' },
+  // 1 Fluxo
+  { feedback: 0.35, zoom: 0.3, rot: 0, warp: 1.0, colA: '#ff2d55', colB: '#3df2ff' },
+  // 2 Warp Profundo
+  { feedback: 0.25, zoom: 0.5, rot: 0.2, warp: 1.0, intensity: 1.1, colA: '#6a00ff', colB: '#00ffd5', exposure: 1.6, aberr: 0.5, grain: 0.03, vignette: 0.5 },
+  // 3 Spectral TD
   { feedback: 0.3, warp: 1, intensity: 1, colA: '#ffffff', colB: '#dfe6ff', exposure: 1.3, aberr: 0.6, grain: 0.03, vignette: 0.3 },
 ];
 const PALETTES = [
@@ -469,6 +478,7 @@ function renderScene(b, colA, colB) {
   gl.uniform1f(u.uFeedback, P.feedback);
   gl.uniform1f(u.uZoom, P.zoom);
   gl.uniform1f(u.uRot, P.rot);
+  gl.uniform1f(u.uSpeed, P.speed);
   gl.uniform3fv(u.uColA, colA);
   gl.uniform3fv(u.uColB, colB);
   gl.uniform1i(u.uMode, P.mode);

@@ -5,8 +5,9 @@ pub mod caminhos;
 pub mod comando;
 pub mod erro;
 pub mod registro;
+pub mod texto;
 
-pub use ajustes::{Ajustes, Modelo, Modulo, Skin, Tema};
+pub use ajustes::{Ajustes, BANDAS_EQ, BordaIlha, Modelo, Modulo, PRESETS_EQ, Repetir, Skin, TamanhoIlha, Tema};
 pub use comando::{Comando, Pagina};
 pub use erro::{Erro, Resultado};
 

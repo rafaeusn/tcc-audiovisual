@@ -14,7 +14,7 @@ use crate::tema::{self, Cores};
 use analise::{Retrato, Rotulo};
 use gpui::{
     Bounds, Context, DispatchPhase, FocusHandle, KeyDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    RenderImage, SharedString, Window, canvas, div, prelude::*, px,
+    RenderImage, SharedString, Window, WindowHandle, canvas, div, prelude::*, px,
 };
 use nucleo::{Ajustes, Comando, Modelo, Modulo, Pagina, Skin, Tema};
 use sessao::{Capa, Controle, Estado, Faixa, Sessao};
@@ -24,17 +24,29 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod letra;
+mod loja;
+mod midia;
+mod volume;
+
 /// Colunas do medidor de energia do painel (uma a cada meio segundo).
 pub const COLUNAS_ENERGIA: usize = 16;
 /// Células do mapa de energia do dock.
 pub const CELULAS_MAPA: usize = 96;
 const MAXIMO_NA_SESSAO: usize = 30;
+/// Uma música entra em "Nesta sessão" depois de tocar com som por este tempo (segundos). Sem isso, qualquer app
+/// que abre uma sessão de mídia em silêncio, ou uma faixa pulada na hora, enchia a lista.
+const SOM_PARA_A_SESSAO: f32 = 4.0;
 /// Trechos guardados no módulo Estrutura (os mais antigos saem).
 const MAXIMO_DE_SECOES: usize = 48;
 /// Um nível de energia precisa durar isto para virar um trecho novo (evita pisca-pisca na fronteira).
 const SECAO_MINIMA_S: f32 = 2.0;
 const AVISO: Duration = Duration::from_millis(2600);
+/// Com "Desfazer", o aviso fica mais tempo: dá para ler e clicar.
+const AVISO_COM_DESFAZER: Duration = Duration::from_secs(6);
 const PASSO_VOLUME: f32 = 0.05;
+/// Quanto a barra de volume estica, no máximo, ao puxar além do fim (em pixels).
+const ESTICA_VOLUME: f32 = 6.0;
 /// De quanto em quanto tempo o resumo da Biblioteca é refeito enquanto a página está aberta.
 const RENOVAR_RESUMO_S: f32 = 5.0;
 /// Sem a duração da faixa (os apps informam um pouco depois do título), a busca da letra espera isto.
@@ -65,8 +77,39 @@ pub enum AbaBiblioteca {
     /// As músicas das pastas do computador.
     #[default]
     Musicas,
+    /// O que toca agora e o que vem depois.
+    Fila,
     /// O que foi ouvido, em números.
     Historico,
+}
+
+/// O aviso que aparece acima do dock por alguns segundos, às vezes com "Desfazer".
+pub struct Aviso {
+    pub texto: SharedString,
+    pub ate: Instant,
+    pub desfazer: Option<Desfazer>,
+}
+
+/// O que o "Desfazer" do aviso (ou `Ctrl Z`) devolve.
+pub enum Desfazer {
+    /// A música tirada da fila volta para a posição em que estava.
+    TirarDaFila { indice: usize, musica: biblioteca::Musica },
+    /// As músicas tiradas por "Limpar a seguir" voltam para o fim da fila.
+    LimparASeguir(Vec<biblioteca::Musica>),
+    /// A pasta tirada volta (e é lida de novo).
+    TirarPasta(std::path::PathBuf),
+    /// Playlist apagada ou música tirada de playlist: a thread da biblioteca guarda os detalhes.
+    NaBiblioteca,
+}
+
+/// A janela de pôr músicas numa playlist (ou criar uma nova).
+pub struct JanelaPlaylist {
+    /// As músicas que vão entrar.
+    pub musicas: Vec<std::path::PathBuf>,
+    /// O nome da playlist nova, enquanto a pessoa escreve.
+    pub nome: String,
+    /// Só criar (sem músicas) e abrir a playlist nova.
+    pub so_criar: bool,
 }
 
 /// O botão em que o mouse está parado, para a dica (nome e atalho) dele.
@@ -118,6 +161,8 @@ pub struct Player {
     pub(crate) midia: Estado,
     pub(crate) capa: Option<Arc<RenderImage>>,
     pub(crate) historico: VecDeque<Ouvida>,
+    /// Quanto a faixa de agora já tocou com som (segundos), até entrar em "Nesta sessão".
+    som_da_faixa: f32,
     pub(crate) retrato: Retrato,
     pub(crate) situacao: Situacao,
     #[cfg(windows)]
@@ -126,7 +171,8 @@ pub struct Player {
     pub(crate) placa: SharedString,
     proxima_camada: Instant,
     pub(crate) pagina: Pagina,
-    pub(crate) painel_ajustes: bool,
+    /// A seção aberta na página Configurações.
+    pub(crate) secao_config: crate::ui::configuracoes::Secao,
     pub(crate) gaveta_aberta: bool,
     pub(crate) arranjo: Arranjo,
     anterior: Instant,
@@ -136,6 +182,16 @@ pub struct Player {
     /// Energia de cada trecho da faixa (ou das últimas células, quando o app não informa a posição).
     /// Negativo = trecho ainda não ouvido.
     pub(crate) mapa: Vec<f32>,
+    /// O mapa veio da pré-análise desta análise (o endereço dela): aí ele não é mais preenchido ao vivo.
+    mapa_da_analise: Option<usize>,
+    /// O modo arquivo do diretor: com a música local pré-analisada, conduz o visual pela linha do tempo.
+    condutor: preanalise::condutor::Condutor,
+    /// O impulso da forma: a soma do ao vivo (quando é ele que conduz) e do condutor (quando é a análise), para
+    /// não dar salto na troca entre os dois.
+    impulso_vivo: f64,
+    impulso_saida: f64,
+    /// Em que tempo do compasso estamos, quando a análise sabe (o módulo Ritmo acende o tempo forte certo).
+    compasso_da_analise: Option<u8>,
     t_mapa: f32,
     /// Batida atual do compasso (0 a 3), só para o indicador do painel.
     pub(crate) batida: usize,
@@ -143,7 +199,7 @@ pub struct Player {
     /// Vai a 1 no primeiro tempo do compasso e cai rápido: o pulso do logo e do ponto da energia.
     pub(crate) pulso_compasso: f32,
     pub(crate) tom: [f32; 3],
-    pub(crate) aviso: Option<(SharedString, Instant)>,
+    pub(crate) aviso: Option<Aviso>,
     tamanho_visto: (f32, f32),
     tamanho_desde: Instant,
 
@@ -179,6 +235,8 @@ pub struct Player {
     /// Hora local (horas, minutos), para o módulo Relógio.
     pub(crate) hora: (u8, u8),
     t_hora: f32,
+    /// "Efeitos de animação" desligado no Windows: a interface vai direto ao estado final (como a Ilha).
+    movimento_reduzido: bool,
 
     diario: Diario,
     versao_diario: u64,
@@ -202,12 +260,27 @@ pub struct Player {
     pub(crate) local: crate::local::Local,
     /// Neste quadro o "tocando agora" veio do player local (e não dos outros apps).
     era_local: bool,
+    /// O "tocando agora" dos outros apps (sem a sessão do próprio Player), lido quando muda.
+    outro: Estado,
+    /// Tocando no quadro anterior: a música local e o outro app (para saber quem começou por último).
+    local_tocava: bool,
+    outro_tocava: bool,
+    /// Quem tocou por último: a música local (verdadeiro) ou outro app. Desempata quando nada toca.
+    ultimo_foi_local: bool,
+    /// O que a tela mostra agora é a música local (os controles valem para ela).
+    pub(crate) origem_local: bool,
+    /// A mesma informação, para a bandeja e os botões da barra de tarefas (que agem fora da interface).
+    origem_local_fora: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) aba_biblioteca: AbaBiblioteca,
     /// O texto da busca de músicas e se o teclado está nela.
     pub(crate) busca_musicas: String,
     pub(crate) buscando_musicas: bool,
     /// No campo de texto ativo: o pedaço ainda provisório (a tecla morta esperando a letra), em bytes.
     pub(crate) marcado: Option<std::ops::Range<usize>>,
+    /// A janela de playlist aberta (pôr músicas numa playlist ou criar uma).
+    pub(crate) janela_playlist: Option<JanelaPlaylist>,
+    /// A playlist com o "Apagar?" à mostra, esperando a confirmação.
+    pub(crate) apagar_playlist: Option<i64>,
     /// As threads do Last.fm e do Discord.
     pub(crate) servicos: crate::servicos::Servicos,
     /// Os módulos da Loja (manifestos que vêm com o app).
@@ -230,6 +303,17 @@ pub struct Player {
     sistema: Option<integracao::Integracao>,
     /// A janela está no modo mini (pequena, no canto, por cima das outras).
     pub(crate) mini: bool,
+    /// Quando o estado (som, mídia, threads) foi atualizado pela última vez: a Ilha também atualiza, e a guarda
+    /// evita rodar duas vezes no mesmo quadro.
+    estado_em: Instant,
+    /// A janela da Ilha, quando aberta.
+    ilha: Option<WindowHandle<crate::ui::ilha::VistaIlha>>,
+    abrindo_ilha: bool,
+    /// A Ilha está mostrando a letra (então a letra é buscada mesmo sem o módulo Letra no painel).
+    pub(crate) letra_pela_ilha: bool,
+    /// O tema e a skin vistos por último, e até quando o tom do dock troca rápido depois de uma mudança.
+    estilo_visto: (Tema, bool),
+    troca_de_estilo_ate: Instant,
 }
 
 impl Player {
@@ -265,6 +349,7 @@ impl Player {
             midia: Estado::default(),
             capa: None,
             historico: VecDeque::new(),
+            som_da_faixa: 0.0,
             retrato: Retrato::default(),
             situacao: Situacao::Iniciando,
             #[cfg(windows)]
@@ -273,7 +358,7 @@ impl Player {
             placa: "".into(),
             proxima_camada: agora,
             pagina: Pagina::Inicio,
-            painel_ajustes: false,
+            secao_config: Default::default(),
             gaveta_aberta: false,
             arranjo: arranjo::calcular(
                 tamanho.0,
@@ -284,6 +369,11 @@ impl Player {
             energia_recente: std::iter::repeat_n(0.0, COLUNAS_ENERGIA).collect(),
             t_energia: 0.0,
             mapa: vec![-1.0; CELULAS_MAPA],
+            mapa_da_analise: None,
+            condutor: preanalise::condutor::Condutor::default(),
+            impulso_vivo: 0.0,
+            impulso_saida: 0.0,
+            compasso_da_analise: None,
             t_mapa: 0.0,
             batida: 0,
             fase_anterior: 0.0,
@@ -314,6 +404,7 @@ impl Player {
             troca_de_faixa: agora,
             hora: hora_local(),
             t_hora: 0.0,
+            movimento_reduzido: integracao::ilha::movimento_reduzido(),
             diario,
             versao_diario: 0,
             relatorio: None,
@@ -330,12 +421,23 @@ impl Player {
                 nucleo::caminhos::pasta_dados().ok(),
                 hwnd_da_janela(window),
                 std::env::var_os("TCCPLAYER_MUDO").is_some(),
+                ajustes.aleatorio,
+                ajustes.repetir,
+                ajustes.analisar_biblioteca,
             ),
             era_local: false,
+            outro: Estado::default(),
+            local_tocava: false,
+            outro_tocava: false,
+            ultimo_foi_local: false,
+            origem_local: false,
+            origem_local_fora: Arc::default(),
             aba_biblioteca: AbaBiblioteca::default(),
             busca_musicas: String::new(),
             buscando_musicas: false,
             marcado: None,
+            janela_playlist: None,
+            apagar_playlist: None,
             servicos,
             catalogo: crate::catalogo::catalogo(),
             instalados,
@@ -348,12 +450,21 @@ impl Player {
             ponteiro_em: agora,
             sistema: None,
             mini: false,
+            estado_em: agora,
+            ilha: None,
+            abrindo_ilha: false,
+            letra_pela_ilha: false,
+            estilo_visto: (ajustes.tema, ajustes.skin == Skin::Imersiva),
+            troca_de_estilo_ate: agora,
             ajustes,
         };
         player.criar_camada(window);
         player.ligar_ao_sistema(window);
         player.aceitar_letra_ja_escolhida();
+        player.atualizar_modulos();
         player.avisar_servicos();
+        player.aplicar_reproducao();
+        player.manter_o_player_local_andando(cx);
         // Ajuda de teste: pastas de músicas (separadas por `;`) para já entrar na biblioteca ao abrir.
         if let Some(pastas) = std::env::var_os("TCCPLAYER_PASTA") {
             for pasta in std::env::split_paths(&pastas).filter(|p| !p.as_os_str().is_empty()) {
@@ -372,12 +483,23 @@ impl Player {
             use raw_window_handle::{HasWindowHandle, RawWindowHandle};
             if let Ok(RawWindowHandle::Win32(hw)) = window.window_handle().map(|h| h.as_raw()) {
                 let controle = self.sessao.controlador();
+                let local = self.local.controle();
+                let origem_local = self.origem_local_fora.clone();
+                // Os botões agem no que a tela mostra: a música local ou o app que está tocando.
                 let sistema = integracao::Integracao::instalar(hw.hwnd.get(), move |acao| {
-                    controle.controlar(match acao {
-                        Acao::Anterior => Controle::Anterior,
-                        Acao::TocarPausar => Controle::TocarPausar,
-                        Acao::Proxima => Controle::Proxima,
-                    });
+                    if origem_local.load(std::sync::atomic::Ordering::Acquire) {
+                        let _ = local.send(match acao {
+                            Acao::Anterior => souvlaki::MediaControlEvent::Previous,
+                            Acao::TocarPausar => souvlaki::MediaControlEvent::Toggle,
+                            Acao::Proxima => souvlaki::MediaControlEvent::Next,
+                        });
+                    } else {
+                        controle.controlar(match acao {
+                            Acao::Anterior => Controle::Anterior,
+                            Acao::TocarPausar => Controle::TocarPausar,
+                            Acao::Proxima => Controle::Proxima,
+                        });
+                    }
                 });
                 sistema.fechar_esconde(self.ajustes.fechar_na_bandeja);
                 self.sistema = Some(sistema);
@@ -411,9 +533,14 @@ impl Player {
         self.mini = alvo;
         if alvo {
             self.pagina = Pagina::Inicio;
-            self.painel_ajustes = false;
             self.gaveta_aberta = false;
             self.paleta = None;
+            // Janelas por cima e campos de texto não cabem na janela mini.
+            self.janela_playlist = None;
+            self.ficha = None;
+            self.buscando_musicas = false;
+            self.marcado = None;
+            self.apagar_playlist = None;
             self.sair_da_edicao();
         }
     }
@@ -492,10 +619,29 @@ impl Player {
     }
 
     pub(crate) fn avisar(&mut self, texto: impl Into<SharedString>) {
-        self.aviso = Some((texto.into(), Instant::now() + AVISO));
+        self.aviso = Some(Aviso { texto: texto.into(), ate: Instant::now() + AVISO, desfazer: None });
     }
 
-    fn salvar(&self) {
+    /// Aviso com o botão "Desfazer" (também vale `Ctrl Z` enquanto ele está na tela).
+    pub(crate) fn avisar_com_desfazer(&mut self, texto: impl Into<SharedString>, desfazer: Desfazer) {
+        self.aviso =
+            Some(Aviso { texto: texto.into(), ate: Instant::now() + AVISO_COM_DESFAZER, desfazer: Some(desfazer) });
+    }
+
+    /// Desfaz a ação do aviso que está na tela. Falso se não havia nada para desfazer.
+    pub(crate) fn desfazer(&mut self) -> bool {
+        let Some(d) = self.aviso.take().and_then(|a| a.desfazer) else { return false };
+        match d {
+            Desfazer::TirarDaFila { indice, musica } => self.local.fila.inserir(indice, musica),
+            Desfazer::LimparASeguir(musicas) => self.local.fila.adicionar(musicas),
+            Desfazer::TirarPasta(pasta) => self.local.adicionar_pasta(pasta),
+            Desfazer::NaBiblioteca => self.local.desfazer_na_biblioteca(),
+        }
+        self.avisar("Desfeito");
+        true
+    }
+
+    pub(crate) fn salvar(&self) {
         self.gravador.salvar(&self.ajustes);
     }
 
@@ -506,9 +652,9 @@ impl Player {
         self.dica = None;
         match comando {
             // Com uma música local carregada, os controles valem para ela; senão, para o app que está tocando.
-            Comando::TocarPausar if self.local.ativo() => self.local.alternar(),
-            Comando::Proxima if self.local.ativo() => self.local.proxima(),
-            Comando::Anterior if self.local.ativo() => self.local.anterior(),
+            Comando::TocarPausar if self.origem_local => self.local.alternar(),
+            Comando::Proxima if self.origem_local => self.local.proxima(),
+            Comando::Anterior if self.origem_local => self.local.anterior(),
             Comando::TocarPausar => self.sessao.controlar(Controle::TocarPausar),
             Comando::Proxima => self.sessao.controlar(Controle::Proxima),
             Comando::Anterior => self.sessao.controlar(Controle::Anterior),
@@ -523,6 +669,56 @@ impl Player {
             }
             Comando::TelaCheia => window.toggle_fullscreen(),
             Comando::AlternarMini => self.alternar_mini(window),
+            Comando::AlternarIlha => {
+                self.ajustes.ilha = !self.ajustes.ilha;
+                self.avisar(if self.ajustes.ilha {
+                    "Ilha ligada: ela aparece no topo da tela enquanto a música toca"
+                } else {
+                    "Ilha fechada. Para reabrir: tecla D, o botão no dock ou as Configurações"
+                });
+                self.salvar();
+            }
+            Comando::AlternarIlhaAoPairar => {
+                self.ajustes.ilha_ao_pairar = !self.ajustes.ilha_ao_pairar;
+                self.salvar();
+            }
+            Comando::CentralizarIlha => {
+                self.ajustes.ilha_borda = nucleo::BordaIlha::Topo;
+                self.ajustes.ilha_posicao = 0.5;
+                self.ajustes.ilha_solta = None;
+                self.avisar("A Ilha voltou ao centro do topo");
+                self.salvar();
+            }
+            Comando::AlternarTravaIlha => {
+                self.ajustes.ilha_travada = !self.ajustes.ilha_travada;
+                if self.ajustes.ilha_travada {
+                    // Travar uma Ilha solta a devolve à última borda em que ela esteve.
+                    self.ajustes.ilha_solta = None;
+                    self.avisar("Ilha travada");
+                } else {
+                    self.avisar("Ilha destravada: arraste para qualquer borda da tela");
+                }
+                self.salvar();
+            }
+            Comando::PrenderIlha(borda) => {
+                self.ajustes.ilha = true;
+                self.ajustes.ilha_borda = borda;
+                self.ajustes.ilha_posicao = 0.5;
+                self.ajustes.ilha_solta = None;
+                self.avisar(format!("A Ilha agora fica {}", borda.nome().to_lowercase()));
+                self.salvar();
+            }
+            Comando::TrocarTamanhoIlha(t) => {
+                if self.ajustes.ilha_tamanho != t {
+                    self.ajustes.ilha_tamanho = t;
+                    self.avisar(format!("Ilha: tamanho {}", t.nome().to_lowercase()));
+                    self.salvar();
+                }
+            }
+            Comando::AlternarIlhaAvisos => {
+                self.ajustes.ilha_avisos = !self.ajustes.ilha_avisos;
+                self.salvar();
+            }
             Comando::AlternarBandeja => {
                 self.ajustes.fechar_na_bandeja = !self.ajustes.fechar_na_bandeja;
                 if let Some(s) = &self.sistema {
@@ -536,6 +732,34 @@ impl Player {
                 self.salvar();
             }
             Comando::CopiarDiagnostico => self.copiar_diagnostico(cx),
+            Comando::AlternarAleatorio => {
+                self.local.alternar_aleatorio();
+                self.ajustes.aleatorio = self.local.fila.aleatorio;
+                self.salvar();
+                self.avisar(if self.ajustes.aleatorio {
+                    "Ordem aleatória ligada"
+                } else {
+                    "Ordem aleatória desligada"
+                });
+            }
+            Comando::AlternarRepetir => {
+                self.local.alternar_repetir();
+                self.ajustes.repetir = self.local.fila.repetir;
+                self.salvar();
+                self.avisar(match self.ajustes.repetir {
+                    nucleo::Repetir::Nada => "Repetir desligado",
+                    nucleo::Repetir::Fila => "Repetindo a fila",
+                    nucleo::Repetir::Faixa => "Repetindo a música",
+                });
+            }
+            Comando::AbrirFila => {
+                // A janela mini não mostra páginas: volta ao tamanho normal antes.
+                if self.mini {
+                    self.alternar_mini(window);
+                }
+                self.executar(Comando::AbrirPagina(Pagina::Biblioteca), window, cx);
+                self.abrir_aba_da_biblioteca(AbaBiblioteca::Fila);
+            }
             Comando::AlternarDicas => {
                 self.ajustes.dicas = !self.ajustes.dicas;
                 self.avisar(if self.ajustes.dicas {
@@ -554,12 +778,10 @@ impl Player {
                 Modo::Empilhado => {}
             },
             Comando::AbrirAjustes => {
-                self.painel_ajustes = !self.painel_ajustes || !self.painel_visivel();
-                if self.painel_ajustes {
-                    self.pagina = Pagina::Inicio;
-                    self.edicao = false;
-                    self.mostrar_painel();
-                }
+                self.buscando_musicas = false;
+                self.pagina = if self.pagina == Pagina::Configuracoes { Pagina::Inicio } else { Pagina::Configuracoes };
+                self.gaveta_aberta = false;
+                self.edicao = false;
             }
             Comando::AbrirPagina(p) => {
                 if p == Pagina::Biblioteca {
@@ -567,7 +789,6 @@ impl Player {
                 }
                 self.buscando_musicas = false;
                 self.pagina = p;
-                self.painel_ajustes = false;
                 self.gaveta_aberta = false;
                 self.edicao = false;
             }
@@ -589,8 +810,6 @@ impl Player {
                     self.gaveta_aberta = false;
                 } else if self.pagina != Pagina::Inicio {
                     self.pagina = Pagina::Inicio;
-                } else {
-                    self.painel_ajustes = false;
                 }
             }
             Comando::TrocarVisual(m) => self.trocar_visual(m),
@@ -622,7 +841,6 @@ impl Player {
                 } else {
                     self.edicao = true;
                     self.pagina = Pagina::Inicio;
-                    self.painel_ajustes = false;
                     self.mostrar_painel();
                     self.avisar("Modo edição: arraste um módulo sobre outro para trocar");
                 }
@@ -638,14 +856,6 @@ impl Player {
     fn sair_da_edicao(&mut self) {
         self.edicao = false;
         self.arrasto = None;
-    }
-
-    fn painel_visivel(&self) -> bool {
-        match self.arranjo.modo {
-            Modo::Largo => self.ajustes.painel_aberto,
-            Modo::Gaveta => self.gaveta_aberta,
-            Modo::Empilhado => true,
-        }
     }
 
     fn mostrar_painel(&mut self) {
@@ -688,6 +898,22 @@ impl Player {
     }
 
     /// Escolhe o que o Modo Escuta ouve: `""` = todo o som do PC; senão, o executável de um app.
+    /// Passa ao player local os ajustes de reprodução (volume igualado, crossfade, equalizador).
+    pub(crate) fn aplicar_reproducao(&mut self) {
+        let aj = &self.ajustes;
+        self.local.preanalista().analisar_biblioteca(aj.analisar_biblioteca);
+        self.local.volume_igualado = aj.volume_igualado;
+        self.local.mixagem(aj.crossfade_s, if aj.eq_ligado { aj.eq.clone() } else { Vec::new() });
+    }
+
+    /// Muda um ajuste de reprodução, grava e aplica.
+    pub(crate) fn mudar_reproducao(&mut self, mudar: impl FnOnce(&mut nucleo::Ajustes)) {
+        mudar(&mut self.ajustes);
+        self.ajustes = self.ajustes.clone().validar();
+        self.salvar();
+        self.aplicar_reproducao();
+    }
+
     pub(crate) fn escolher_fonte(&mut self, exe: &str) {
         self.ajustes.escuta_app = exe.to_string();
         self.ajustes = self.ajustes.clone().validar();
@@ -734,9 +960,24 @@ impl Player {
     }
 
     /// Toca a música `i` da lista da Biblioteca; as seguintes viram a fila.
-    pub(crate) fn tocar_musica(&mut self, i: usize) {
+    pub(crate) fn tocar_musica(&mut self, i: usize, caminho: &std::path::Path) {
         self.buscando_musicas = false;
-        self.local.tocar(i);
+        self.local.tocar(i, caminho);
+    }
+
+    /// Com a janela escondida (bandeja) ou minimizada, a interface não desenha, e o player local era atendido
+    /// só no desenho: a fila parava no fim da música e as teclas de mídia não respondiam. Este relógio atende o
+    /// player local cinco vezes por segundo, desenhando ou não. Atender duas vezes no mesmo quadro não faz mal.
+    fn manter_o_player_local_andando(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+                if this.update(cx, |this, _| this.local.quadro()).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// Abre a janela do sistema para escolher pastas de música.
@@ -784,153 +1025,13 @@ impl Player {
         let Some(area) = self.areas.borrow().get("dock-mapa").copied() else { return };
         let largura = f32::from(area.size.width);
         let duracao = self.local.situacao.duracao_s;
-        if self.local.ativo() && largura > 1.0 && duracao > 1.0 {
+        if self.origem_local && largura > 1.0 && duracao > 1.0 {
             let parte = (f32::from(x - area.origin.x) / largura).clamp(0.0, 1.0);
             self.local.ir(duracao * f64::from(parte));
         }
     }
 
     // ------------------------------------------------------------------ módulos da Loja
-
-    /// Grava a lista de instalados fora da thread da interface.
-    fn salvar_instalados(&self) {
-        let Some(caminho) = self.arquivo_modulos.clone() else { return };
-        let lista = self.instalados.clone();
-        let gravando = std::thread::Builder::new().name("modulos".into()).spawn(move || {
-            if let Err(e) = lista.salvar(&caminho) {
-                log::warn!("não foi possível salvar os módulos instalados: {e}");
-            }
-        });
-        if let Err(e) = gravando {
-            log::warn!("não foi possível salvar os módulos instalados: {e}");
-        }
-    }
-
-    /// Quem já tinha posto a Letra no painel antes de existir a ficha de instalação escolheu usá-la sabendo o
-    /// que ela faz (a Loja já dizia): a escolha é mantida, registrada como instalação.
-    fn aceitar_letra_ja_escolhida(&mut self) {
-        use crate::catalogo::ID_LETRA;
-        if self.ajustes.modulos.contains(&Modulo::Letra)
-            && self.instalados.achar(ID_LETRA).is_none()
-            && let Some(m) = self.catalogo.iter().find(|m| m.id == ID_LETRA)
-        {
-            self.instalados.instalar(m);
-            self.salvar_instalados();
-            log::info!("módulo Letra registrado como instalado (já estava no painel)");
-        }
-    }
-
-    /// Diz às threads do Last.fm e do Discord se o módulo de cada uma está instalado e ligado.
-    fn avisar_servicos(&self) {
-        self.servicos.ativar_lastfm(self.instalados.ativo(crate::catalogo::ID_LASTFM));
-        self.servicos.ativar_discord(self.instalados.ativo(crate::catalogo::ID_DISCORD));
-    }
-
-    /// Abre a ficha do módulo `id` do catálogo.
-    pub(crate) fn abrir_ficha(&mut self, id: &str) {
-        self.ficha = self.catalogo.iter().position(|m| m.id == id);
-        self.aceite_marcado = false;
-    }
-
-    pub(crate) fn fechar_ficha(&mut self) {
-        self.ficha = None;
-        self.aceite_marcado = false;
-    }
-
-    /// Instala o módulo da ficha aberta. Só vale com a caixa de aceite marcada e para módulo que já tem código.
-    pub(crate) fn instalar_modulo_aberto(&mut self) {
-        let Some(m) = self.ficha.and_then(|i| self.catalogo.get(i)).cloned() else { return };
-        if !m.pronto || !self.aceite_marcado {
-            return;
-        }
-        self.instalados.instalar(&m);
-        self.salvar_instalados();
-        self.avisar_servicos();
-        self.aceite_marcado = false;
-        if m.id == crate::catalogo::ID_LETRA {
-            self.fechar_ficha();
-            self.adicionar_modulo(Modulo::Letra);
-        }
-        // Os módulos de serviço ficam com a ficha aberta: é nela que se conecta a conta e se vê a situação.
-        self.avisar(format!("Módulo {} instalado", m.nome));
-    }
-
-    pub(crate) fn desinstalar_modulo_aberto(&mut self) {
-        let Some(m) = self.ficha.and_then(|i| self.catalogo.get(i)).cloned() else { return };
-        if self.instalados.remover(&m.id) {
-            self.salvar_instalados();
-        }
-        // Desinstalar o Last.fm também esquece a conta: a autorização guardada é apagada.
-        if m.id == crate::catalogo::ID_LASTFM {
-            self.servicos.desconectar_lastfm();
-        }
-        self.avisar_servicos();
-        if m.id == crate::catalogo::ID_LETRA {
-            self.remover_modulo(Modulo::Letra);
-        }
-        self.fechar_ficha();
-        self.avisar(format!("Módulo {} desinstalado", m.nome));
-    }
-
-    pub(crate) fn adicionar_modulo(&mut self, m: Modulo) {
-        // A Letra usa a internet: antes de entrar no painel, a pessoa vê o que ela faz e aceita.
-        if m == Modulo::Letra && !self.instalados.ativo(crate::catalogo::ID_LETRA) {
-            self.abrir_ficha(crate::catalogo::ID_LETRA);
-            return;
-        }
-        if !self.ajustes.modulos.contains(&m) {
-            self.ajustes.modulos.push(m);
-            self.salvar();
-        }
-    }
-
-    /// Começa a arrastar um módulo (modo edição).
-    pub(crate) fn pegar_modulo(&mut self, modulo: Modulo, onde: Point<Pixels>) {
-        if self.edicao {
-            self.arrasto = Some(Arrasto { modulo, inicio: onde, atual: onde, alvo: None });
-        }
-    }
-
-    /// Deslocamento atual de um módulo em relação ao lugar dele: segue o ponteiro enquanto é arrastado e volta
-    /// (ou assenta no lugar novo) com uma aproximação suave quando é solto.
-    pub(crate) fn deslocamento_do_modulo(&self, m: Modulo) -> (f32, f32) {
-        let (kx, ky) = (("modulo-x", m as u32), ("modulo-y", m as u32));
-        match &self.arrasto {
-            Some(a) if a.modulo == m => {
-                let (dx, dy) = (f32::from(a.atual.x - a.inicio.x), f32::from(a.atual.y - a.inicio.y));
-                self.anim.definir(kx, dx);
-                self.anim.definir(ky, dy);
-                (dx, dy)
-            }
-            _ => (self.anim.seguir(kx, 0.0, 0.36), self.anim.seguir(ky, 0.0, 0.36)),
-        }
-    }
-
-    fn soltar_modulo(&mut self, a: Arrasto) {
-        let Some(alvo) = a.alvo else { return };
-        let (Some(ia), Some(ib)) = (
-            self.ajustes.modulos.iter().position(|m| *m == a.modulo),
-            self.ajustes.modulos.iter().position(|m| *m == alvo),
-        ) else {
-            return;
-        };
-        // Cada um parte de onde está na tela e vai até o lugar novo, em vez de pular.
-        {
-            let limites = self.limites.borrow();
-            if let (Some(la), Some(lb)) = (limites.get(&a.modulo), limites.get(&alvo)) {
-                let arrastado = (f32::from(a.atual.x - a.inicio.x), f32::from(a.atual.y - a.inicio.y));
-                let entre = (f32::from(la.origin.x - lb.origin.x), f32::from(la.origin.y - lb.origin.y));
-                self.anim.definir(("modulo-x", a.modulo as u32), entre.0);
-                self.anim.definir(("modulo-y", a.modulo as u32), entre.1);
-                self.anim.definir(("modulo-x", alvo as u32), arrastado.0 - entre.0);
-                self.anim.definir(("modulo-y", alvo as u32), arrastado.1 - entre.1);
-            }
-        }
-        self.ajustes.modulos.swap(ia, ib);
-        self.salvar();
-    }
-
-    // ------------------------------------------------------------------ histórico e letra
 
     /// O histórico está gravando (há pasta de dados e o banco abriu).
     pub(crate) fn historico_ativo(&self) -> bool {
@@ -964,216 +1065,64 @@ impl Player {
         }
     }
 
-    /// Abre a busca manual de letra, já com o nome da faixa que está tocando.
-    pub(crate) fn abrir_busca_de_letra(&mut self) {
-        let consulta: String = self
-            .midia
-            .faixa
-            .as_ref()
-            .map(|f| {
-                let (titulo, artista) = letras::limpar(&f.titulo, &f.artista);
-                format!("{titulo} {artista}").trim().chars().take(80).collect()
-            })
-            .unwrap_or_default();
-        if !consulta.is_empty() {
-            self.letrista.procurar(consulta.clone());
+    /// A parte do quadro que não depende da janela: o som, a mídia, a origem, a pré-análise e as threads. A Ilha
+    /// também chama, para tudo seguir andando com a janela principal minimizada ou na bandeja; a guarda evita rodar
+    /// duas vezes no mesmo quadro quando as duas janelas desenham.
+    pub(crate) fn atualizar_estado(&mut self) {
+        let agora = Instant::now();
+        let passado = agora.duration_since(self.estado_em);
+        if passado < Duration::from_millis(4) {
+            return;
         }
-        self.paleta = Some(Paleta { consulta, selecionado: 0, letra: true });
-    }
+        let dt = passado.as_secs_f32().clamp(0.0, 0.1);
+        self.estado_em = agora;
 
-    /// Procura no LRCLIB o que está digitado na busca de letra.
-    pub(crate) fn procurar_letra(&mut self) {
-        if let Some(consulta) = self.paleta.as_ref().map(|p| p.consulta.trim().to_string()).filter(|c| !c.is_empty()) {
-            self.letrista.procurar(consulta);
+        self.retrato = self.escuta.retrato();
+        self.situacao = self.escuta.situacao();
+        self.apps_com_som = self.escuta.apps();
+        self.local.quadro();
+        let outro_mudou = self.ler_outro();
+        self.origem_local = self.escolher_origem();
+        self.origem_local_fora.store(self.origem_local, std::sync::atomic::Ordering::Release);
+        // Com um app escolhido, a música local ainda move o visual: enquanto ela é a origem, a escuta ouve o Player.
+        let fonte = fonte_de(&self.ajustes.escuta_app, self.origem_local);
+        if fonte != self.fonte_pedida {
+            self.escuta.escolher(fonte.clone());
+            self.fonte_pedida = fonte;
         }
-    }
-
-    /// Usa o resultado `i` da busca como a letra da faixa que está tocando.
-    pub(crate) fn fixar_letra(&mut self, i: usize) {
-        let letrista::Achados::Prontos(lista) = &self.procura.achados else { return };
-        let (Some(chave), Some(registro)) = (self.chave_letra.clone(), lista.get(i).cloned()) else { return };
-        self.letrista.fixar(chave, registro);
-        self.paleta = None;
-        self.avisar("Letra trocada nesta música");
-    }
-
-    /// Adianta (positivo) ou atrasa a letra em relação à música. Vale até a faixa mudar.
-    pub(crate) fn deslocar_letra(&mut self, segundos: f32) {
-        self.atraso_letra = (self.atraso_letra + segundos).clamp(-10.0, 10.0);
-    }
-
-    /// Posição e duração da música para a letra, já com o ajuste manual. Vazio quando o app de origem não informa.
-    pub(crate) fn tempo_da_letra(&self) -> Option<(f64, f64)> {
-        let p = self.midia.posicao.filter(|p| p.duracao_s > 1.0)?;
-        Some((p.agora(self.midia.tocando) + f64::from(self.atraso_letra), p.duracao_s))
-    }
-
-    /// Pede a letra da faixa atual quando o módulo Letra está no painel. Sem o módulo, nada vai para a rede.
-    fn atualizar_letra(&mut self, dt: f32) {
-        let versao = self.letrista.versao();
-        if versao != self.versao_letra {
-            self.versao_letra = versao;
-            let nova = self.letrista.resposta();
-            if nova != self.letra {
-                self.letra = nova;
-                // A letra nova entra do começo, sem rolar a partir da linha da música anterior.
-                self.anim.definir(("letra", 0), -1.0);
+        match self.local.estado_de_midia().filter(|_| self.origem_local) {
+            Some(estado) => {
+                self.era_local = true;
+                self.atualizar_midia(estado);
             }
-            self.procura = self.letrista.procura();
-        }
-        self.t_letra += dt;
-        if self.t_letra < 0.25 {
-            return;
-        }
-        self.t_letra = 0.0;
-        let faixa = self.midia.faixa.as_ref().filter(|f| !f.titulo.is_empty());
-        let ligada = self.ajustes.modulos.contains(&Modulo::Letra) && self.instalados.ativo(crate::catalogo::ID_LETRA);
-        let (Some(faixa), true) = (faixa, ligada) else {
-            self.chave_letra = None;
-            return;
-        };
-        let duracao = self.midia.posicao.map(|p| p.duracao_s).filter(|d| *d > 1.0);
-        if duracao.is_none() && self.troca_de_faixa.elapsed() < ESPERA_PELA_DURACAO {
-            return;
-        }
-        let (titulo, artista) = letras::limpar(&faixa.titulo, &faixa.artista);
-        let chave = letras::chave(&titulo, &artista, duracao);
-        let respondida = self.letra.chave == chave && self.letra.situacao != letrista::Situacao::SemRede;
-        let pedida = self
-            .letra_pedida
-            .as_ref()
-            .is_some_and(|(c, quando)| *c == chave && (respondida || quando.elapsed() < NOVA_BUSCA_DA_LETRA));
-        if !pedida {
-            let pedido = letras::Pedido { titulo, artista, album: faixa.album.clone(), duracao_s: duracao };
-            self.letrista.pedir(chave.clone(), pedido);
-            self.letra_pedida = Some((chave.clone(), Instant::now()));
-        }
-        self.chave_letra = Some(chave);
-    }
-
-    // ------------------------------------------------------------------ volume
-
-    pub(crate) fn mudar_volume(&mut self, alvo: f32) {
-        if !alvo.is_finite() {
-            return;
-        }
-        let alvo = alvo.clamp(0.0, 1.0);
-        if audio::volume::definir(alvo) {
-            self.volume = alvo;
-            self.volume_disponivel = true;
-            // Mexer no volume com o som mudo devolve o som, como no sistema.
-            if self.mudo && alvo > 0.0 && audio::volume::silenciar(false) {
-                self.mudo = false;
+            None => {
+                if self.era_local || outro_mudou {
+                    self.era_local = false;
+                    self.atualizar_midia(self.outro.clone());
+                }
             }
         }
-    }
-
-    fn silenciar(&mut self, mudo: bool) {
-        if audio::volume::silenciar(mudo) {
-            self.mudo = mudo;
+        self.aplicar_preanalise(dt);
+        if let Some(s) = &self.sistema {
+            s.tocando(self.midia.tocando);
+        }
+        self.atualizar_medidores(dt);
+        self.atualizar_sistema(dt);
+        self.atualizar_relatorio(dt);
+        self.atualizar_letra(dt);
+        if self.aviso.as_ref().is_some_and(|a| agora >= a.ate) {
+            self.aviso = None;
         }
     }
-
-    /// Leva o volume até onde o ponteiro está na pista. Além das pontas a barra estica com resistência.
-    fn volume_no_ponteiro(&mut self, x: Pixels) {
-        let pista = self.pista_volume.get();
-        let largura = f32::from(pista.size.width);
-        if largura < 1.0 {
-            return;
-        }
-        let pos = f32::from(x - pista.origin.x);
-        let sobra = if pos < 0.0 { pos } else { (pos - largura).max(0.0) };
-        self.volume_esticado = elastico(sobra, largura);
-        self.mudar_volume(pos / largura);
-    }
-
-    pub(crate) fn pegar_volume(&mut self, x: Pixels) {
-        if self.volume_disponivel {
-            self.arrastando_volume = true;
-            self.volume_no_ponteiro(x);
-        }
-    }
-
-    // ------------------------------------------------------------------ ponteiro (ouvintes da janela inteira)
-
-    /// O ponteiro se moveu em qualquer lugar da janela. Devolve se algo mudou.
-    fn ao_mover(&mut self, pos: Point<Pixels>) -> bool {
-        self.ponteiro_em = Instant::now();
-        let mut mudou = false;
-        // O botão da dica saiu de baixo do ponteiro sem avisar (a tela mudou, por exemplo): a dica some.
-        if let Some(d) = &self.dica
-            && !self.areas.borrow().get(d.id).is_some_and(|a| a.contains(&pos))
-        {
-            self.dica = None;
-            mudou = true;
-        }
-        if self.arrastando_volume {
-            self.volume_no_ponteiro(pos.x);
-            mudou = true;
-        }
-        if let Some(a) = &mut self.arrasto {
-            a.atual = pos;
-            a.alvo = self.limites.borrow().iter().find(|(m, l)| **m != a.modulo && l.contains(&pos)).map(|(m, _)| *m);
-            mudou = true;
-        }
-        mudou
-    }
-
-    /// O botão do mouse foi solto em qualquer lugar da janela.
-    fn ao_soltar(&mut self) -> bool {
-        let mudou = self.pressionado.is_some() || self.arrastando_volume || self.arrasto.is_some();
-        self.pressionado = None;
-        if self.arrastando_volume {
-            self.arrastando_volume = false;
-            // A barra volta do ponto em que estava esticada.
-            self.anim.definir(("volume-esticado", 0), self.volume_esticado);
-            self.volume_esticado = 0.0;
-        }
-        if let Some(a) = self.arrasto.take() {
-            self.soltar_modulo(a);
-        }
-        mudou
-    }
-
-    // ------------------------------------------------------------------ o quadro
 
     /// Um quadro: lê o que mudou, atualiza os números da tela e desenha o visual.
     fn quadro(&mut self, window: &mut Window) {
         let agora = Instant::now();
         let dt = agora.duration_since(self.anterior).as_secs_f32().clamp(0.0, 0.1);
         self.anterior = agora;
-        self.anim.quadro(dt, false);
-
-        self.retrato = self.escuta.retrato();
-        self.situacao = self.escuta.situacao();
-        self.apps_com_som = self.escuta.apps();
-        // O "tocando agora" vem do player local quando ele tem uma música carregada; senão, dos outros apps.
-        self.local.quadro();
-        // Com um app escolhido, a música local ainda move o visual: enquanto ela toca, a escuta ouve o Player.
-        let fonte = fonte_de(&self.ajustes.escuta_app, self.local.ativo());
-        if fonte != self.fonte_pedida {
-            self.escuta.escolher(fonte.clone());
-            self.fonte_pedida = fonte;
-        }
-        match self.local.estado_de_midia() {
-            Some(estado) => {
-                self.era_local = true;
-                self.atualizar_midia(estado, window);
-            }
-            None => {
-                let versao = self.sessao.versao();
-                if self.era_local || versao != self.versao_sessao {
-                    self.era_local = false;
-                    self.versao_sessao = versao;
-                    let mut estado = self.sessao.estado();
-                    // O resto da nossa própria fila, já parada, não é "tocando agora".
-                    if estado.faixa.as_ref().is_some_and(|f| self.local.e_resto(f)) {
-                        estado = Estado { disponivel: estado.disponivel, ..Default::default() };
-                    }
-                    self.atualizar_midia(estado, window);
-                }
-            }
-        }
+        // Com "Efeitos de animação" desligado no Windows ou o modo seguro, nada desliza: vai direto ao fim.
+        self.anim.quadro(dt, self.movimento_reduzido || self.ajustes.modo_seguro);
+        self.atualizar_estado();
 
         let vp = window.viewport_size();
         let (w, h) = (f32::from(vp.width), f32::from(vp.height));
@@ -1188,6 +1137,7 @@ impl Player {
                 painel_a_esquerda: self.ajustes.painel_a_esquerda,
                 imersivo: self.imersivo(),
                 mini: self.mini,
+                pagina_cheia: matches!(self.pagina, Pagina::Biblioteca | Pagina::Loja),
             },
         );
         if self.arranjo.modo != Modo::Gaveta {
@@ -1197,240 +1147,44 @@ impl Player {
             self.sair_da_edicao();
         }
         self.lembrar_tamanho(w, h, tela_cheia || self.mini || window.is_maximized());
-        if let Some(s) = &self.sistema {
-            s.tocando(self.midia.tocando);
-        }
-
-        self.atualizar_medidores(dt);
-        self.atualizar_sistema(dt);
-        self.atualizar_relatorio(dt);
-        self.atualizar_letra(dt);
+        self.contar_para_a_sessao(dt, window);
         self.desenhar_visual(window, dt);
-
-        if self.aviso.as_ref().is_some_and(|(_, ate)| agora >= *ate) {
-            self.aviso = None;
-        }
         window.request_animation_frame();
     }
 
-    /// A faixa, a capa ou o estado de reprodução mudaram.
-    fn atualizar_midia(&mut self, novo: Estado, window: &mut Window) {
-        let mudou_faixa = novo.faixa.as_ref().map(Faixa::chave) != self.midia.faixa.as_ref().map(Faixa::chave);
-        let mudou_capa = novo.capa.as_ref().map(Arc::as_ptr) != self.midia.capa.as_ref().map(Arc::as_ptr);
-        if mudou_faixa {
-            self.mapa.fill(-1.0);
-            self.capa = None;
-            self.secoes.clear();
-            self.candidata = None;
-            self.inicio_da_faixa = Instant::now();
-            self.troca_de_faixa = Instant::now();
-            self.atraso_letra = 0.0;
+    /// Abre ou fecha a janela da Ilha conforme o ajuste. Abrir e fechar janelas fica para depois do quadro.
+    fn sincronizar_ilha(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A janela pode ter sido fechada por fora: esquece o identificador.
+        if let Some(h) = self.ilha
+            && !cx.windows().iter().any(|w| w.window_id() == h.window_id())
+        {
+            self.ilha = None;
         }
-        if mudou_faixa || mudou_capa {
-            self.capa = novo.capa.as_deref().and_then(imagem_da_capa);
+        if self.ajustes.ilha && self.ilha.is_none() && !self.abrindo_ilha {
+            let Some(principal) = window.window_handle().downcast::<Player>() else { return };
+            self.abrindo_ilha = true;
+            let player = cx.entity();
+            let hwnd = hwnd_da_janela(window);
+            cx.defer(move |cx| {
+                let aberta = crate::ui::ilha::VistaIlha::abrir(cx, principal, player.clone(), hwnd);
+                player.update(cx, |p, _| {
+                    p.ilha = aberta;
+                    p.abrindo_ilha = false;
+                });
+            });
+        } else if !self.ajustes.ilha
+            && let Some(h) = self.ilha.take()
+        {
+            cx.defer(move |cx| {
+                let _ = h.update(cx, |_, window, _| window.remove_window());
+            });
         }
-        if let Some(faixa) = novo.faixa.as_ref().filter(|f| !f.titulo.is_empty()) {
-            match self.historico.front_mut() {
-                // A capa chega um pouco depois do título: completa a entrada que já existe.
-                Some(o) if o.faixa.chave() == faixa.chave() => o.capa = self.capa.clone().or(o.capa.take()),
-                _ => {
-                    self.historico.push_front(Ouvida {
-                        faixa: faixa.clone(),
-                        capa: self.capa.clone(),
-                        quando: Instant::now(),
-                    });
-                    while self.historico.len() > MAXIMO_NA_SESSAO {
-                        // Sem isso o atlas de imagens do GPUI guardaria a capa para sempre.
-                        if let Some(Ouvida { capa: Some(img), .. }) = self.historico.pop_back() {
-                            let _ = window.drop_image(img);
-                        }
-                    }
-                }
-            }
-        }
-        self.midia = novo;
+    }
+
+    /// Traz a janela principal para a frente (mesmo escondida na bandeja ou minimizada).
+    pub(crate) fn trazer_janela(&self) {
         if let Some(s) = &self.sistema {
-            let (titulo, artista) =
-                self.midia.faixa.as_ref().map_or(("", ""), |f| (f.titulo.as_str(), f.artista.as_str()));
-            s.dica(&integracao::texto_da_dica(titulo, artista));
-        }
-    }
-
-    /// Onde a faixa está agora, em segundos: a posição que o app informa ou, sem ela, o tempo desde que começou.
-    pub(crate) fn tempo_da_faixa(&self) -> f64 {
-        match self.midia.posicao {
-            Some(p) if p.duracao_s > 1.0 => p.agora(self.midia.tocando),
-            _ => self.inicio_da_faixa.elapsed().as_secs_f64(),
-        }
-    }
-
-    fn atualizar_medidores(&mut self, dt: f32) {
-        let r = self.retrato;
-        self.t_energia += dt;
-        if self.t_energia >= 0.5 {
-            self.t_energia = 0.0;
-            self.energia_recente.pop_front();
-            self.energia_recente.push_back(r.energia * r.gate);
-        }
-        // Batida do compasso: avança quando a fase da batida dá a volta.
-        if r.conf_batida > 0.15 && r.gate > 0.5 && r.fase_batida < self.fase_anterior - 0.5 {
-            self.batida = (self.batida + 1) % 4;
-            // Pulso só no primeiro tempo, e nunca no modo seguro.
-            if self.batida == 0 && !self.ajustes.modo_seguro {
-                self.pulso_compasso = 1.0;
-            }
-        }
-        self.fase_anterior = r.fase_batida;
-        self.pulso_compasso *= (-dt / 0.09).exp();
-
-        // Mapa de energia: com a posição da faixa, cada célula é um trecho; sem ela, as células rolam.
-        let n = self.mapa.len();
-        match self.midia.posicao.filter(|p| p.duracao_s > 1.0) {
-            Some(p) if self.midia.tocando => {
-                let i = ((p.agora(true) / p.duracao_s) * n as f64) as usize;
-                if let Some(c) = self.mapa.get_mut(i.min(n - 1)) {
-                    *c = if *c < 0.0 { r.energia } else { *c + (r.energia - *c) * (dt * 2.0).min(1.0) };
-                }
-            }
-            Some(_) => {}
-            None => {
-                self.t_mapa += dt;
-                if self.t_mapa >= 0.5 && r.gate > 0.5 {
-                    self.t_mapa = 0.0;
-                    self.mapa.rotate_left(1);
-                    self.mapa[n - 1] = r.energia;
-                }
-            }
-        }
-
-        self.atualizar_secoes(dt);
-
-        // Tom do dock: segue a cor do visual devagar; neutro no modo seguro ou sem cores reativas.
-        let cores = self.cores();
-        let segue = self.ajustes.cores_reativas && !self.ajustes.modo_seguro && r.gate > 0.3;
-        let alvo =
-            if segue { tema::tom_do_dock(analise::cores(r.energia, 0.0).0, self.ajustes.tema) } else { cores.dock };
-        let k = 1.0 - (-dt / 2.0).exp();
-        for (tom, alvo) in self.tom.iter_mut().zip(alvo) {
-            *tom += (alvo - *tom) * k;
-        }
-    }
-
-    /// Estrutura da faixa: registra quando o nível de energia muda e fica.
-    fn atualizar_secoes(&mut self, dt: f32) {
-        let r = self.retrato;
-        if r.gate < 0.5 {
-            self.candidata = None;
-            self.silencio_s += dt;
-            return;
-        }
-        // Sem faixa informada pelo app, "a faixa" começa quando o som volta depois de um silêncio.
-        if self.silencio_s > 3.0 && self.midia.posicao.is_none() {
-            self.secoes.clear();
-            self.inicio_da_faixa = Instant::now();
-        }
-        self.silencio_s = 0.0;
-        let t = self.tempo_da_faixa();
-        // A pessoa voltou a faixa: o que estava registrado depois desse ponto não vale mais.
-        while self.secoes.last().is_some_and(|s| s.inicio_s > t + 1.0) {
-            self.secoes.pop();
-        }
-        let Some(atual) = self.secoes.last().map(|s| s.rotulo) else {
-            self.secoes.push(Secao { rotulo: r.rotulo, inicio_s: t });
-            return;
-        };
-        if r.rotulo == atual {
-            self.candidata = None;
-            return;
-        }
-        let durou = match self.candidata {
-            Some((rotulo, tempo)) if rotulo == r.rotulo => tempo + dt,
-            _ => 0.0,
-        };
-        self.candidata = Some((r.rotulo, durou));
-        if durou >= SECAO_MINIMA_S {
-            self.candidata = None;
-            self.secoes.push(Secao { rotulo: r.rotulo, inicio_s: (t - f64::from(durou)).max(0.0) });
-            if self.secoes.len() > MAXIMO_DE_SECOES {
-                self.secoes.remove(0);
-            }
-        }
-    }
-
-    /// Coisas do sistema que mudam devagar: o volume (outro app pode ter mexido) e a hora.
-    fn atualizar_sistema(&mut self, dt: f32) {
-        self.t_volume += dt;
-        if self.t_volume >= 0.5 && !self.arrastando_volume {
-            self.t_volume = 0.0;
-            match audio::volume::ler() {
-                Some(n) => {
-                    self.volume = n.volume;
-                    self.mudo = n.mudo;
-                    self.volume_disponivel = true;
-                }
-                None => self.volume_disponivel = false,
-            }
-        }
-        self.t_hora += dt;
-        if self.t_hora >= 1.0 {
-            self.t_hora = 0.0;
-            self.hora = hora_local();
-        }
-    }
-
-    fn desenhar_visual(&mut self, window: &mut Window, dt: f32) {
-        #[cfg(windows)]
-        {
-            if self.camada.as_ref().is_some_and(janela::Camada::perdida) {
-                self.camada = None;
-                self.erro_visual = Some("A placa de vídeo foi reiniciada. Recuperando o visual...".into());
-            }
-            if self.camada.is_none() && Instant::now() >= self.proxima_camada {
-                self.criar_camada(window);
-            }
-            let escala = window.scale_factor();
-            let a = &self.arranjo;
-            let cores = self.cores();
-            let fundo = tema::tripla(cores.parede);
-            let v = a.visual;
-            let raio = a.raio_visual * escala;
-            let paleta = self.ajustes.paleta_atual();
-            let fixas = (!self.ajustes.cores_reativas)
-                .then(|| (paleta.a.map(|v| v as f32 / 255.0), paleta.b.map(|v| v as f32 / 255.0)));
-            let quadro = visual::Quadro {
-                retrato: &self.retrato,
-                modelo: self.ajustes.modelo,
-                cores: fixas,
-                modo_seguro: self.ajustes.modo_seguro,
-                cinza: self.ajustes.tema == Tema::Mono,
-                dt,
-            };
-            if let Some(c) = self.camada.as_mut() {
-                c.redimensionar((a.janela.w * escala) as u32, (a.janela.h * escala) as u32);
-                c.desenhar(fundo, (v.x * escala, v.y * escala, v.w * escala, v.h * escala), raio, &quadro);
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = (window, dt);
-        }
-    }
-
-    /// Guarda o tamanho da janela depois que ele fica parado por um segundo (para reabrir igual).
-    fn lembrar_tamanho(&mut self, w: f32, h: f32, especial: bool) {
-        if especial {
-            return;
-        }
-        if (w, h) != self.tamanho_visto {
-            self.tamanho_visto = (w, h);
-            self.tamanho_desde = Instant::now();
-        } else if self.tamanho_desde.elapsed() > Duration::from_secs(1)
-            && ((self.ajustes.janela_largura - w).abs() > 0.5 || (self.ajustes.janela_altura - h).abs() > 0.5)
-        {
-            self.ajustes.janela_largura = w;
-            self.ajustes.janela_altura = h;
-            self.ajustes = self.ajustes.clone().validar();
-            self.salvar();
+            s.trazer();
         }
     }
 
@@ -1439,12 +1193,22 @@ impl Player {
             self.tecla_na_paleta(ev, window, cx);
             return;
         }
+        if self.janela_playlist.is_some() {
+            self.tecla_na_janela_playlist(ev, cx);
+            return;
+        }
         if self.buscando_musicas && self.pagina == Pagina::Biblioteca {
             self.tecla_na_busca_de_musicas(ev, cx);
             return;
         }
         let m = &ev.keystroke.modifiers;
         if m.alt || m.shift {
+            return;
+        }
+        if ev.keystroke.key == "z" && (m.control || m.platform) {
+            if self.desfazer() {
+                cx.notify();
+            }
             return;
         }
         if let Some(comando) = Comando::do_atalho(ev.keystroke.key.as_str(), m.control || m.platform) {
@@ -1463,6 +1227,19 @@ fn fonte_de(exe: &str, local_tocando: bool) -> Fonte {
     }
 }
 
+/// A regra de quem a tela mostra, sem estado (testada à parte).
+fn origem_e_local(tem_local: bool, tem_outro: bool, local_toca: bool, outro_toca: bool, ultimo_local: bool) -> bool {
+    match (tem_local, tem_outro) {
+        (true, false) => true,
+        (false, _) => false,
+        (true, true) => match (local_toca, outro_toca) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => ultimo_local,
+        },
+    }
+}
+
 /// O nome do app que o "tocando agora" segue (`""` = o app atual do Windows).
 fn filtro_de(exe: &str) -> String {
     if exe.is_empty() { String::new() } else { sessao::nome_do_app(exe) }
@@ -1475,7 +1252,7 @@ fn imagem_da_capa(capa: &Capa) -> Option<Arc<RenderImage>> {
 }
 
 /// O identificador que o Windows dá à janela (para a integração com o sistema). `None` fora do Windows.
-fn hwnd_da_janela(window: &Window) -> Option<isize> {
+pub(crate) fn hwnd_da_janela(window: &Window) -> Option<isize> {
     #[cfg(windows)]
     {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -1509,6 +1286,7 @@ fn hora_local() -> (u8, u8) {
 impl Render for Player {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.quadro(window);
+        self.sincronizar_ilha(window, cx);
         let c = self.cores();
         let a = self.arranjo;
         let mut raiz = div()
@@ -1540,13 +1318,14 @@ impl Render for Player {
                 raiz = raiz.child(self.ver_nav(r, cx));
             }
         }
-        raiz = raiz.children(self.ver_aviso());
+        raiz = raiz.children(self.ver_aviso(cx));
         if self.paleta.is_some() {
             raiz = raiz.child(self.ver_paleta(cx));
         }
         if let Some(m) = self.ficha.and_then(|i| self.catalogo.get(i)) {
             raiz = raiz.child(self.ver_ficha_do_modulo(m, cx));
         }
+        raiz = raiz.children(self.ver_janela_playlist(cx));
         // Por último, por cima de tudo.
         raiz = raiz.children(self.ver_dica());
 
@@ -1582,5 +1361,26 @@ impl Render for Player {
             .absolute()
             .size_0(),
         )
+    }
+}
+
+#[cfg(test)]
+mod testes_da_origem {
+    use super::origem_e_local;
+
+    #[test]
+    fn quem_toca_vence_e_o_ultimo_desempata() {
+        // Só uma das fontes existe.
+        assert!(origem_e_local(true, false, false, false, false));
+        assert!(!origem_e_local(false, true, false, false, true));
+        assert!(!origem_e_local(false, false, false, false, true));
+        // Música local pausada e o Spotify tocando: a tela vai para o Spotify.
+        assert!(!origem_e_local(true, true, false, true, true));
+        // Música local tocando e o outro pausado: a local.
+        assert!(origem_e_local(true, true, true, false, false));
+        // Os dois tocando, ou os dois parados: quem tocou por último.
+        assert!(origem_e_local(true, true, true, true, true));
+        assert!(!origem_e_local(true, true, true, true, false));
+        assert!(origem_e_local(true, true, false, false, true));
     }
 }

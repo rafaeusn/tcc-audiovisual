@@ -5,6 +5,7 @@
 //! autocorrelação.
 
 use crate::descritores::Bandas;
+use crate::diretor::smoothstep;
 use std::collections::VecDeque;
 
 const GRID_HZ: f32 = 50.0;
@@ -23,11 +24,6 @@ pub enum Faixa {
 }
 
 const FAIXAS: [(Faixa, f32); 3] = [(Faixa::Low, 1.0), (Faixa::Mid, 0.85), (Faixa::High, 0.6)];
-
-fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
 
 pub struct Ritmo {
     t: f64,

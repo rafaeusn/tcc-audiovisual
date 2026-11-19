@@ -1,4 +1,4 @@
-//! A conversa com o Windows. Todo o código `unsafe` da integração fica neste arquivo.
+//! A conversa com o Windows. O código `unsafe` da integração fica neste arquivo (o da Ilha, em `sistema_ilha.rs`).
 //!
 //! A janela é do GPUI; aqui entramos na fila de mensagens dela (uma "subclasse" do Windows) para ver as poucas
 //! mensagens que nos interessam e deixar todas as outras passarem.
@@ -276,6 +276,12 @@ pub fn ponteiro_dentro() -> bool {
         }
         let embaixo = WindowFromPoint(ponto);
         embaixo == hwnd || GetAncestor(embaixo, GA_ROOT) == hwnd
+    }
+}
+
+pub fn trazer() {
+    if let Some(hwnd) = com_estado(|e| e.hwnd) {
+        mostrar(hwnd);
     }
 }
 

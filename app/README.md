@@ -32,10 +32,11 @@ ao tentar de novo; para uma DLL de build, `cargo clean -p <pacote>` e compilar d
 | `historico` | `crates/historico` | O que foi ouvido, num SQLite local: execuções, estatísticas e as letras já buscadas |
 | `letras` | `crates/letras` | Leitura do formato LRC e busca de letras no LRCLIB (aberto, sem chave) |
 | `modulos` | `crates/modulos` | O formato dos módulos da Loja: manifesto, ações pedidas, aceite, lista de bloqueio, instalados |
-| `tocador` | `crates/tocador` | Toca arquivos: decodifica (MP3, FLAC, WAV, OGG, M4A), converte a taxa e entrega à saída de som por uma fila sem trava |
-| `biblioteca` | `crates/biblioteca` | As músicas do computador: varre as pastas, lê as etiquetas e guarda num acervo SQLite com busca |
+| `tocador` | `crates/tocador` | Toca arquivos: decodifica (MP3, FLAC, WAV, OGG, M4A), mistura (sem intervalo, crossfade, ganho, equalizador, limitador) e entrega à saída de som por uma fila sem trava |
+| `preanalise` | `crates/preanalise` | Pré-análise das músicas do computador: o motor da análise roda sobre o arquivo inteiro (energia, trechos, drops, BPM) e mede a sonoridade (LUFS, ITU-R BS.1770); cache em `analises.db` |
+| `biblioteca` | `crates/biblioteca` | As músicas do computador: varre as pastas, lê as etiquetas (com ReplayGain) e guarda num acervo SQLite com busca, álbuns, artistas e playlists |
 | `servicos` | `crates/servicos` | Last.fm (autorização e scrobble), Discord (cartão "ouvindo"), a regra de quando a música conta e o cofre da conta |
-| `integracao` | `crates/integracao` | O app dentro do Windows: botões na miniatura da barra de tarefas, ícone na bandeja, janela mini |
+| `integracao` | `crates/integracao` | O app dentro do Windows: botões na miniatura da barra de tarefas, ícone na bandeja, janela mini, a janela da Ilha |
 | `visual` | `crates/visual` | Os três visuais em wgpu: Spectral (262 mil partículas), Fluxo e Barras, mais o modo seguro |
 | `janela` | `crates/janela` | Camada do DirectComposition por baixo da interface, onde o visual é desenhado sem cópia |
 | `player` | `player` | A interface em GPUI: arranjo responsivo, temas, skins, painel, dock, Loja, Biblioteca, barra de comandos |
@@ -52,7 +53,10 @@ mais recente das outras e nunca espera por elas.
   quando"), Letra, Nesta sessão, Visual e Relógio. No **modo edição** (`E`) dá para arrastar um módulo sobre outro para
   trocar de lugar, tirar, adicionar e pôr o painel do outro lado. A ordem fica salva.
 - **Letra** (módulo opcional, fora do painel por padrão): a linha de agora, a anterior e as próximas, rolando com
-  a música. A letra vem do [LRCLIB](https://lrclib.net) e fica guardada no banco local. A busca usa o título, o
+  a música numa mola (passa de leve e assenta). A linha de agora enche como num karaokê, letra por letra, com uma
+  borda macia; quando o arquivo traz o tempo de cada palavra (o "LRC com palavras"), enche palavra por palavra no
+  tempo dela. As outras linhas apagam e diminuem com a distância, e uma pausa vira "· · ·" enchendo até a próxima
+  linha. A letra vem do [LRCLIB](https://lrclib.net) e fica guardada no banco local. A busca usa o título, o
   artista, o álbum e a duração da faixa, e só acontece enquanto o módulo está no painel. Precisa que o app de
   origem informe a posição da música; os botões − e + acertam a sincronia em passos de meio segundo. Quando a
   busca não acha (ou acha a música errada), a lupa abre a busca manual: digita-se a música, escolhe-se um
@@ -69,13 +73,64 @@ mais recente das outras e nunca espera por elas.
   categoria, como uma playlist, com a contagem ao lado; "Todas" junta as pastas sem repetir música (mesmo título,
   artista e duração contam como a mesma, inclusive cópias e pastas uma dentro da outra). O botão de tirar aparece
   na pasta escolhida. A busca acha por título, artista ou álbum, sem acento nem maiúscula, dentro da categoria
-  escolhida; aceita acentos com tecla morta e colar (`Ctrl V`). Clicar numa música toca, e as seguintes da lista
-  viram a fila. O dock controla (tocar/pausar, anterior, próxima; "anterior" volta ao começo depois de 3 segundos) e um
-  clique no mapa de energia vai para aquele ponto. "Atualizar" varre de novo: o que é novo entra, o que sumiu
-  do disco sai.
-- **A música local aparece no Windows** como a de qualquer app (controle de mídia do sistema): as teclas de mídia
-  do teclado funcionam, e o histórico, a letra, o Last.fm e o Discord a enxergam sem código próprio. O visual
-  reage porque ouve o que sai do computador.
+  escolhida; aceita acentos com tecla morta e colar (`Ctrl V`). Clicar numa música toca, e a lista inteira vira
+  a fila ("Tocar tudo" começa do início). O dock controla (tocar/pausar, anterior, próxima; "anterior" volta ao
+  começo depois de 3 segundos) e um clique no mapa de energia vai para aquele ponto. "Atualizar" varre de novo:
+  o que é novo entra, o que sumiu do disco sai.
+- **Álbuns e artistas**: o seletor Músicas | Álbuns | Artistas agrupa a categoria escolhida pelas etiquetas;
+  escolher um álbum ou artista filtra a lista, com um chip para tirar o filtro.
+- **Playlists**: "+ Playlist" cria uma (o nome aceita acentos e colar). Passando o mouse numa música aparecem
+  três botões: tocar a seguir, pôr no fim da fila e pôr numa playlist (a janela lista as playlists e cria uma
+  nova). Cada playlist vira uma categoria, na ordem em que as músicas entraram; dentro dela, o X da linha tira a
+  música. Apagar pede confirmação ("Apagar?"). Ficam no `biblioteca.db` (tabelas `playlists` e
+  `playlist_itens`), guardando o caminho dos arquivos.
+- **Fila** (aba da Biblioteca, `Q`, ou o botão no dock): o que já tocou (esmaecido), a de agora e o que vem
+  depois. Clicar pula para a música; com o mouse em cima, subir, descer e tirar. "Limpar a seguir" deixa só a de
+  agora. Tirar uma música, limpar a fila, tirar uma música de playlist, tirar uma pasta ou apagar uma playlist
+  mostram um aviso com **Desfazer** (6 segundos; `Ctrl Z` também vale). **Aleatório** (`S`) embaralha o resto
+  mantendo a de agora, e desligar volta à ordem original.
+  **Repetir** (`R`) passa por não, a fila e a música. Os dois ficam no dock quando uma música local toca e são
+  lembrados nos ajustes.
+- **Reprodução** (Ajustes, "Músicas do computador"): a próxima música já fica aberta e entra **sem intervalo**
+  (discos ao vivo e mixados ficam inteiros). **Crossfade** de 2 a 12 s, com curvas de mesma potência (só quando
+  o arquivo informa a duração). **Volume igualado** pelo ReplayGain das etiquetas (`REPLAYGAIN_TRACK_GAIN` e
+  `REPLAYGAIN_TRACK_PEAK`), sem passar do pico; arquivo sem ReplayGain toca como está. **Equalizador** de 10
+  bandas (31 Hz a 16 kHz, ±12 dB): presets, ou clique e arraste nas barras. No fim um limitador suave impede que
+  ganho, equalizador e crossfade estourem. Valem só para as músicas do computador: o som dos outros apps não
+  passa pelo tocador.
+- **Sensibilidade do Modo Escuta**: o som entra no nível em que o diretor foi calibrado, e um ganho automático
+  sobe fontes baixas (Spotify e YouTube igualam o volume em -14 LUFS; o volume do app baixa mais) até 12 dB,
+  sem mexer em música já alta nem em silêncio. A fase da batida segue os bumbos.
+- **De onde vem o "tocando agora"**: a tela mostra quem está tocando. Pausou a música local e deu play no
+  Spotify, a tela e os controles (dock, teclas do app, bandeja e botões da barra de tarefas) passam para o
+  Spotify; voltou a tocar a local, voltam para ela. Com as duas tocando, vale a que começou por último; com as
+  duas paradas, a que tocou por último. A sessão que o próprio Player publica no Windows não conta como "outro
+  app". Do lado do Windows, quando o app "atual" está parado e outro está tocando, o Player acompanha o que toca.
+- **Só mídia de verdade**: apps que abrem uma sessão de mídia no Windows sem tocar música (o Riot Client, por
+  exemplo: o título é o nome do app, sem artista, álbum nem duração) são ignorados na tela, no histórico, no
+  Last.fm e no Discord. "Nesta sessão" só registra uma música depois de 4 segundos tocando com som.
+- **Saída de som trocada** (fone desligado, outra caixa como padrão): a música local continua na saída nova, do
+  mesmo ponto e no mesmo estado (tocando ou pausada).
+- **Pasta fora do ar** (pendrive ou HD externo desligado): "Atualizar" pula a pasta e mantém o que já estava
+  guardado, em vez de apagar as músicas dela.
+- **Com a janela escondida ou minimizada**, o player local continua atendido (a fila anda, as teclas de mídia e a
+  bandeja respondem): um relógio de 200 ms faz o que antes só acontecia no desenho.
+- **Pré-análise** (músicas do computador): antes de tocar, o app analisa o arquivo inteiro com a receita da prévia
+  (batidas por programação dinâmica, tempo forte do compasso, clareza do pulso, trechos pela novidade, energia
+  calibrada no corpus, drops no ataque exato, tom) e guarda em `analises.db` (refaz se o arquivo mudar). Durante a
+  música, o visual é conduzido por essa linha do tempo: o pump cai em cada batida, mais forte no tempo forte; o
+  drop, no instante dele; a subida começa até 16 s antes; o módulo Ritmo acende o tempo certo do compasso e mostra
+  o tom (com a notação Camelot). A música de agora e as duas seguintes vêm
+  primeiro; o resto da biblioteca é analisado aos poucos, em prioridade baixa (Ajustes, "Analisar a biblioteca",
+  com o andamento). Com a análise pronta: o mapa de energia do dock aparece inteiro desde o começo; a "Estrutura
+  da faixa" mostra a música toda (o que tocou, o de agora, o que vem), marca os drops e diz quanto falta para o
+  próximo; o BPM fica firme; e o visual se prepara nos 4 segundos antes do drop e acerta o momento dele (ao vivo,
+  o drop só é percebido depois). Música sem ReplayGain ganha o volume igualado pela sonoridade medida (nível
+  de referência -18 LUFS, sem passar do pico).
+- **A música local aparece no Windows** como a de qualquer app (controle de mídia do sistema), com a capa
+  embutida no arquivo (gravada na pasta temporária `TccPlayer`): as teclas de mídia do teclado funcionam, e o
+  histórico, a letra, o Last.fm e o Discord a enxergam sem código próprio. O visual reage porque ouve o que sai
+  do computador.
 - **Histórico** (aba da Biblioteca): o que tocou com o Player aberto, por período (hoje, 7 dias, 30 dias, tudo): tempo
   ouvido e comparação com o período anterior, músicas, artistas, BPM e energia médios, dias seguidos com música,
   horas do dia, mais ouvidos e as últimas músicas. Uma música entra depois de 30 segundos ouvidos (ou da metade,
@@ -85,6 +140,31 @@ mais recente das outras e nunca espera por elas.
 - **Bandeja**: um ícone ao lado do relógio mostra o nome da música; clicar traz a janela, e o botão direito abre
   o menu (mostrar, tocar ou pausar, próxima, anterior, sair). Com "Continuar na bandeja" ligado nos Ajustes
   (desligado por padrão), fechar a janela só a esconde: o app segue ouvindo e contando o histórico.
+- **Ilha** (opcional, desligada por padrão: tecla `D`, o botão ao lado da janela mini no dock ou Configurações ›
+  Ilha): um entalhe preto preso ao topo da tela, com "ombros" curvos que o ligam à borda (no estilo do Nusa e do
+  island), por cima de tudo e sem roubar o foco. Fechada, mostra a capa e o som em barras na cor do visual. Avisa
+  por um instante a música nova, o volume e, nas músicas pré-analisadas, a contagem "Drop em 3, 2, 1".
+  - **Abre quase na hora** (30 ms com o mouse em cima, ou na borda de cima da tela sobre ela) e fecha 200 ms depois
+    de o mouse sair. Cresce com um leve quique e encolhe sem quique; some encolhendo para a borda.
+  - **Páginas** quando aberta: *Tocando* (capa grande, título, progresso, controles, abrir o Player), *Letra* (a linha
+    cantada grande, enchendo como num karaokê, entre a anterior e as próximas; a troca de linha rola numa mola e a
+    linha que chega cresce e acende), *Visual* (o visual de verdade, reagindo ao som, num recorte da Ilha, com a
+    escolha entre Spectral, Fluxo e Barras; ele é preparado em segundo plano quando a Ilha abre, então chegar à
+    página não trava), *Ritmo* (BPM, energia, estrutura da faixa, contagem do drop e tom) e
+    *Ajustes* (cores reativas, modo seguro, visual, tema, tamanho da Ilha e abrir as Configurações; o que está
+    ligado fica branco, como no painel). Troca pelas
+    abas, arrastando o conteúdo para o lado ou com a roda do mouse.
+  - **Arrastar pela borda de cima** muda a Ilha de lugar (com um ímã no centro); ela lembra onde ficou. "Voltar ao
+    centro" nas Configurações.
+  - **Tamanhos**: mínima (fechada só com o som em barras), padrão e grande.
+  - **Sai do caminho** com jogo, vídeo ou apresentação em tela cheia, com o Player maximizado ou em tela cheia na
+    frente e depois de 30 s parada; segue funcionando com a janela minimizada ou na bandeja. Fora da forma, os
+    cliques passam para o que está embaixo. O × da Ilha aberta a fecha. Respeita o modo seguro e o "Efeitos de
+    animação" do Windows.
+- **Configurações** (`Ctrl ,` ou o botão de controles na barra lateral): uma página com seções (Geral, Aparência,
+  Visual, Som, Ilha, Atalhos, Sobre). Larga, as seções ficam numa coluna à esquerda; média, viram fichas no topo;
+  estreita, a página vai para a área do painel e rola inteira, com o visual em cima. As mudanças valem na hora e
+  ficam guardadas. Trocar o tema muda as cores na hora (o tom do dock acompanha em cerca de 0,15 s).
 - **Janela mini** (`N`, ou o botão no dock): a janela encolhe para o canto da tela e fica por cima das outras,
   só com o visual e a faixa. Com o mouse em cima aparecem os controles (anterior, tocar/pausar, próxima) no
   canto de baixo à direita, o nome do visual (clicar troca) e o botão de voltar ao tamanho de antes; ao tirar o
@@ -112,8 +192,15 @@ mais recente das outras e nunca espera por elas.
   de até 30 s não contam; pausa e silêncio também não). Sem internet, até 50 scrobbles esperam e são reenviados
   a cada minuto. Sem artista (título vindo do navegador) a faixa não é enviada. Se o app de origem já envia ao
   Last.fm, a música conta duas vezes: desligue num dos dois.
-- **Discord** (módulo): mostra a música no perfil ("Ouvindo"), com a barra de progresso, pelo canal local do
-  Discord aberto neste computador. Sem login e sem rede. O cartão some quando a música pausa.
+- **Discord** (módulo, versão 1.1.0): mostra a música no perfil ("Ouvindo"), com a capa do álbum, a foto do
+  artista no canto, o nome do álbum ao passar o mouse e a barra de progresso; título e artista viram links para o
+  Last.fm. Fala com o Discord aberto neste computador e busca a capa na busca pública do Deezer (vão o título e
+  o artista; sem conta nem chave). O Player lê a resposta do Discord: se ele recusar o cartão, o motivo aparece
+  na ficha. O cartão some quando a música pausa. Não aparece? No Discord, ligue "Privacidade de atividade >
+  Compartilhar sua atividade detectada".
+- **Versões novas de módulo**: a que não pede nada além do que foi aceito se aplica sozinha; a que pede mais
+  (como o Discord 1.1.0, que passou a usar a internet) fica parada até a pessoa aceitar na ficha ("Aceitar e
+  atualizar").
 - **Chaves dos serviços**: não ficam no código. O Last.fm precisa de `LASTFM_API_KEY` e `LASTFM_API_SECRET`
   (criadas em <https://www.last.fm/api/account/create>) e o Discord de `DISCORD_APP_ID` (o "Application ID" de
   um aplicativo criado em <https://discord.com/developers/applications>; o nome dele é o que aparece no cartão).
@@ -126,7 +213,8 @@ mais recente das outras e nunca espera por elas.
   inclusive as capas.
 - **Micro-interações** (artefato "Micro-interações do Player"): botões afundam ao pressionar, o play vira pause
   ponto a ponto, marcadores de aba deslizam, os dígitos do BPM rolam, o título entra a cada troca de faixa, o
-  logo e o ponto da energia pulsam uma vez por compasso (nunca no modo seguro), o volume estica nas pontas.
+  logo e o ponto da energia pulsam uma vez por compasso (nunca no modo seguro), o volume estica nas pontas. Com o
+  "Efeitos de animação" do Windows desligado (ou o modo seguro), nada desliza: tudo vai direto ao estado final.
 - **Fontes**: Instrument Sans (texto e títulos estreitos), Doto (números) e Fragment Mono, embutidas. Ficam em
   `recursos/fontes`, geradas por `gerar.py` a partir das fontes do Google Fonts (licença OFL).
 
@@ -154,11 +242,15 @@ Dados do usuário ficam em `%APPDATA%\TccPlayer` (`ajustes.toml`, `modulos.toml`
 áudio é gravado nem enviado para fora. O histórico fica só no computador. A única coisa que sai é a busca da
 letra (título, artista, álbum e duração), e só com o módulo Letra no painel.
 
+- **Janela estreita**: com a Biblioteca ou a Loja aberta no layout empilhado, a página fica com o meio inteiro (o
+  painel de módulos sai), sem a descrição, e os botões de texto do topo dela viram só ícone, com a dica.
+
 ## Atalhos
 
 Espaço tocar/pausar · Ctrl ←/→ faixa anterior/próxima · Ctrl ↑/↓ volume · M mudo · F tela cheia · P painel ·
 Ctrl K comandos · Ctrl , ajustes · V próximo visual · 1/2/3 escolher o visual · T próximo tema · I imersivo ·
-E editar o layout · N janela mini · Esc fechar/voltar. Cada atalho chama um comando com nome (`player.tocar-pausar`,
+E editar o layout · N janela mini · D Ilha · H Início · B Biblioteca · L Loja · S aleatório · R repetir · Q fila ·
+Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
 `layout.editar`…), o mesmo que os botões e a barra de comandos usam. A lista inteira está em
 `crates/nucleo/src/comando.rs`.
 
@@ -166,7 +258,7 @@ E editar o layout · N janela mini · Esc fechar/voltar. Cada atalho chama um co
 
 Captura por app (hoje é o som do sistema inteiro), no player: tela da fila, tocar sem intervalo entre faixas,
 normalização de volume, equalizador, crossfade, capa da música local no controle do Windows, playlists e
-visões por álbum e artista; letra palavra por palavra, ajuste de sincronia da letra lembrado por música, retrospectiva do ano, download de módulos
+visões por álbum e artista; ajuste de sincronia da letra lembrado por música, retrospectiva do ano, download de módulos
 pela Loja (catálogo assinado), skins carregadas de arquivo, ir a um ponto da música pelo mapa de energia (e a
 lupa ao passar o mouse), arrastar o visual para trocar de lado (há o botão "Trocar de lado"), medidor de flashes,
 ajuste de sincronia para fone Bluetooth e CI. A Biblioteca abre uma folha dizendo o que vem.

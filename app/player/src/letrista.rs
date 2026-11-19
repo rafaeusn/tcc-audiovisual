@@ -287,7 +287,11 @@ fn situacao_de(guardada: &LetraGuardada) -> Situacao {
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|l| !l.is_empty())
         .take(MAXIMO_DE_LINHAS)
-        .map(|texto| Linha { t: 0.0, texto: texto.chars().filter(|c| !c.is_control()).take(300).collect() })
+        .map(|texto| Linha {
+            t: 0.0,
+            texto: texto.chars().filter(|c| !c.is_control()).take(300).collect(),
+            palavras: Vec::new(),
+        })
         .collect();
     if !linhas.is_empty() {
         Situacao::Achou(Arc::new(Letra { linhas, sincronizada: false, instrumental: false }))

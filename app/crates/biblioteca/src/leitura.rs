@@ -2,7 +2,7 @@
 
 use crate::Musica;
 use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::tag::Accessor;
+use lofty::tag::{Accessor, ItemKey};
 use std::path::Path;
 
 /// Os tipos de arquivo que o tocador sabe tocar.
@@ -31,12 +31,25 @@ pub fn ler(caminho: &Path) -> Musica {
             m.artista = etiqueta.artist().map(|t| limpo(&t)).unwrap_or_default();
             m.album = etiqueta.album().map(|t| limpo(&t)).unwrap_or_default();
             m.numero = etiqueta.track().unwrap_or(0);
+            m.ganho_db = etiqueta.get_string(&ItemKey::ReplayGainTrackGain).and_then(numero_da_etiqueta);
+            m.pico = etiqueta.get_string(&ItemKey::ReplayGainTrackPeak).and_then(numero_da_etiqueta);
         }
     }
     if m.titulo.is_empty() {
         m.titulo = caminho.file_stem().map(|n| limpo(&n.to_string_lossy())).unwrap_or_default();
     }
     m
+}
+
+/// O número no começo de uma etiqueta como "-6.53 dB" ou "0,98". `None` se não houver número razoável.
+pub fn numero_da_etiqueta(texto: &str) -> Option<f32> {
+    let limpo: String = texto
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | ','))
+        .map(|c| if c == ',' { '.' } else { c })
+        .collect();
+    limpo.parse::<f32>().ok().filter(|v| v.is_finite() && v.abs() < 100.0)
 }
 
 /// A imagem da capa embutida no arquivo (os bytes do JPEG ou PNG), se houver.
@@ -125,6 +138,15 @@ pub(crate) mod testes {
         varrer(&pasta.join("nao-existe"), &mut |_| nenhum += 1, &|| true);
         assert_eq!(nenhum, 0);
         let _ = std::fs::remove_dir_all(pasta);
+    }
+
+    #[test]
+    fn numero_das_etiquetas_de_replaygain() {
+        assert_eq!(numero_da_etiqueta("-6.53 dB"), Some(-6.53));
+        assert_eq!(numero_da_etiqueta(" +2,5 dB"), Some(2.5));
+        assert_eq!(numero_da_etiqueta("0.988"), Some(0.988));
+        assert_eq!(numero_da_etiqueta("dB"), None);
+        assert_eq!(numero_da_etiqueta("9999"), None);
     }
 
     #[test]

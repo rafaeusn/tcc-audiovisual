@@ -13,9 +13,12 @@ mod catalogo;
 mod diagnostico;
 mod diario;
 mod escuta;
+mod fila;
 mod gravador;
+mod ilha;
 mod letrista;
 mod local;
+mod preanalista;
 mod recursos;
 mod servicos;
 mod tema;
@@ -126,12 +129,21 @@ fn main() {
         };
         let aberta = cx
             .open_window(opcoes, move |window, cx| cx.new(|cx| app::Player::new(ajustes, gravador, banco, window, cx)));
-        if let Err(e) = aberta {
-            log::error!("não foi possível abrir a janela: {e}");
-            cx.quit();
-            return;
-        }
-        cx.on_window_closed(|cx| cx.quit()).detach();
+        let principal = match aberta {
+            Ok(janela) => janela.window_id(),
+            Err(e) => {
+                log::error!("não foi possível abrir a janela: {e}");
+                cx.quit();
+                return;
+            }
+        };
+        // Só a janela principal encerra o app (fechar a Ilha não); com ela, a Ilha vai junto.
+        cx.on_window_closed(move |cx| {
+            if !cx.windows().iter().any(|w| w.window_id() == principal) {
+                cx.quit();
+            }
+        })
+        .detach();
         cx.activate(true);
     });
     log::info!("Player encerrado");

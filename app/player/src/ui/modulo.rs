@@ -77,8 +77,13 @@ impl Player {
                     false,
                     None,
                 ),
-                SituacaoDiscord::Ligado => {
-                    ("Ligado ao Discord. O cartão aparece enquanto a música toca.".into(), false, None)
+                SituacaoDiscord::Ligado => (
+                    "Ligado ao Discord. O cartão aparece enquanto a música toca. Não aparece? No Discord, veja \"Configurações > Privacidade de atividade\" e ligue \"Compartilhar sua atividade detectada\".".into(),
+                    false,
+                    None,
+                ),
+                SituacaoDiscord::Recusado(motivo) => {
+                    (format!("O Discord recusou o cartão: {motivo}.").into(), true, None)
                 }
             }
         } else {
@@ -127,7 +132,10 @@ impl Player {
     pub(crate) fn ver_ficha_do_modulo(&self, m: &Manifesto, cx: &mut Context<Self>) -> AnyElement {
         let c = self.cores();
         let a = &self.arranjo;
-        let instalado = self.instalados.achar(&m.id).is_some();
+        // Com uma versão nova pedindo mais, o rodapé volta a pedir o aceite (o botão vira "Aceitar e atualizar").
+        let pendencias = self.pendencias(m);
+        let instalado = self.instalados.achar(&m.id).is_some() && pendencias.is_empty();
+        let rotulo_instalar = if pendencias.is_empty() { "Instalar" } else { "Aceitar e atualizar" };
 
         let cabeca = div()
             .flex()
@@ -245,6 +253,33 @@ impl Player {
             .flex_col()
             .gap(px(12.0))
             .child(texto(14.0).text_color(c.texto_2).child(SharedString::from(m.descricao.clone())))
+            .when(!pendencias.is_empty(), |d| {
+                let lista: Vec<String> = pendencias
+                    .iter()
+                    .map(|p| match p {
+                        modulos::Mudanca::AcaoNova(a) => a.rotulo().to_string(),
+                        modulos::Mudanca::EnderecoNovo(e) => format!("acesso a {e}"),
+                        modulos::Mudanca::MotivoMudou(a) => format!("novo motivo para \"{}\"", a.rotulo()),
+                        modulos::Mudanca::AutorMudou => "outro autor".to_string(),
+                    })
+                    .collect();
+                d.child(
+                    div()
+                        .p(px(12.0))
+                        .flex()
+                        .items_start()
+                        .gap(px(10.0))
+                        .rounded(px(RAIO_CONTROLE))
+                        .border_1()
+                        .border_color(c.alerta)
+                        .child(icone("icones/info.svg", 18.0, c.alerta))
+                        .child(texto(14.0).flex_1().min_w(px(0.0)).child(format!(
+                            "A versão {} pede mais do que você aceitou: {}. Até você aceitar, o módulo fica parado.",
+                            m.versao,
+                            lista.join("; ")
+                        ))),
+                )
+            })
             .children(self.situacao_do_servico(m, cx))
             .child(
                 texto(12.0)
@@ -331,7 +366,7 @@ impl Player {
                             cx.notify();
                         })),
                 )
-                .child(botao("ficha-instalar", "Instalar", true, marcado).on_click(cx.listener(
+                .child(botao("ficha-instalar", rotulo_instalar, true, marcado).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
                         this.instalar_modulo_aberto();
                         cx.notify();

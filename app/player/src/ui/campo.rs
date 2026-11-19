@@ -52,6 +52,9 @@ pub fn trocar(s: &mut String, faixa: Range<usize>, novo: &str) -> Range<usize> {
 impl Player {
     /// O texto do campo que está recebendo o teclado agora.
     fn campo_ativo(&mut self) -> Option<&mut String> {
+        if let Some(j) = self.janela_playlist.as_mut() {
+            return Some(&mut j.nome);
+        }
         if let Some(p) = self.paleta.as_mut() {
             return Some(&mut p.consulta);
         }
@@ -63,6 +66,9 @@ impl Player {
 
     /// O campo ativo mudou de texto: cada campo reage do seu jeito.
     fn campo_mudou(&mut self) {
+        if self.janela_playlist.is_some() {
+            return;
+        }
         if let Some(p) = self.paleta.as_mut() {
             p.selecionado = 0;
             if !p.letra {
@@ -172,7 +178,11 @@ impl EntityInputHandler for Player {
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
         let marcado = self.marcado.clone()?;
-        let s = if let Some(p) = self.paleta.as_ref() { &p.consulta } else { &self.busca_musicas };
+        let s = match (self.janela_playlist.as_ref(), self.paleta.as_ref()) {
+            (Some(j), _) => &j.nome,
+            (None, Some(p)) => &p.consulta,
+            (None, None) => &self.busca_musicas,
+        };
         Some(para_utf16(s, marcado.start)..para_utf16(s, marcado.end))
     }
 

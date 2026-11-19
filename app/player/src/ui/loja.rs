@@ -282,9 +282,12 @@ impl Player {
                             .flex_col()
                             .gap(px(4.0))
                             .child(titulo(if a.heroi.w >= 640.0 { 40.0 } else { 28.0 }).child("Loja"))
-                            .child(texto(14.0).text_color(c.texto_2).child(
-                                "Módulos, temas, skins e layouts. O que já vem com o app se aplica com um clique.",
-                            )),
+                            // Em janela estreita a descrição sai: a altura fica para a lista.
+                            .when(a.heroi.w >= 640.0, |d| {
+                                d.child(texto(14.0).text_color(c.texto_2).child(
+                                    "Módulos, temas, skins e layouts. O que já vem com o app se aplica com um clique.",
+                                ))
+                            }),
                     )
                     .child(self.botao_icone(
                         "loja-fechar",

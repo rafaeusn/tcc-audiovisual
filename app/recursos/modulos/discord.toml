@@ -1,10 +1,10 @@
 id = "player.discord"
 nome = "Discord"
-versao = "1.0.0"
-codigo = 1
+versao = "1.1.0"
+codigo = 2
 autor = "Player"
 categoria = "presenca"
-descricao = "Mostra no seu perfil do Discord a música que está tocando, com a barra de progresso. Fala só com o Discord aberto neste computador."
+descricao = "Mostra no seu perfil do Discord a música que está tocando, com a capa, a foto do artista e a barra de progresso. Fala com o Discord aberto neste computador e busca a capa no Deezer pelo título e pelo artista."
 
 [[acoes]]
 nome = "tocando.ler"
@@ -13,3 +13,8 @@ motivo = "Saber qual música mostrar no seu perfil"
 [[acoes]]
 nome = "programa.local"
 motivo = "Entregar o cartão ao Discord que está aberto neste computador"
+
+[[acoes]]
+nome = "rede"
+motivo = "Buscar a capa da música e a foto do artista (vão o título e o artista)"
+enderecos = ["api.deezer.com"]

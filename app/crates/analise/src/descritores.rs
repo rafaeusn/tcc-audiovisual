@@ -105,7 +105,9 @@ impl Descritores {
         if !tempo.is_empty() {
             let (mut ss, mut pk) = (0.0f32, 0.0f32);
             for v in tempo {
-                let v = if v.is_finite() { *v } else { 0.0 };
+                // A prévia media o volume pelos bytes do AnalyserNode, que cortam acima do máximo: a calibração
+                // conta com esse corte (masters muito altas têm muito pico).
+                let v = if v.is_finite() { v.clamp(-1.0, 1.0) } else { 0.0 };
                 ss += v * v;
                 pk = pk.max(v.abs());
             }

@@ -52,7 +52,7 @@ pub fn cores(tema: Tema) -> Cores {
         linha_2: h(0x2a2a2e),
         texto: h(0xf2f2f3),
         texto_2: h(0xa7a7ad),
-        texto_3: h(0x808087),
+        texto_3: h(0x8a8a91),
         inv: h(0xf4f4f5),
         inv_texto: h(0x0b0b0c),
         hover: h(0x18181b),
@@ -75,7 +75,7 @@ pub fn cores(tema: Tema) -> Cores {
             linha: h(0x26262a),
             linha_2: h(0x323237),
             texto_2: h(0xb1b1b7),
-            texto_3: h(0x8e8e95),
+            texto_3: h(0x96969d),
             hover: h(0x1f1f22),
             sel: h(0x29292d),
             folha: ha(0x0f0f10e0),
@@ -212,9 +212,12 @@ mod testes {
     fn texto_tem_contraste_minimo_em_todos_os_temas() {
         for tema in Tema::TODOS {
             let c = cores(tema);
-            for (nome, cor) in [("texto", c.texto), ("texto_2", c.texto_2), ("texto_3", c.texto_3)] {
-                let r = contraste(tripla(cor), tripla(c.parede));
-                assert!(r >= 4.5, "{tema:?}: {nome} sobre a parede tem contraste {r:.2}");
+            // Sobre a parede, os blocos (módulos, cartões) e a linha selecionada.
+            for (fundo, base) in [("parede", c.parede), ("bloco", c.bloco), ("sel", c.sel)] {
+                for (nome, cor) in [("texto", c.texto), ("texto_2", c.texto_2), ("texto_3", c.texto_3)] {
+                    let r = contraste(tripla(cor), tripla(base));
+                    assert!(r >= 4.5, "{tema:?}: {nome} sobre {fundo} tem contraste {r:.2}");
+                }
             }
             let r = contraste(tripla(c.inv_texto), tripla(c.inv));
             assert!(r >= 4.5, "{tema:?}: botão principal com contraste {r:.2}");

@@ -4516,6 +4516,7 @@ dependencies = [
  "log",
  "modulos",
  "nucleo",
+ "preanalise",
  "raw-window-handle",
  "servicos",
  "sessao",
@@ -4626,6 +4627,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
+]
+
+[[package]]
+name = "preanalise"
+version = "0.1.0"
+dependencies = [
+ "analise",
+ "log",
+ "nucleo",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tocador",
 ]
 
 [[package]]

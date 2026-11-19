@@ -131,3 +131,26 @@ node tools/simulate.mjs caminho/musica.mp3  # uma faixa
 - O modo ao vivo não sabe o futuro: transições e drops chegam com atraso de ~1 s e os pulsos têm ~25-45 ms de atraso.
 - A calibração usa julgamento de faixas esperadas por gênero, não anotação humana. Próximo passo para o TCC: um teste
   com usuários (ex.: notas de "sincronia" e "imersão" por trecho) para validar os pesos.
+
+## 8. No app em Rust (15/11/2026)
+
+- **Nível de entrada.** A calibração acima usou áudio mono pelo ffmpeg (`-ac 1`), que soma os canais com -3 dB
+  cada: 3 dB acima da média simples. O motor em Rust compensa (`GANHO_DE_CALIBRACAO = √2` em `analise::Motor`) e
+  a pré-análise faz o mono do mesmo jeito. Sem isso o diretor ouvia tudo 3 dB mais baixo (hardstyle não chegava
+  no vermelho). A prévia media o volume por bytes de 8 bits, que cortam acima do máximo; o Rust corta só nessa
+  medida, para seguir a calibração.
+- **Ganho automático de volume (ao vivo).** Spotify e YouTube igualam em -14 LUFS e o volume do app baixa mais
+  antes da captura. `analise::GanhoAutomatico` acompanha o percentil 80 do nível do último minuto e sobe o sinal
+  até -10 dBFS (no máximo +12 dB, nunca abaixa, não aprende com silêncio). A porta de silêncio olha o volume sem
+  esse ganho.
+- **Fase da batida ao vivo** travada nos ataques graves e médios (antes corria num relógio solto).
+- **Pré-análise** portada para `crates/preanalise/src/pista.rs` (mesmas constantes) e **modo arquivo** do diretor
+  em `crates/preanalise/src/condutor.rs`. Comparação nas duas faixas de hardstyle (`cargo run --release -p
+  preanalise --example diagnostico -- faixa.mp3` contra `node tools/simulate.mjs faixa.mp3`):
+
+| Faixa | BPM (JS / Rust) | Batidas | Drops (JS) | Drops (Rust) | Energia p10/50/90 (JS / Rust) |
+| --- | --- | --- | --- | --- | --- |
+| ATTSS | 170,2 / 170,1 | 517 / 518 | 12,5 49,1 58,4 139,2 148,8 | 12,6 49,3 58,4 139,2 148,8 | 0,46/0,76/0,91 / 0,46/0,76/0,91 |
+| Outside | 150,0 / 150,0 | 379 / 381 | 26,4 52,1 90,4 143,4 | 27,7 52,1 90,5 144,2 | 0,46/0,83/0,91 / 0,48/0,84/0,92 |
+
+- **Tom**: cromagrama + perfis de Krumhansl-Kessler (`crates/preanalise/src/tom.rs`), com a notação Camelot.

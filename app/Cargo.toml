@@ -5,7 +5,7 @@ members = ["crates/*", "player"]
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
-license = "MIT"
+license = "GPL-3.0-or-later"
 rust-version = "1.88"
 
 [workspace.dependencies]
@@ -22,6 +22,7 @@ modulos = { path = "crates/modulos" }
 servicos = { path = "crates/servicos" }
 tocador = { path = "crates/tocador" }
 biblioteca = { path = "crates/biblioteca" }
+preanalise = { path = "crates/preanalise" }
 
 # O GPUI ainda é pré-1.0: a versão exata fica presa aqui e no Cargo.lock.
 gpui = "=0.2.2"

@@ -12,13 +12,18 @@ mod biblioteca;
 mod busca_letra;
 mod campo;
 mod casca;
+pub mod configuracoes;
 mod dock;
+mod fila;
 mod heroi;
+pub mod ilha;
 mod loja;
 mod modulo;
 mod musicas;
 mod painel;
 mod paleta;
+mod playlist;
+mod reproducao;
 
 use crate::app::Player;
 use crate::arranjo::Ret;
@@ -104,6 +109,89 @@ pub fn com_alfa(cor: Hsla, a: f32) -> Hsla {
     Hsla { a, ..cor }
 }
 
+/// Mistura duas cores (0 = `a`, 1 = `b`), em RGB.
+pub fn misturar(a: Hsla, b: Hsla, t: f32) -> Hsla {
+    let (a, b, t) = (a.to_rgb(), b.to_rgb(), t.clamp(0.0, 1.0));
+    gpui::Rgba {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
+    .into()
+}
+
+/// Por quantas letras a borda do karaokê se espalha: a letra cantada acende aos poucos, não de um quadro para o
+/// outro.
+const BORDA_DO_KARAOKE: f32 = 2.5;
+
+/// Uma linha da letra enchendo como num karaokê: as letras já cantadas em `cheia`, as que faltam em `apagada` e,
+/// entre as duas, uma borda macia. `cantado` é quantas letras já foram (com fração), como em [`letras::cantado`].
+/// As cores vão inteiras em cada trecho do texto: um destaque do GPUI mistura a cor por cima da cor do texto e
+/// fica com o alfa dela (um branco translúcido sobre texto branco continuaria branco).
+pub fn letra_enchendo(
+    linha: gpui::SharedString,
+    cantado: f32,
+    cheia: Hsla,
+    apagada: Hsla,
+    peso: gpui::FontWeight,
+) -> gpui::StyledText {
+    if linha.is_empty() {
+        return gpui::StyledText::new(linha);
+    }
+    let fonte = gpui::Font { weight: peso, ..gpui::font(FONTE) };
+    let trecho = |len: usize, color: Hsla| gpui::TextRun {
+        len,
+        font: fonte.clone(),
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let mut cheias_ate = 0;
+    let mut apagadas_de = linha.len();
+    let mut meio = Vec::new();
+    for (j, (b, letra)) in linha.char_indices().enumerate() {
+        let f = ((cantado - (j as f32 + 1.0 - BORDA_DO_KARAOKE)) / BORDA_DO_KARAOKE).clamp(0.0, 1.0);
+        if f >= 0.999 {
+            cheias_ate = b + letra.len_utf8();
+        } else if f <= 0.001 {
+            apagadas_de = b;
+            break;
+        } else {
+            meio.push(trecho(letra.len_utf8(), misturar(apagada, cheia, f)));
+        }
+    }
+    let mut trechos = Vec::with_capacity(meio.len() + 2);
+    if cheias_ate > 0 {
+        trechos.push(trecho(cheias_ate, cheia));
+    }
+    trechos.extend(meio);
+    if apagadas_de < linha.len() {
+        trechos.push(trecho(linha.len() - apagadas_de, apagada));
+    }
+    gpui::StyledText::new(linha).with_runs(trechos)
+}
+
+/// O texto da linha `k` da letra sincronizada e quanto dela já foi cantado no instante `t` (`atual` é a linha de
+/// agora): as de antes inteiras, as de depois nada. Uma pausa vira "· · ·", que enche no tempo até a próxima linha.
+pub fn linha_da_letra(linhas: &[letras::Linha], k: usize, atual: Option<usize>, t: f64) -> (gpui::SharedString, f32) {
+    let Some(linha) = linhas.get(k) else { return (gpui::SharedString::default(), 0.0) };
+    let pausa = linha.texto.trim().is_empty();
+    let conteudo: gpui::SharedString = if pausa { "· · ·".into() } else { linha.texto.clone().into() };
+    let n = conteudo.chars().count() as f32;
+    let cantado = match atual {
+        Some(i) if k < i => n,
+        Some(i) if k == i && pausa => {
+            let fim = linhas.get(k + 1).map_or(linha.t + 4.0, |p| p.t);
+            ((t - linha.t) / (fim - linha.t).max(0.2)).clamp(0.0, 1.0) as f32 * n
+        }
+        Some(i) if k == i => letras::cantado(linhas, k, t),
+        _ => 0.0,
+    };
+    (conteudo, cantado)
+}
+
 /// "1:32" (ou "1:02:03" acima de uma hora).
 pub fn tempo(segundos: f64) -> String {
     let s = if segundos.is_finite() { segundos.max(0.0) as u64 } else { 0 };
@@ -174,13 +262,24 @@ impl Player {
             Comando::AlternarMini if self.mini => "Voltar ao tamanho normal",
             Comando::AlternarMini => "Miniplayer",
             Comando::AlternarPainel => "Painel",
-            Comando::AbrirAjustes => "Ajustes",
+            Comando::AbrirAjustes => "Configurações",
             Comando::AbrirPagina(Pagina::Inicio) => "Início",
             Comando::AbrirPagina(Pagina::Biblioteca) => "Biblioteca",
             Comando::AbrirPagina(Pagina::Loja) => "Loja",
+            Comando::AbrirPagina(Pagina::Configuracoes) => "Configurações",
+            Comando::AlternarIlha if self.ajustes.ilha => "Fechar a Ilha",
+            Comando::AlternarIlha => "Ilha",
             Comando::AbrirPaleta => "Buscar",
             Comando::ProximoVisual => "Trocar o visual",
             Comando::EditarLayout => "Personalizar o layout",
+            Comando::AlternarAleatorio if self.local.fila.aleatorio => "Desligar o aleatório",
+            Comando::AlternarAleatorio => "Aleatório",
+            Comando::AlternarRepetir => match self.local.fila.repetir {
+                nucleo::Repetir::Nada => "Repetir a fila",
+                nucleo::Repetir::Fila => "Repetir a música",
+                nucleo::Repetir::Faixa => "Não repetir",
+            },
+            Comando::AbrirFila => "Fila",
             outro => outro.nome(),
         }
     }
@@ -424,29 +523,74 @@ impl Player {
     }
 
     /// Aviso curto (troca de visual, modo seguro), centralizado acima do dock.
-    pub(crate) fn ver_aviso(&self) -> Option<Div> {
-        let (texto_aviso, _) = self.aviso.as_ref()?;
+    pub(crate) fn ver_aviso(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let aviso = self.aviso.as_ref()?;
         let c = self.cores();
         let a = &self.arranjo;
         let base = if a.so_visual { 32.0 } else { a.janela.h - a.dock.y + 16.0 };
-        Some(
-            div().absolute().left(px(0.0)).bottom(px(base)).w_full().flex().justify_center().child(
+        let mut pilula = texto(14.0)
+            .id("aviso")
+            .max_w(px((a.janela.w - 32.0).max(200.0)))
+            .pl(px(16.0))
+            .pr(px(if aviso.desfazer.is_some() { 6.0 } else { 16.0 }))
+            .py(px(if aviso.desfazer.is_some() { 6.0 } else { 10.0 }))
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .rounded(px(999.0))
+            .bg(c.inv)
+            .text_color(c.inv_texto)
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .child(div().min_w(px(0.0)).truncate().child(aviso.texto.clone()));
+        if aviso.desfazer.is_some() {
+            // O aviso só bloqueia cliques quando tem o botão; sem ele, não atrapalha o que está embaixo.
+            pilula = pilula.occlude().child(
                 texto(14.0)
-                    .px(px(16.0))
-                    .py(px(10.0))
+                    .id("aviso-desfazer")
+                    .flex_none()
+                    .h(px(30.0))
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
                     .rounded(px(999.0))
-                    .bg(c.inv)
-                    .text_color(c.inv_texto)
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(texto_aviso.clone()),
-            ),
-        )
+                    .bg(com_alfa(c.inv_texto, 0.14))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(com_alfa(c.inv_texto, 0.24)))
+                    .child("Desfazer")
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.desfazer();
+                        cx.notify();
+                    })),
+            );
+        }
+        Some(div().absolute().left(px(0.0)).bottom(px(base)).w_full().flex().justify_center().child(pilula))
     }
 }
 
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn karaoke_cobre_o_texto_inteiro() {
+        // `with_runs` confere que os trechos somam o texto (e derruba o app se não somarem): qualquer ponto do
+        // canto, antes, no meio e depois da linha, com letras acentuadas, tem que passar.
+        let cor = |a| gpui::hsla(0.0, 0.0, 1.0, a);
+        for linha in ["", "a", "ação é cantar", "duas palavras", "· · ·"] {
+            for k in 0..=60 {
+                let cantado = k as f32 * 0.37 - 3.0;
+                let _ = letra_enchendo(linha.into(), cantado, cor(1.0), cor(0.4), gpui::FontWeight::BOLD);
+            }
+        }
+    }
+
+    #[test]
+    fn mistura_vai_de_uma_cor_a_outra() {
+        let (a, b) = (gpui::hsla(0.0, 0.0, 1.0, 0.4), gpui::hsla(0.0, 0.0, 1.0, 1.0));
+        assert!((misturar(a, b, 0.0).a - 0.4).abs() < 1e-4);
+        assert!((misturar(a, b, 1.0).a - 1.0).abs() < 1e-4);
+        assert!((misturar(a, b, 0.5).a - 0.7).abs() < 1e-4);
+    }
 
     #[test]
     fn tempo_formatado() {

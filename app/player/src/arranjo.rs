@@ -62,6 +62,9 @@ pub struct Pedido {
     pub imersivo: bool,
     /// Janela mini: só o visual, com o título pequeno.
     pub mini: bool,
+    /// Uma página com lista (Biblioteca, Loja) está aberta. No empilhado ela fica com o meio inteiro: no cartão de
+    /// cima, dividindo a altura com o painel, a lista nem aparecia.
+    pub pagina_cheia: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -140,8 +143,8 @@ pub fn calcular(largura: f32, altura: f32, p: Pedido) -> Arranjo {
         // O visual fica com 46% do espaço (no máximo um quadrado e meio); o painel rola no que sobra.
         let mut hh = (livre * 0.46).min(lw * 0.9).max(160.0);
         let mut resto = livre - hh - MARGEM;
-        if resto < 120.0 {
-            // Janela baixa demais para os dois: fica só o visual.
+        if p.pagina_cheia || resto < 120.0 {
+            // Uma página com lista aberta, ou janela baixa demais para os dois: fica só o meio, sem o painel.
             hh = livre.max(120.0);
             resto = 0.0;
         }
@@ -223,6 +226,7 @@ mod testes {
         painel_a_esquerda: false,
         imersivo: false,
         mini: false,
+        pagina_cheia: false,
     };
 
     fn dentro(r: &Ret, j: &Ret) -> bool {
@@ -275,7 +279,12 @@ mod testes {
             (360.0, 560.0),
             (320.0, 400.0),
         ] {
-            for pedido in [ABERTO, Pedido::default(), Pedido { gaveta_aberta: true, ..ABERTO }] {
+            for pedido in [
+                ABERTO,
+                Pedido::default(),
+                Pedido { gaveta_aberta: true, ..ABERTO },
+                Pedido { pagina_cheia: true, ..ABERTO },
+            ] {
                 let a = calcular(w, h, pedido);
                 let mut regioes = vec![a.topo, a.heroi, a.dock];
                 regioes.extend(a.trilho);
@@ -305,6 +314,20 @@ mod testes {
         assert_eq!(a.titulo, 28.0);
         assert!(a.nav.is_some_and(|n| (n.base() - 844.0).abs() < 0.01));
         assert!(a.painel.is_some_and(|p| p.y > a.heroi.base() && p.base() < a.dock.y));
+    }
+
+    #[test]
+    fn pagina_com_lista_fica_com_o_meio_inteiro_no_empilhado() {
+        for (w, h) in [(380.0, 720.0), (390.0, 844.0), (760.0, 1000.0)] {
+            let normal = calcular(w, h, ABERTO);
+            let cheia = calcular(w, h, Pedido { pagina_cheia: true, ..ABERTO });
+            assert_eq!(cheia.modo, Modo::Empilhado);
+            assert!(normal.painel.is_some() && cheia.painel.is_none(), "{w}x{h}: o painel sai");
+            assert!(cheia.heroi.h > normal.heroi.h + 100.0, "{w}x{h}: a página cresce");
+            assert!((cheia.heroi.base() - (cheia.dock.y - MARGEM)).abs() < 0.01, "{w}x{h}: vai até o dock");
+        }
+        // Fora do empilhado nada muda (a página fica no lugar do visual, ao lado do painel).
+        assert_eq!(calcular(1440.0, 900.0, Pedido { pagina_cheia: true, ..ABERTO }), calcular(1440.0, 900.0, ABERTO));
     }
 
     #[test]

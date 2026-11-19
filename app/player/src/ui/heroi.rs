@@ -268,7 +268,7 @@ impl Player {
                 )
             });
 
-        if self.pagina != Pagina::Inicio && !a.so_visual {
+        if self.pagina != Pagina::Inicio && !a.so_visual && !self.configuracoes_no_painel() {
             // Com uma página aberta, o título e os botões do visual saem: só o visual fica por trás da folha.
             heroi.child(self.ver_folha(cx))
         } else {
@@ -308,6 +308,9 @@ impl Player {
         }
         if self.pagina == Pagina::Biblioteca {
             return folha.child(self.ver_biblioteca(cx));
+        }
+        if self.pagina == Pagina::Configuracoes {
+            return folha.child(self.ver_configuracoes(cx));
         }
         // Página sem conteúdo próprio: diz o que vem, sem inventar dados.
         folha

@@ -156,6 +156,32 @@ impl Sessao {
     }
 }
 
+/// Só letras e números, em minúsculas: para comparar "Riot Client" com "Com.riotgames.RiotClient".
+fn so_letras(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// Um texto com cara de identificador de programa ("Com.riotgames.RiotGames.RiotClient"), não de nome de artista.
+pub fn parece_identificador(s: &str) -> bool {
+    !s.is_empty() && !s.chars().any(char::is_whitespace) && s.matches('.').count() >= 2
+}
+
+/// Alguns programas (launchers de jogos, apps com navegador embutido) abrem uma sessão de mídia no Windows sem
+/// tocar música: o título é o nome do próprio app e não há artista, álbum nem duração. Isso não é "tocando
+/// agora" e não entra em lugar nenhum (tela, histórico, Last.fm, Discord).
+///
+/// `id` é o identificador do app no Windows; `tem_duracao`, se o app informa posição e duração.
+pub fn e_midia_de_verdade(faixa: &Faixa, id: &str, tem_duracao: bool) -> bool {
+    let titulo = so_letras(&faixa.titulo);
+    if titulo.is_empty() {
+        return false;
+    }
+    let sem_mais_nada =
+        (faixa.artista.is_empty() || parece_identificador(&faixa.artista)) && faixa.album.is_empty() && !tem_duracao;
+    let titulo_e_o_app = so_letras(id).contains(&titulo) || so_letras(&faixa.app) == titulo;
+    !(sem_mais_nada && titulo_e_o_app)
+}
+
 /// Nome legível do app a partir do identificador que o Windows informa.
 pub fn nome_do_app(id: &str) -> String {
     let baixo = id.to_lowercase();
@@ -202,6 +228,26 @@ mod testes {
         assert_eq!(nome_do_app("308046B0AF4A39CB"), "Firefox");
         assert_eq!(nome_do_app("C:\\Apps\\meuplayer.exe"), "Meuplayer");
         assert_eq!(nome_do_app(""), "App");
+    }
+
+    #[test]
+    fn sessao_que_nao_e_musica_fica_de_fora() {
+        let f = |titulo: &str, artista: &str, album: &str, app: &str| Faixa {
+            titulo: titulo.into(),
+            artista: artista.into(),
+            album: album.into(),
+            app: app.into(),
+        };
+        let riot = "Com.riotgames.RiotGames.RiotClient";
+        assert!(!e_midia_de_verdade(&f("Riot Client", riot, "", &nome_do_app(riot)), riot, false));
+        assert!(!e_midia_de_verdade(&f("", "Banda", "", "Spotify"), "Spotify.exe", true));
+        assert!(!e_midia_de_verdade(&f("Spotify", "", "", "Spotify"), "Spotify.exe", false), "anúncio sem nada");
+        // Música de verdade, mesmo pausada ou sem duração.
+        assert!(e_midia_de_verdade(&f("Riot Client", "Banda X", "", "Spotify"), "Spotify.exe", false));
+        assert!(e_midia_de_verdade(&f("Somebody", "", "", "Chrome"), "chrome.exe", false));
+        assert!(e_midia_de_verdade(&f("Riot Client", "", "", "x"), riot, true), "com duração, é mídia");
+        assert!(parece_identificador(riot));
+        assert!(!parece_identificador("Dj Slk, Mc Talibã"));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! - **Bandeja**: um ícone ao lado do relógio, com o nome da música e um menu (mostrar, tocar, próxima, sair).
 //!   Se a pessoa escolher, fechar a janela só a esconde: o app continua ouvindo e contando o histórico.
 //! - **Janela mini**: a janela encolhe para um canto da tela e fica por cima das outras.
+//! - **Ilha** ([`ilha`]): a janela da pílula no topo da tela, sempre por cima e sem roubar o foco.
 //!
 //! Tudo acontece na thread da interface, dentro das mensagens que o Windows manda para a janela. Por isso os
 //! botões e o menu funcionam mesmo com a janela escondida, quando a interface não está sendo desenhada: quem
@@ -12,8 +13,11 @@
 //! Nada aqui é essencial: se o Windows recusar qualquer parte, o app segue sem ela.
 
 mod desenho;
+pub mod ilha;
 #[cfg(windows)]
 mod sistema;
+#[cfg(windows)]
+mod sistema_ilha;
 
 /// Um pedido vindo da barra de tarefas ou do menu da bandeja.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +97,14 @@ impl Integracao {
         #[cfg(not(windows))]
         {
             None
+        }
+    }
+
+    /// Traz a janela para a frente: mostra se estava escondida na bandeja e restaura se estava minimizada.
+    pub fn trazer(&self) {
+        #[cfg(windows)]
+        if self.instalada {
+            sistema::trazer();
         }
     }
 

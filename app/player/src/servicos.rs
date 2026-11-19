@@ -38,7 +38,7 @@ pub enum SituacaoLastfm {
     Falha(String),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum SituacaoDiscord {
     /// O app foi compilado sem o identificador do aplicativo no Discord.
     SemChave,
@@ -47,6 +47,8 @@ pub enum SituacaoDiscord {
     /// O Discord não está aberto neste computador.
     Esperando,
     Ligado,
+    /// O Discord respondeu que não aceitou (o motivo vem dele).
+    Recusado(String),
 }
 
 enum Pedido {
@@ -324,6 +326,7 @@ fn rodar_discord(
     som: &LeitorDeRetrato,
 ) {
     let mut presenca = discord::Presenca::nova(id);
+    let mut capas = servicos::capas::Buscador::novo();
     let mut proxima_ligacao = Instant::now();
     loop {
         std::thread::sleep(PASSO_DO_DISCORD);
@@ -338,18 +341,36 @@ fn rodar_discord(
             }
             if !presenca.ligar() {
                 proxima_ligacao = Instant::now() + NOVA_LIGACAO_AO_DISCORD;
-                trocar(situacao, SituacaoDiscord::Esperando);
+                let nova = match &presenca.recusa {
+                    Some(motivo) => SituacaoDiscord::Recusado(motivo.clone()),
+                    None => SituacaoDiscord::Esperando,
+                };
+                trocar(situacao, nova);
                 continue;
             }
         }
         // O cartão aparece só enquanto toca de verdade: o Discord não tem estado de "pausado".
         let a = amostra(midia, som);
         let cartao = a.faixa.filter(|f| !f.titulo.is_empty() && a.tocando).map(|faixa| discord::Cartao {
+            capa: capas.guardada(&faixa).flatten(),
             faixa,
             intervalo: a.posicao.and_then(|(posicao, duracao)| discord::intervalo(posicao, duracao, agora_ms())),
         });
         let de_pe = presenca.mostrar(cartao.as_ref());
-        trocar(situacao, if de_pe { SituacaoDiscord::Ligado } else { SituacaoDiscord::Esperando });
+        // O cartão vai primeiro sem capa; a busca vem depois (leva até alguns segundos) e, achando, o próximo passo
+        // reenvia com a capa.
+        if let Some(c) = cartao.as_ref()
+            && de_pe
+            && capas.guardada(&c.faixa).is_none()
+        {
+            capas.buscar(&c.faixa);
+        }
+        let nova = match (&presenca.recusa, de_pe) {
+            (Some(motivo), _) => SituacaoDiscord::Recusado(motivo.clone()),
+            (None, true) => SituacaoDiscord::Ligado,
+            (None, false) => SituacaoDiscord::Esperando,
+        };
+        trocar(situacao, nova);
         if !de_pe {
             proxima_ligacao = Instant::now() + NOVA_LIGACAO_AO_DISCORD;
         }

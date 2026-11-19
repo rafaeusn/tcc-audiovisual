@@ -179,6 +179,8 @@ pub struct Diretor {
     db_hist: VecDeque<(f64, f32)>,
     last_drop: f64,
     e_slow: f32,
+    /// A fase da batida (0–1 a cada batida), travada nos ataques graves.
+    fase: f64,
 }
 
 impl Default for Diretor {
@@ -212,18 +214,21 @@ impl Default for Diretor {
             db_hist: VecDeque::new(),
             last_drop: -99.0,
             e_slow: 0.25,
+            fase: 0.0,
         }
     }
 }
 
 impl Diretor {
-    pub fn atualizar(&mut self, dt: f32, b: &Bandas, r: Pulso) {
+    /// `ganho_db`: o ganho automático de volume já aplicado ao som. A porta de silêncio olha o volume sem ele
+    /// (subir um chiado não pode abrir a porta).
+    pub fn atualizar(&mut self, dt: f32, b: &Bandas, r: Pulso, ganho_db: f32) {
         self.play_time += dt as f64;
         let now = self.play_time;
         let ema = |v: f32, x: f32, tau: f32| v + (x - v) * (1.0 - (-dt / tau).exp());
 
         // Porta de ruído: abaixo de ~-50 dBFS é silêncio.
-        let audivel = b.rms_db > -50.0;
+        let audivel = b.rms_db - ganho_db > -50.0;
         self.gate = ema(self.gate, if audivel { 1.0 } else { 0.0 }, if audivel { 0.15 } else { 0.6 });
 
         self.ao_vivo(dt, b, r, now);
@@ -344,9 +349,19 @@ impl Diretor {
         self.drop *= (-dt / 0.9).exp();
         self.build = (smoothstep(0.04, 0.22, self.intensity - self.e_slow) * (1.0 - self.drop)).clamp(0.0, 1.0);
 
-        // Fase aproximada pelo andamento estimado (ao vivo não se sabe onde cai a próxima batida).
-        let bpm = if self.bpm > 0.0 { self.bpm as f64 } else { 120.0 };
-        self.beat_phase = ((now * bpm / 60.0) % 1.0) as f32;
+        // Fase da batida: anda no andamento estimado (dobrado ou dividido para 70–180) e se trava nos ataques
+        // graves e médios. Um bumbo perto da batida esperada puxa a fase para ele; longe dela (contratempo),
+        // não mexe. Assim o "arranque" do visual cai no bumbo, não num relógio solto.
+        let bpm = f64::from(if bpm_fold > 0.0 { bpm_fold } else { 120.0 });
+        self.fase += f64::from(dt) * bpm / 60.0;
+        if r.forca > 0.1 && matches!(r.faixa, Faixa::Low | Faixa::Mid) {
+            let erro = self.fase - self.fase.round();
+            if erro.abs() < 0.25 {
+                self.fase -= 0.35 * erro;
+            }
+        }
+        self.fase = self.fase.rem_euclid(1.0);
+        self.beat_phase = self.fase as f32;
         self.beat_conf = pulse;
     }
 }
@@ -363,7 +378,7 @@ mod testes {
     fn silencio_fecha_a_porta_e_baixa_a_energia() {
         let mut d = Diretor::default();
         for _ in 0..600 {
-            d.atualizar(1.0 / 60.0, &bandas(-80.0), Pulso::default());
+            d.atualizar(1.0 / 60.0, &bandas(-80.0), Pulso::default(), 0.0);
         }
         assert!(d.gate < 0.01);
         assert!(d.intensity < 0.05, "energia = {}", d.intensity);
@@ -379,6 +394,7 @@ mod testes {
                     1.0 / 60.0,
                     &bandas(db),
                     Pulso { groove, bpm: 128.0, densidade: 2.5, ..Default::default() },
+                    0.0,
                 );
             }
             d.intensity
@@ -392,10 +408,10 @@ mod testes {
     fn ataque_gera_pulso_e_impulso() {
         let mut d = Diretor::default();
         for _ in 0..120 {
-            d.atualizar(1.0 / 60.0, &bandas(-12.0), Pulso::default());
+            d.atualizar(1.0 / 60.0, &bandas(-12.0), Pulso::default(), 0.0);
         }
         let antes = d.impulso_total;
-        d.atualizar(1.0 / 60.0, &bandas(-12.0), Pulso { forca: 0.9, faixa: Faixa::Low, ..Default::default() });
+        d.atualizar(1.0 / 60.0, &bandas(-12.0), Pulso { forca: 0.9, faixa: Faixa::Low, ..Default::default() }, 0.0);
         assert!(d.pulse > 0.1);
         assert!(d.impulso_total > antes);
     }

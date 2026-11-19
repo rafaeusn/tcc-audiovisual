@@ -1,6 +1,6 @@
 //! Thread que conversa com o Windows (WinRT). Todo o código que pode travar ou falhar fica aqui.
 
-use crate::{Capa, Controle, Estado, Faixa, Posicao, nome_do_app};
+use crate::{Capa, Controle, Estado, Faixa, Posicao, e_midia_de_verdade, nome_do_app, parece_identificador};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -78,7 +78,7 @@ pub fn rodar(estado: Arc<Mutex<Estado>>, versao: Arc<AtomicU64>, fila: Receiver<
             Ok(f) => f.clone(),
             Err(p) => p.into_inner().clone(),
         };
-        let sessao = if quer.is_empty() { g.GetCurrentSession().ok() } else { do_app(g, &quer) };
+        let sessao = if quer.is_empty() { escolher(g) } else { do_app(g, &quer) };
         if let (Some(c), Some(s)) = (controle, sessao.as_ref())
             && let Err(e) = enviar(s, c)
         {
@@ -133,6 +133,42 @@ pub fn rodar(estado: Arc<Mutex<Estado>>, versao: Arc<AtomicU64>, fila: Receiver<
     }
 }
 
+fn esta_tocando(s: &Sessao) -> bool {
+    s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|status| status == Status::Playing)
+}
+
+fn e_proprio(s: &Sessao) -> bool {
+    nome_do_app(&texto(s.SourceAppUserModelId())) == PROPRIO
+}
+
+/// Sem filtro: qual sessão acompanhar. O Windows aponta uma como "atual", mas ela pode estar parada enquanto
+/// outro app toca (pausar a música local e dar play no Spotify, por exemplo). A ordem:
+/// 1. um outro app tocando (a atual primeiro);
+/// 2. o próprio Player tocando (o histórico conta a música local por aqui);
+/// 3. a atual, se não for o próprio Player;
+/// 4. qualquer outro app;
+/// 5. o próprio Player.
+fn escolher(g: &Gerente) -> Option<Sessao> {
+    // Sessões sem mídia de verdade (o Riot Client, por exemplo) nem entram na conta.
+    let atual = g.GetCurrentSession().ok().filter(tem_midia);
+    let mut todas: Vec<Sessao> = g.GetSessions().map(|l| l.into_iter().filter(tem_midia).collect()).unwrap_or_default();
+    if let Some(a) = atual.as_ref() {
+        // A atual vai na frente: em empate, é ela que vale.
+        let id = texto(a.SourceAppUserModelId());
+        todas.retain(|s| texto(s.SourceAppUserModelId()) != id);
+        todas.insert(0, a.clone());
+    }
+    let tocando: Vec<bool> = todas.iter().map(esta_tocando).collect();
+    let proprio: Vec<bool> = todas.iter().map(e_proprio).collect();
+    let escolhida = (0..todas.len())
+        .find(|&i| tocando[i] && !proprio[i])
+        .or_else(|| (0..todas.len()).find(|&i| tocando[i]))
+        .or_else(|| (!todas.is_empty() && atual.is_some() && !proprio[0]).then_some(0))
+        .or_else(|| (0..todas.len()).find(|&i| !proprio[i]))
+        .or_else(|| (!todas.is_empty()).then_some(0))?;
+    Some(todas.swap_remove(escolhida))
+}
+
 /// A sessão do app `quer` (ou do próprio Player), preferindo a que está tocando.
 fn do_app(g: &Gerente, quer: &str) -> Option<Sessao> {
     let lista = g.GetSessions().ok()?;
@@ -140,12 +176,10 @@ fn do_app(g: &Gerente, quer: &str) -> Option<Sessao> {
         .into_iter()
         .filter(|s| {
             let nome = nome_do_app(&texto(s.SourceAppUserModelId()));
-            nome == quer || nome == PROPRIO
+            (nome == quer || nome == PROPRIO) && tem_midia(s)
         })
         .collect();
-    let tocando =
-        |s: &Sessao| s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|status| status == Status::Playing);
-    match achadas.iter().position(tocando) {
+    match achadas.iter().position(esta_tocando) {
         Some(i) => Some(achadas.swap_remove(i)),
         None => achadas.into_iter().next(),
     }
@@ -171,14 +205,26 @@ fn texto(h: R<windows::core::HSTRING>) -> String {
 
 fn ler(s: &Sessao) -> R<(Faixa, bool, Option<Posicao>)> {
     let props = s.TryGetMediaPropertiesAsync()?.join()?;
+    let mut artista = texto(props.Artist());
+    // Alguns apps põem o próprio identificador no lugar do artista.
+    if parece_identificador(&artista) {
+        artista.clear();
+    }
     let faixa = Faixa {
         titulo: texto(props.Title()),
-        artista: texto(props.Artist()),
+        artista,
         album: texto(props.AlbumTitle()),
         app: nome_do_app(&texto(s.SourceAppUserModelId())),
     };
     let tocando = s.GetPlaybackInfo()?.PlaybackStatus()? == Status::Playing;
     Ok((faixa, tocando, ler_posicao(s, tocando)))
+}
+
+/// A sessão tem música (ou vídeo) de verdade, não só um app que abriu a sessão de mídia à toa.
+fn tem_midia(s: &Sessao) -> bool {
+    ler(s).is_ok_and(|(faixa, _, posicao)| {
+        e_midia_de_verdade(&faixa, &texto(s.SourceAppUserModelId()), posicao.is_some())
+    })
 }
 
 /// Posição e duração, quando o app informa. Muitos apps (navegadores, por exemplo) não informam: `None`.

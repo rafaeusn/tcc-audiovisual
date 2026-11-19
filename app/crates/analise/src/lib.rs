@@ -18,12 +18,81 @@ use analisador::Analisador;
 use descritores::Descritores;
 use diretor::{Diretor, Pulso};
 use ritmo::Ritmo;
+use std::collections::VecDeque;
 
 /// Tamanho dos dois analisadores, os mesmos da prévia.
 pub const FFT_PRINCIPAL: usize = 2048;
 const FFT_ATAQUES: usize = 1024;
 /// Passo fixo da análise: o diretor foi calibrado a 60 atualizações por segundo.
 pub const PASSO: f32 = 1.0 / 60.0;
+
+/// A calibração do diretor (corpus da prévia) usou o áudio em mono pelo ffmpeg, que soma os dois canais com
+/// -3 dB cada: 3 dB acima da média simples que a captura e o tocador fazem. Sem compensar, o motor "ouve" tudo
+/// 3 dB mais baixo do que foi calibrado (menos volume, menos espectro cheio, menos energia).
+const GANHO_DE_CALIBRACAO: f32 = std::f32::consts::SQRT_2;
+
+/// Ganho automático de volume do modo ao vivo.
+///
+/// O Spotify e o YouTube igualam o volume em -14 LUFS (uma música masterizada a -7 LUFS chega 7 dB mais baixa),
+/// e o volume do próprio app baixa mais ainda antes da captura. O diretor mede volume em dBFS absoluto, então
+/// essas fontes pareciam "calmas". Este ganho acompanha o nível típico (percentil 80 do último minuto) e sobe o
+/// sinal até ele chegar perto do nível em que o diretor foi calibrado. Nunca abaixa (uma música já alta fica como
+/// está) e não sobe silêncio (só aprende com som audível).
+pub struct GanhoAutomatico {
+    /// O nível de cada segundo audível do último minuto, em dB.
+    segundos: VecDeque<f32>,
+    soma: f64,
+    amostras: u32,
+    tempo: f32,
+    /// O ganho aplicado agora (dB, suavizado).
+    pub db: f32,
+}
+
+/// O nível típico (percentil 80) que o ganho busca, em dBFS (já com a compensação de calibração).
+const ALVO_DO_GANHO_DB: f32 = -10.0;
+/// O máximo que o ganho sobe.
+const TETO_DO_GANHO_DB: f32 = 12.0;
+/// Abaixo disto, o segundo não ensina nada ao ganho (silêncio ou chiado).
+const PISO_DO_GANHO_DB: f32 = -45.0;
+
+impl Default for GanhoAutomatico {
+    fn default() -> Self {
+        Self { segundos: VecDeque::with_capacity(64), soma: 0.0, amostras: 0, tempo: 0.0, db: 0.0 }
+    }
+}
+
+impl GanhoAutomatico {
+    /// Recebe o nível (dB) da janela de agora e devolve o ganho a aplicar (dB).
+    pub fn passo(&mut self, dt: f32, nivel_db: f32) -> f32 {
+        if nivel_db > PISO_DO_GANHO_DB {
+            self.soma += 10f64.powf(f64::from(nivel_db) / 10.0);
+            self.amostras += 1;
+        }
+        self.tempo += dt;
+        if self.tempo >= 1.0 {
+            self.tempo -= 1.0;
+            if self.amostras > 0 {
+                let medio = (10.0 * (self.soma / f64::from(self.amostras)).log10()) as f32;
+                self.segundos.push_back(medio);
+                if self.segundos.len() > 60 {
+                    self.segundos.pop_front();
+                }
+            }
+            self.soma = 0.0;
+            self.amostras = 0;
+        }
+        if self.segundos.len() >= 3 {
+            let mut v: Vec<f32> = self.segundos.iter().copied().collect();
+            v.sort_by(f32::total_cmp);
+            let referencia = v[((v.len() as f32 * 0.8) as usize).min(v.len() - 1)];
+            let alvo = (ALVO_DO_GANHO_DB - referencia).clamp(0.0, TETO_DO_GANHO_DB);
+            // Rápido nos primeiros segundos, depois devagar (não "respira" com a música).
+            let tau = if self.segundos.len() < 10 { 1.5 } else { 4.0 };
+            self.db += (alvo - self.db) * (1.0 - (-dt / tau).exp());
+        }
+        self.db
+    }
+}
 
 /// Tudo o que o resto do app precisa saber sobre o som neste instante. É pequeno e copiável de propósito:
 /// a análise publica um retrato novo e a interface só lê, sem esperar ninguém.
@@ -47,6 +116,10 @@ pub struct Retrato {
     pub fase_batida: f32,
     pub conf_batida: f32,
     pub rotulo: Rotulo,
+    /// O ganho automático de entrada do diretor (para diagnóstico).
+    pub sens: f32,
+    /// O ganho automático de volume aplicado ao som (dB, para diagnóstico).
+    pub ganho_db: f32,
 }
 
 impl Default for Retrato {
@@ -66,6 +139,8 @@ impl Default for Retrato {
             fase_batida: 0.0,
             conf_batida: 0.0,
             rotulo: Rotulo::Calma,
+            sens: 1.2,
+            ganho_db: 0.0,
         }
     }
 }
@@ -95,6 +170,10 @@ pub struct Motor {
     descritores: Descritores,
     ritmo: Ritmo,
     diretor: Diretor,
+    ganho: GanhoAutomatico,
+    /// Ganho automático de volume ligado (modo ao vivo). Na pré-análise de arquivo fica desligado.
+    pub ganho_automatico: bool,
+    janela: Vec<f32>,
 }
 
 impl Motor {
@@ -105,6 +184,9 @@ impl Motor {
             descritores: Descritores::new(taxa_de_amostragem, FFT_PRINCIPAL, FFT_ATAQUES),
             ritmo: Ritmo::default(),
             diretor: Diretor::default(),
+            ganho: GanhoAutomatico::default(),
+            ganho_automatico: true,
+            janela: vec![0.0; FFT_PRINCIPAL],
         }
     }
 
@@ -112,9 +194,27 @@ impl Motor {
     /// o passo é tratado como silêncio.
     pub fn passo(&mut self, dt: f32, amostras: &[f32]) -> Retrato {
         let dt = if dt.is_finite() { dt.clamp(1e-4, 0.05) } else { PASSO };
-        let silencio = [0.0f32; FFT_PRINCIPAL];
-        let amostras =
-            if amostras.len() >= FFT_PRINCIPAL { &amostras[amostras.len() - FFT_PRINCIPAL..] } else { &silencio };
+        // A janela com a compensação de calibração e o ganho automático de volume.
+        if amostras.len() >= FFT_PRINCIPAL {
+            let origem = &amostras[amostras.len() - FFT_PRINCIPAL..];
+            let (mut ss, mut n) = (0.0f32, 0u32);
+            for v in origem.iter().rev().take(FFT_PRINCIPAL / 2) {
+                if v.is_finite() {
+                    ss += v * v;
+                    n += 1;
+                }
+            }
+            let nivel = 20.0 * ((ss / n.max(1) as f32).sqrt() * GANHO_DE_CALIBRACAO).max(1e-6).log10();
+            let ganho_db = if self.ganho_automatico { self.ganho.passo(dt, nivel) } else { 0.0 };
+            let fator = GANHO_DE_CALIBRACAO * 10f32.powf(ganho_db / 20.0);
+            for (d, o) in self.janela.iter_mut().zip(origem) {
+                *d = if o.is_finite() { o * fator } else { 0.0 };
+            }
+        } else {
+            self.janela.fill(0.0);
+        }
+        let amostras = &self.janela;
+        let ganho_db = self.ganho.db * f32::from(u8::from(self.ganho_automatico));
 
         self.descritores.sensibilidade = self.diretor.sens;
         let freq = self.principal.processar(amostras);
@@ -129,7 +229,7 @@ impl Motor {
             bpm: self.ritmo.bpm,
             densidade: self.ritmo.density,
         };
-        self.diretor.atualizar(dt, &b, pulso);
+        self.diretor.atualizar(dt, &b, pulso, ganho_db);
         let d = &self.diretor;
         Retrato {
             bandas: b,
@@ -146,6 +246,8 @@ impl Motor {
             fase_batida: d.beat_phase,
             conf_batida: d.beat_conf,
             rotulo: d.rotulo,
+            sens: d.sens,
+            ganho_db,
         }
     }
 }

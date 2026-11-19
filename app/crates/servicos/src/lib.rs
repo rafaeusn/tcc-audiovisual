@@ -2,14 +2,16 @@
 //!
 //! - [`lastfm`]: scrobble. Avisa o Last.fm quando uma música começa e a conta quando ela passa da metade (ou de
 //!   4 minutos), que é a regra do próprio serviço. A conta é autorizada no navegador; o app nunca vê a senha.
-//! - [`discord`]: o cartão "ouvindo" no perfil. Fala só com o Discord aberto neste computador, por um canal
-//!   local. Não há login nem rede.
+//! - [`discord`]: o cartão "ouvindo" no perfil. Fala com o Discord aberto neste computador, por um canal
+//!   local. Não há login.
+//! - [`capas`]: a capa da música e a foto do artista para o cartão, pela busca pública do Deezer.
 //! - [`marcador`]: a regra de quando uma música começou e quando ela conta, sem rede, para dar para testar.
 //! - [`cofre`]: guarda a autorização do Last.fm cifrada pelo Windows para o usuário atual.
 //!
 //! As chaves que identificam o app nesses serviços não ficam no código: vêm de variáveis de ambiente, lidas na
 //! compilação ou ao abrir ([`Chaves`]). Sem elas o módulo correspondente avisa que não está configurado.
 
+pub mod capas;
 pub mod cofre;
 pub mod discord;
 pub mod lastfm;

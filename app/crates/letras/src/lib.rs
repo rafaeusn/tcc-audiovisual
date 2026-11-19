@@ -13,6 +13,6 @@ mod lrc;
 mod lrclib;
 mod texto;
 
-pub use lrc::{Linha, ler_lrc, linha_em};
+pub use lrc::{Linha, Palavra, cantado, ler_lrc, linha_em};
 pub use lrclib::{Cliente, Pedido, Registro, escolher};
 pub use texto::{chave, limpar, normalizar};
