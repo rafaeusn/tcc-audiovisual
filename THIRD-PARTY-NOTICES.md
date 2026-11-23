@@ -4,6 +4,14 @@ Este projeto é distribuído sob a **GPL-3.0-or-later** (arquivo [`LICENSE`](LIC
 
 Regra: código **copiado ou adaptado** de outro projeto entra na seção 3, com origem, licença e os arquivos onde está, e o arquivo copiado mantém no topo um comentário com a origem.
 
+## 0. Provedores
+
+- `app/provedores/youtube-music` usa a biblioteca **rustypipe** (GPL-3.0, <https://codeberg.org/ThetaDev/rustypipe>)
+  para os metadados do YouTube Music; por isso esse programa é distribuído sob a GPL-3.0 (só a 3).
+- A rota do áudio pelo cliente visionOS do YouTube (`visionos.rs`) segue o que fazem o **MixMusic**
+  (<https://github.com/fzn0x/mixmusic>, MIT ou GPL-3) e o **limusic** (<https://github.com/SimoHypers/limusic>,
+  GPL-3). Nenhum código foi copiado: só os valores do cliente (nome, versão, agente), que são do YouTube.
+
 ## 1. Fontes tipográficas
 
 | Fonte | Licença | Arquivo da licença |

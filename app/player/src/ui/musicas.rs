@@ -5,6 +5,9 @@
 //! - Clicar numa música toca, e a lista inteira vira a fila. Passando o mouse aparecem: tocar a seguir, pôr no
 //!   fim da fila, pôr numa playlist (e, dentro de uma playlist, tirar dela).
 //!
+//! - Com provedores instalados, a busca também vai a eles: o bloco "Nos serviços" mostra as faixas que chegam,
+//!   acima das músicas do computador. Clicar toca, e os resultados viram a fila.
+//!
 //! A lista pode ter milhares de linhas e a interface é redesenhada a cada quadro, então só as linhas visíveis
 //! são montadas (`uniform_list`).
 
@@ -20,6 +23,8 @@ use std::ops::Range;
 
 /// Altura de cada música (ou álbum, ou artista) na lista.
 const LINHA: f32 = 52.0;
+/// Quantas faixas dos serviços o bloco mostra.
+const NOS_SERVICOS: usize = 5;
 
 impl Player {
     /// O seletor Músicas | Fila | Histórico, no alto da Biblioteca.
@@ -189,6 +194,118 @@ impl Player {
             .into_any_element()
     }
 
+    /// O bloco "Nos serviços": as faixas que os provedores acharam para a busca (`None` sem provedor ou sem busca).
+    fn nos_servicos(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let remoto = &self.local.remoto;
+        if !remoto.tem_provedores() || self.busca_musicas.trim().is_empty() {
+            return None;
+        }
+        let c = self.cores();
+        let busca = &remoto.busca;
+        let buscando = busca.faltam > 0 || busca.texto != self.busca_musicas.trim();
+        let situacao: SharedString = if buscando {
+            "Buscando...".into()
+        } else if busca.faixas.is_empty() && !busca.erros.is_empty() {
+            busca.erros.join(" · ").into()
+        } else if busca.faixas.is_empty() {
+            "Nada com esse nome.".into()
+        } else {
+            format!("{} {}", busca.faixas.len(), if busca.faixas.len() == 1 { "faixa" } else { "faixas" }).into()
+        };
+        let mut bloco = div().flex().flex_col().gap(px(2.0)).pb(px(12.0)).child(
+            div()
+                .h(px(32.0))
+                .px(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(icone("icones/globe.svg", 16.0, c.texto_2))
+                .child(texto(13.0).font_weight(FontWeight::SEMIBOLD).child("Nos serviços"))
+                .child(texto(12.0).text_color(c.texto_3).truncate().child(situacao)),
+        );
+        for (i, m) in busca.faixas.iter().take(NOS_SERVICOS).enumerate() {
+            let esta = self.local.atual().is_some_and(|a| a.caminho == m.caminho);
+            let de_quem = match (&m.remota, m.artista.is_empty()) {
+                (Some(r), false) => format!("{} · {}", m.artista, r.fonte),
+                (Some(r), true) => r.fonte.clone(),
+                (None, _) => m.artista.clone(),
+            };
+            let marca: AnyElement = if esta {
+                let caminho = if self.local.situacao.tocando { "icones/wave.svg" } else { "icones/pause.svg" };
+                icone(caminho, 16.0, c.texto).into_any_element()
+            } else {
+                icone("icones/play.svg", 14.0, c.texto_3).into_any_element()
+            };
+            let (a_seguir, no_fim) = (m.clone(), m.clone());
+            let acoes = div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(2.0))
+                .child(
+                    self.acao_da_linha(("servico-a-seguir", i), "icones/play-next.svg", "servico-linha", false)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.local.tocar_a_seguir(a_seguir.clone());
+                            this.avisar(format!("\"{}\" toca a seguir", a_seguir.titulo));
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    self.acao_da_linha(("servico-na-fila", i), "icones/queue-add.svg", "servico-linha", false)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.local.adicionar_a_fila(vec![no_fim.clone()]);
+                            this.avisar(format!("\"{}\" foi para o fim da fila", no_fim.titulo));
+                            cx.notify();
+                        })),
+                );
+            bloco = bloco.child(
+                div()
+                    .id(("servico", i))
+                    .group("servico-linha")
+                    .w_full()
+                    .h(px(LINHA))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .rounded(px(RAIO_CONTROLE))
+                    .cursor_pointer()
+                    .when(esta, |d| d.bg(c.sel))
+                    .when(!esta, |d| d.hover(|s| s.bg(c.hover)))
+                    .child(div().w(px(36.0)).flex_none().flex().justify_center().child(marca))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                texto(14.0)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child(SharedString::from(m.titulo.clone())),
+                            )
+                            .child(texto(12.0).text_color(c.texto_2).truncate().child(de_quem)),
+                    )
+                    .child(acoes)
+                    .when(m.duracao_s > 0.0, |d| {
+                        d.child(
+                            mono().w(px(44.0)).flex_none().text_right().text_color(c.texto_2).child(tempo(m.duracao_s)),
+                        )
+                    })
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        // Os resultados dos serviços viram a fila, a partir da clicada.
+                        let faixas = this.local.remoto.busca.faixas.clone();
+                        this.local.tocar_lista(faixas, i);
+                        cx.notify();
+                    })),
+            );
+        }
+        Some(bloco)
+    }
+
     /// Um álbum ou artista na lista: clicar mostra as músicas dele.
     fn linha_de_grupo(&self, i: usize, cx: &mut Context<Self>) -> AnyElement {
         let c = self.cores();
@@ -323,6 +440,7 @@ impl Player {
                             this.busca_musicas.clear();
                             this.marcado = None;
                             this.local.buscar("");
+                            this.local.remoto.buscar("");
                             cx.stop_propagation();
                             cx.notify();
                         })),
@@ -695,8 +813,18 @@ impl Player {
             .into_any_element()
         };
 
+        let nos_servicos = self.nos_servicos(cx);
         div().size_full().flex().flex_col().child(cabeca).child(
-            div().flex_1().min_h(px(0.0)).flex().flex_col().px(px(lado - 10.0)).pt(px(12.0)).pb(px(12.0)).child(corpo),
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .flex()
+                .flex_col()
+                .px(px(lado - 10.0))
+                .pt(px(12.0))
+                .pb(px(12.0))
+                .children(nos_servicos)
+                .child(corpo),
         )
     }
 }

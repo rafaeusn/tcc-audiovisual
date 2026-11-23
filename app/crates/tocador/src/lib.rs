@@ -1,8 +1,8 @@
-//! Toca arquivos de música.
+//! Toca música: arquivos do computador e endereços na internet (os que os provedores entregam).
 //!
-//! Uma thread própria decodifica os arquivos ([`fonte`]), mistura ([`mistura`]: troca sem intervalo, crossfade,
-//! ganho por faixa, equalizador) e mantém cheia a fila da saída de som ([`saida`]). Quem usa manda comandos
-//! ([`Comando`]) e lê a situação ([`Situacao`]); nunca espera o disco nem a placa de som.
+//! Uma thread própria decodifica ([`fonte`]; da internet, aos pedaços: [`rede`]), mistura ([`mistura`]: troca sem
+//! intervalo, crossfade, ganho por faixa, equalizador) e mantém cheia a fila da saída de som ([`saida`]). Quem usa
+//! manda comandos ([`Comando`]) e lê a situação ([`Situacao`]); nunca espera o disco, a rede nem a placa de som.
 //!
 //! A fila de músicas não é daqui: quem usa diz qual toca agora ([`Comando::Tocar`]) e qual vem depois
 //! ([`Comando::Seguinte`]). Quando a seguinte entra sozinha, [`Situacao::avancou`] muda.
@@ -12,6 +12,7 @@
 
 pub mod fonte;
 pub mod mistura;
+pub mod rede;
 pub mod saida;
 
 use fonte::Fonte;
@@ -20,11 +21,57 @@ use saida::Saida;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub use mistura::{BANDAS, TETO_EQ_DB};
+pub use rede::Endereco;
+
+/// De onde vem uma música: um arquivo do computador ou um endereço na internet (de um provedor).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Origem {
+    Arquivo(PathBuf),
+    Endereco(Endereco),
+}
+
+impl Origem {
+    /// O caminho, quando é um arquivo.
+    pub fn caminho(&self) -> Option<&Path> {
+        match self {
+            Self::Arquivo(c) => Some(c),
+            Self::Endereco(_) => None,
+        }
+    }
+}
+
+impl From<PathBuf> for Origem {
+    fn from(c: PathBuf) -> Self {
+        Self::Arquivo(c)
+    }
+}
+
+impl From<&Path> for Origem {
+    fn from(c: &Path) -> Self {
+        Self::Arquivo(c.to_path_buf())
+    }
+}
+
+impl From<&str> for Origem {
+    fn from(c: &str) -> Self {
+        Self::Arquivo(PathBuf::from(c))
+    }
+}
+
+impl std::fmt::Display for Origem {
+    /// Para o registro: o caminho do arquivo, ou o endereço sem a parte que leva assinaturas e chaves.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Arquivo(c) => write!(f, "{}", c.display()),
+            Self::Endereco(e) => f.write_str(e.para_registro()),
+        }
+    }
+}
 
 /// Quadros que a mistura produz por vez.
 const BLOCO: usize = 512;
@@ -33,8 +80,8 @@ const NOVA_TENTATIVA: Duration = Duration::from_secs(1);
 
 /// O que estava tocando quando a saída de som caiu: reaberto na saída nova, do mesmo ponto.
 struct Retomar {
-    atual: (PathBuf, f32),
-    seguinte: Option<(PathBuf, f32)>,
+    atual: (Origem, f32),
+    seguinte: Option<(Origem, f32)>,
     posicao_s: f64,
     pausado: bool,
     tentar_em: std::time::Instant,
@@ -42,13 +89,14 @@ struct Retomar {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Comando {
-    /// Toca este arquivo do começo, com este ganho (1 = como está no arquivo).
+    /// Toca esta música do começo, com este ganho (1 = como está no arquivo).
     Tocar {
-        caminho: PathBuf,
+        origem: Origem,
         ganho: f32,
     },
-    /// O arquivo que entra quando o de agora acabar (`None` = nenhum: a música para no fim).
-    Seguinte(Option<(PathBuf, f32)>),
+    /// A música que entra quando a de agora acabar (`None` = nenhuma: a música para no fim). Da internet, ela
+    /// abre em segundo plano, para a de agora não engasgar.
+    Seguinte(Option<(Origem, f32)>),
     Pausar,
     Continuar,
     /// Para e esquece os arquivos.
@@ -64,14 +112,14 @@ pub enum Comando {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Situacao {
-    /// O arquivo que está soando (tocando ou pausado).
-    pub arquivo: Option<PathBuf>,
+    /// A música que está soando (tocando ou pausada).
+    pub origem: Option<Origem>,
     pub tocando: bool,
     pub posicao_s: f64,
     /// 0 quando o arquivo não informa.
     pub duracao_s: f64,
-    /// O arquivo já aberto para entrar depois deste.
-    pub seguinte: Option<PathBuf>,
+    /// A música já aberta para entrar depois desta.
+    pub seguinte: Option<Origem>,
     /// Quantas vezes a seguinte entrou sozinha (sem intervalo ou por crossfade).
     pub avancou: u64,
     /// Quantas vezes a música acabou sem nada depois (ou o arquivo não abriu). Quem cuida da fila decide o
@@ -121,8 +169,8 @@ impl Tocador {
     }
 }
 
-fn abrir_faixa(caminho: &Path, ganho: f32, taxa: u32) -> nucleo::Resultado<Faixa> {
-    Fonte::abrir(caminho, taxa).map(|f| Faixa::nova(caminho.to_path_buf(), Box::new(f), ganho, taxa))
+fn abrir_faixa(origem: &Origem, ganho: f32, taxa: u32) -> nucleo::Resultado<Faixa> {
+    Fonte::abrir_origem(origem, taxa).map(|f| Faixa::nova(origem.clone(), Box::new(f), ganho, taxa))
 }
 
 /// O estado da thread do tocador.
@@ -142,6 +190,8 @@ struct Motor {
     pedaco: Vec<f32>,
     aqui: Vec<(usize, Marco)>,
     retomar: Option<Retomar>,
+    /// A seguinte da internet, abrindo em segundo plano.
+    abrindo: Option<(Origem, Receiver<nucleo::Resultado<Faixa>>)>,
 }
 
 impl Motor {
@@ -189,7 +239,7 @@ impl Motor {
                 self.descartar(onde);
                 log::info!("saída de som reaberta; a música continua em {onde:.1}s");
                 com(situacao, |s| {
-                    s.arquivo = Some(r.atual.0.clone());
+                    s.origem = Some(r.atual.0.clone());
                     s.duracao_s = duracao_s;
                     s.posicao_s = onde;
                     s.tocando = !r.pausado;
@@ -248,6 +298,7 @@ fn rodar(fila: &std::sync::mpsc::Receiver<Comando>, situacao: &Mutex<Situacao>, 
         pedaco: Vec::with_capacity(BLOCO * 2),
         aqui: Vec::new(),
         retomar: None,
+        abrindo: None,
     };
 
     loop {
@@ -286,6 +337,7 @@ fn rodar(fila: &std::sync::mpsc::Receiver<Comando>, situacao: &Mutex<Situacao>, 
             }
         }
         m.tentar_retomar(situacao);
+        receber_a_seguinte(&mut m, situacao);
 
         let (Some(s), Some(mix)) = (m.saida.as_mut(), m.mistura.as_mut()) else { continue };
         // Mantém a fila da placa cheia. Enquanto um descarte está pendente, nada novo entra.
@@ -307,11 +359,11 @@ fn rodar(fila: &std::sync::mpsc::Receiver<Comando>, situacao: &Mutex<Situacao>, 
         while m.marcos.front().is_some_and(|(q, _)| *q <= tocados) {
             let Some((q, marco)) = m.marcos.pop_front() else { break };
             match marco {
-                Marco::Comecou { caminho, duracao_s } => {
+                Marco::Comecou { origem, duracao_s } => {
                     m.inicio = q;
                     m.base_s = 0.0;
                     com(situacao, |e| {
-                        e.arquivo = Some(caminho);
+                        e.origem = Some(origem);
                         e.duracao_s = duracao_s;
                         e.posicao_s = 0.0;
                         e.seguinte = None;
@@ -333,11 +385,39 @@ fn rodar(fila: &std::sync::mpsc::Receiver<Comando>, situacao: &Mutex<Situacao>, 
     }
 }
 
+/// A seguinte da internet terminou de abrir (ou falhou): entra na mistura.
+fn receber_a_seguinte(m: &mut Motor, situacao: &Mutex<Situacao>) {
+    let Some((origem, chegada)) = &m.abrindo else { return };
+    let resultado = match chegada.try_recv() {
+        Ok(r) => r,
+        Err(TryRecvError::Empty) => return,
+        Err(TryRecvError::Disconnected) => Err(nucleo::Erro::Audio("a abertura parou no meio".into())),
+    };
+    let origem = origem.clone();
+    m.abrindo = None;
+    let Some(mix) = m.mistura.as_mut() else { return };
+    match resultado {
+        Ok(faixa) => {
+            mix.preparar(Some(faixa));
+            com(situacao, |e| e.seguinte = Some(origem));
+        }
+        Err(e) => {
+            log::warn!("a próxima música não abriu ({e}): {origem}");
+            mix.preparar(None);
+            com(situacao, |e| e.seguinte = None);
+        }
+    }
+}
+
 fn atender(m: &mut Motor, comando: Comando, situacao: &Mutex<Situacao>) {
+    if matches!(comando, Comando::Tocar { .. } | Comando::Parar | Comando::Seguinte(_)) {
+        // Um pedido novo vale mais que a seguinte que ainda estava abrindo.
+        m.abrindo = None;
+    }
     match comando {
-        Comando::Tocar { caminho, ganho } => {
+        Comando::Tocar { origem, ganho } => {
             let aberta =
-                if m.garantir_saida() { m.saida.as_ref().map(|s| abrir_faixa(&caminho, ganho, s.taxa)) } else { None };
+                if m.garantir_saida() { m.saida.as_ref().map(|s| abrir_faixa(&origem, ganho, s.taxa)) } else { None };
             match aberta {
                 Some(Ok(faixa)) => {
                     let duracao_s = faixa.duracao_s();
@@ -351,7 +431,7 @@ fn atender(m: &mut Motor, comando: Comando, situacao: &Mutex<Situacao>) {
                     }
                     com(situacao, |e| {
                         *e = Situacao {
-                            arquivo: Some(caminho),
+                            origem: Some(origem),
                             tocando: true,
                             duracao_s,
                             avancou: e.avancou,
@@ -369,7 +449,7 @@ fn atender(m: &mut Motor, comando: Comando, situacao: &Mutex<Situacao>) {
                         Some(Err(e)) => format!("Não foi possível tocar este arquivo ({e})."),
                         _ => "Não há saída de som para tocar.".to_string(),
                     };
-                    log::warn!("{motivo} {}", caminho.display());
+                    log::warn!("{motivo} {origem}");
                     com(situacao, |e| {
                         // A fila segue para a próxima: um arquivo ruim não trava a lista.
                         *e = Situacao {
@@ -385,15 +465,29 @@ fn atender(m: &mut Motor, comando: Comando, situacao: &Mutex<Situacao>) {
         Comando::Seguinte(pedido) => {
             let Some(mix) = m.mistura.as_mut() else { return };
             match pedido {
-                Some((caminho, _)) if mix.seguinte() == Some(&caminho) => {}
-                Some((caminho, ganho)) => match abrir_faixa(&caminho, ganho, mix.taxa()) {
+                Some((origem, _)) if mix.seguinte() == Some(&origem) => {}
+                Some((origem @ Origem::Endereco(_), ganho)) => {
+                    // Da internet, abre em segundo plano: a de agora continua tocando enquanto isso.
+                    let (avisar, chegada) = channel();
+                    let (o, taxa) = (origem.clone(), mix.taxa());
+                    let criada = std::thread::Builder::new()
+                        .name("tocador-abre".into())
+                        .spawn(move || drop(avisar.send(abrir_faixa(&o, ganho, taxa))));
+                    match criada {
+                        Ok(_) => m.abrindo = Some((origem, chegada)),
+                        Err(e) => log::warn!("não foi possível abrir a próxima música: {e}"),
+                    }
+                    mix.preparar(None);
+                    com(situacao, |e| e.seguinte = None);
+                }
+                Some((origem, ganho)) => match abrir_faixa(&origem, ganho, mix.taxa()) {
                     Ok(faixa) => {
                         mix.preparar(Some(faixa));
-                        com(situacao, |e| e.seguinte = Some(caminho));
+                        com(situacao, |e| e.seguinte = Some(origem));
                     }
                     Err(e) => {
                         // Fica sem seguinte: no fim desta, quem cuida da fila tenta a próxima e pula esta.
-                        log::warn!("a próxima música não abriu ({e}): {}", caminho.display());
+                        log::warn!("a próxima música não abriu ({e}): {origem}");
                         mix.preparar(None);
                         com(situacao, |e| e.seguinte = None);
                     }

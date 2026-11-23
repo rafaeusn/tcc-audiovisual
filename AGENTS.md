@@ -1,7 +1,7 @@
 # AGENTS.md: contexto para qualquer agente de IA
 
 Leia isto antes de mexer no projeto. Vale para Cursor, Claude Code, Codex ou um chat novo. Atualizado em
-13/11/2026. **Responda sempre em português do Brasil.**
+22/11/2026. **Responda sempre em português do Brasil.**
 
 Detalhes de cada função do app: [`app/README.md`](app/README.md). História do projeto e decisões de produto:
 [`CONTEXTO-TCC.md`](CONTEXTO-TCC.md). Plano original da v1 (fases 0–6): [`docs/plano-v1.md`](docs/plano-v1.md).
@@ -22,7 +22,7 @@ Loja de temas e módulos, integração com o Windows (bandeja, janela mini, bot�
 Last.fm e Discord.
 
 Desde 16/11/2026 o projeto é **gratuito e aberto (GPL-3.0-or-later)**. Os serviços de streaming entram como
-provedores opcionais da Loja ([`docs/plano-v2.md`](docs/plano-v2.md)). Código copiado de outro projeto mantém no
+provedores da Loja ([`docs/plano-v2.md`](docs/plano-v2.md)); desde 21/11/2026, sem as limitações de antes (seção 2). Código copiado de outro projeto mantém no
 topo a origem e a licença e entra em [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
 O código está em **`app/`** (workspace Cargo). O resto do repositório é material anterior: `preview/` (protótipo
@@ -33,12 +33,17 @@ WebGL em JS, gabarito do visual e do diretor), `mockup/` (mockup da UI), `protot
 
 ## 2. Regras que não se negociam
 
-1. **O núcleo não usa nenhum serviço de streaming sozinho.** Tudo o que vem de um serviço (Spotify, YouTube Music,
-   SoundCloud, Shazam...) passa por um **provedor da Loja**, instalado e conectado pelo usuário, desligado por padrão
-   e com aviso de responsabilidade. Cache e download offline só se o provedor oferecer e o usuário ligar, sempre
-   cifrados no computador dele. O áudio nunca é enviado a terceiros: ouvir junto sincroniza, não transmite.
-2. **Spotify por provedor**, com o login do app do próprio usuário (Client ID dele). O Modo Escuta continua
-   funcionando sem provedor nenhum. (Regras 1 e 2 reescritas em 16/11/2026, com o projeto aberto sob GPL-3.)
+1. **Serviços sem limitação (21/11/2026, com o aval da orientadora, para fins acadêmicos).** O app usa todos os
+   recursos que conseguir: APIs oficiais e não oficiais (InnerTube e PO token do YouTube Music, a API interna e o
+   player web do Spotify, Spotify Connect, librespot, o `client_id` público do SoundCloud, o reconhecimento do Shazam
+   pelo protocolo do SongRec, servidores de terceiros para sem perdas), leitura de páginas, provedores já ligados e
+   prontos por padrão, sem aviso de responsabilidade e sem exigir o Client ID do usuário. Pré-analisar, sincronizar o
+   visual com o som e guardar análise do que vem de qualquer serviço vale; cache local do áudio para tocar sem
+   intervalo e para a pré-análise também.
+2. **O único limite, que o agente não atravessa:** nada de quebrar DRM nem de transformar o app num baixador de
+   música (salvar em arquivo, ou redistribuir, faixas de catálogo do Spotify, YouTube, Tidal...). O app toca pelo
+   serviço, com a conta do próprio usuário. O Modo Escuta continua funcionando sem provedor nenhum. (Regras 1 e 2
+   reescritas de novo em 21/11/2026; as de 16/11 pediam provedor desligado por padrão e o Client ID do usuário.)
 3. **Nenhum segredo no código nem no git.** As chaves `LASTFM_API_KEY`, `LASTFM_API_SECRET` e `DISCORD_APP_ID`
    vêm só de variável de ambiente (lidas ao abrir o app ou por `option_env!` na compilação). Nunca pedir nem
    colar chave no chat.
@@ -60,7 +65,7 @@ Dentro de `app/`:
 ```bash
 cargo run -p player                      # abre o app (debug)
 cargo build --release -p player          # release (D:/Rust/target/release/player.exe)
-cargo test --workspace                   # 239 testes em 17/11/2026 (fora o `visual --test desenho`), todos passando
+cargo test --workspace                   # 289 testes em 22/11/2026 (fora o `visual --test desenho`), todos passando
 cargo clippy --workspace --all-targets   # tem que sair sem aviso
 cargo fmt --all
 cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
@@ -105,14 +110,16 @@ cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 | `visual` | Os visuais em wgpu: Spectral (262 mil partículas), Fluxo e Barras, mais o modo seguro |
 | `janela` | Camada DirectComposition por baixo da interface, onde o visual é desenhado sem cópia |
 | `historico` | SQLite local: execuções, estatísticas e cache de letras |
-| `letras` | Formato LRC e cliente do LRCLIB |
-| `integracao` | Windows: botões na miniatura da barra de tarefas, bandeja, janela mini (subclasse da janela); a janela da Ilha (`ilha.rs` + `sistema_ilha.rs`: sempre por cima, sem ativar, posição no topo do monitor, tela cheia de outro app, movimento reduzido) |
+| `letras` | LRC (com palavras), TTML (`ttml.rs`), as fontes em cadeia (`fontes.rs`: Better Lyrics, Unison, LRCLIB; `em_cadeia`), tradução pela Unison e letras latinas (`traducao.rs`, `any_ascii`) |
+| `integracao` | Windows: botões na miniatura da barra de tarefas, bandeja, janela mini (subclasse da janela); a janela da Ilha (`ilha.rs` + `sistema_ilha.rs`: sempre por cima, sem ativar, os monitores (`monitores`, `monitor_no_ponto`, com o nome de cada um), tela cheia de outro app, movimento reduzido) |
 | `modulos` | Formato dos módulos da Loja: manifesto TOML, catálogo fechado de ações com motivo, aceite, bloqueio, instalados |
 | `servicos` | Last.fm (autorização desktop e scrobble), Discord (Rich Presence pelo canal local), cofre DPAPI |
-| `tocador` | Decodifica (`symphonia`), converte a taxa (`rubato`), mistura (`mistura.rs`: sem intervalo, crossfade, ganho, EQ, limitador) e entrega à saída (`cpal`) por uma fila SPSC (`rtrb`) |
+| `tocador` | Decodifica (`symphonia`), converte a taxa (`rubato`), mistura (`mistura.rs`: sem intervalo, crossfade, ganho, EQ, limitador) e entrega à saída (`cpal`) por uma fila SPSC (`rtrb`). Toca uma `Origem`: arquivo ou endereço na internet (`rede.rs`: baixa em pedaços de 64 KB com `Range`, pula para qualquer ponto, retoma conexão caída; a seguinte da internet abre em segundo plano) |
+| `provedores` | F1: o formato comum das faixas (`modelo.rs`), o protocolo JSON por linha com os programas dos serviços (`protocolo.rs`, descrito em `docs/f1-provedores.md`), o lado do Player (`cliente.rs`: abre o processo, pedidos com prazo de várias threads), o lado do provedor (`servidor.rs`), os instalados (`registro.rs`), o casador entre serviços (`casador.rs`) e o `provedor-exemplo` |
 | `preanalise` | Pré-análise (porte de `preview/preanalysis.js`, em `pista.rs`): batidas por programação dinâmica, tempo forte, clareza do pulso, trechos por novidade, energia calibrada, drops e subida; tom (`tom.rs`); LUFS; o modo arquivo do diretor (`condutor.rs`); `cache::Cache` em `analises.db` (vale enquanto tamanho, data e `VERSAO` batem) |
 | `biblioteca` | Varre pastas, lê etiquetas e ReplayGain (`lofty`) e guarda no acervo SQLite (`faixas` com chave `(caminho, pasta)`, `playlists`, `playlist_itens`); consultas por `Filtro` (origem, busca, álbum, artista) |
 | `player` | O app em GPUI 0.2.2: estado em `app.rs`, telas em `ui/*.rs` |
+| `provedores/youtube-music` | O provedor do YouTube Music (um programa à parte, GPL-3.0-only por causa do `rustypipe`): metadados pelo `rustypipe`, áudio pelo cliente visionOS (`visionos.rs`). Embutido: o Player o acha ao lado do `player.exe` (`remoto::EMBUTIDOS`) |
 
 ### Princípio das threads
 
@@ -127,6 +134,10 @@ thread.** Pedidos seguem por canal (`mpsc`).
 - `escuta.rs`: thread do Modo Escuta; `Fonte::{Tudo, App(exe), Proprio}`.
 - `local.rs`: player local (thread da biblioteca, tocador com a seguinte pré-carregada, SMTC via `souvlaki` com
   a capa).
+- `remoto.rs`: as músicas dos provedores (F1): uma thread por provedor instalado (`<dados>/provedores`), a busca
+  em todos ao mesmo tempo (depois de 350 ms sem digitar) e o endereço de cada faixa. A faixa de provedor vira uma
+  `biblioteca::Musica` com `remota` preenchida e a chave `servico:id` no `caminho`; o `local.rs` pede o endereço
+  antes de tocar (a de agora toca quando ele chega; a seguinte é resolvida antes, para entrar sem intervalo).
 - `preanalista.rs`: thread da pré-análise (prioridade: a de agora e as duas seguintes; depois a biblioteca, em
   prioridade baixa; análise da biblioteca interrompida quando chega prioridade).
 - `fila.rs`: a fila (aleatório que guarda a ordem original, repetir, a seguir, mover, tirar), só lógica e testada.
@@ -142,7 +153,11 @@ thread.** Pedidos seguem por canal (`mpsc`).
   principal minimizada ou na bandeja.
 - `ui/configuracoes.rs`: a página Configurações (seções numa coluna, ou abas em janela estreita). Os blocos vêm de
   `painel::blocos_de_ajuste`; o painel lateral mostra só os módulos.
-- `diario.rs`, `letrista.rs`, `servicos.rs`: as pontes para histórico, letras e Last.fm/Discord.
+- `diario.rs`, `letrista.rs`, `servicos.rs`: as pontes para histórico, letras e Last.fm/Discord. A thread das letras
+  pergunta às fontes na ordem dos ajustes (`Recado::Configurar`), guarda a letra com a fonte, o acerto de sincronia
+  (`Recado::Atraso`) e a tradução por música e idioma (`Recado::Traduzir`, `EstadoDaTraducao`). O texto embaixo de
+  cada linha (tradução, letras latinas) sai de `Player::extra_da_linha`; a letra em tela cheia é `ui/letra_cheia.rs`
+  (`Player::letra_cheia`, comando `LetraTelaCheia`, tecla Y), que pede ao arranjo o visual na janela inteira.
 - `arranjo.rs`: layout responsivo (largo, gaveta, empilhado, mini).
 - `ui/`: `casca` (topo e trilho), `heroi`, `painel` (módulos e Ajustes), `reproducao` (crossfade, volume
   igualado e equalizador nos Ajustes), `dock`, `paleta` (Ctrl K), `busca_letra`, `campo` (campo de texto),
@@ -248,7 +263,7 @@ thread.** Pedidos seguem por canal (`mpsc`).
 
 ---
 
-## 7. Onde estamos (13/11/2026)
+## 7. Onde estamos (21/11/2026)
 
 **Pronto e testado no app:** Modo Escuta (som do PC ou de um app só, com "tocando agora" filtrado pelo mesmo
 app); três visuais e modo seguro; interface responsiva com 4 temas e 2 skins; painel em módulos com modo edição;
@@ -267,6 +282,65 @@ janelas por cima.
 150/170, tom com Camelot, tempo do compasso aceso, "Intensa" (vermelho) no instante de cada drop e o visual
 explodindo nele; a troca para o Spotify (Modo Escuta) seguiu sozinha. O ganho automático do ao vivo só foi
 medido no diagnóstico com arquivos (não com o Spotify ouvido por um tempo longo).
+
+**F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
+LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
+palavras, o rodapé diz a fonte, o acerto de sincronia guardado por música, tradução pela Unison (5 idiomas, guardada
+por música e idioma), letras latinas no computador e a letra em tela cheia sobre o visual (Y). O manifesto do módulo
+Letra foi para a versão 2 (três endereços): quem já tinha o módulo precisa aceitar de novo na Loja. Conferido na cópia
+de teste com "Blinding Lights" pelo YouTube Music: Better Lyrics palavra por palavra, a tradução em português embaixo
+de cada linha (módulo e tela cheia), o acerto +1,0 s, a tradução e a fonte gravados no banco, e a seção Letras. Não
+conferido: a página Letra da Ilha com a tradução, as letras latinas na tela (só nos testes de unidade), a Unison e a
+romanização com uma música de verdade e a troca de uma letra antiga do LRCLIB por uma melhor. Ficaram para depois:
+estilos e a bolinha da tela cheia, o cartão para compartilhar e a letra no visual.
+
+**F1, partes 1 e 2 (22/11/2026)**, desenho em [`docs/f1-provedores.md`](docs/f1-provedores.md): crate `provedores`
+(modelos, protocolo versão 1, cliente, servidor, registro em `<dados>/provedores/<nome>/provedor.toml`, casador com
+ISRC e nota título/artista/duração) e o `provedor-exemplo`, testado de ponta a ponta como programa à parte (pedidos
+ao mesmo tempo, prazo, provedor que fecha no meio). O tocador toca endereços (`tocador::Origem`, `rede::LeitorHttp`)
+e a pré-análise também (`preanalise::analisar_origem`); o cache guarda as análises das faixas pela chave e pelo ISRC
+(`Cache::ler_faixa`, `guardar_faixa`).
+
+**F1, parte 3 (22/11/2026)**: no Player, `remoto.rs` (uma thread por provedor, busca em todos, endereço de cada
+faixa, reabre o provedor que fecha até 3 vezes); a fila aceita faixas de provedor ao lado das locais; a pré-análise
+recebe alvos remotos (`preanalista::Alvo`); a busca da Biblioteca mostra o bloco "Nos serviços". Conferido numa cópia
+de teste com o `provedor-exemplo` instalado na pasta de dados e um servidor HTTP local (Python) servindo três WAVs:
+a busca chegou ao provedor, a faixa tocou pela rede com BPM 128 e 140 vindos da pré-análise remota, a seguinte entrou
+sem intervalo aos 20,2 s (cronometrado), a fila acabou certo, e um provedor que fechou mostrou o erro e reabriu na
+busca seguinte. Não conferido: um serviço de verdade (o primeiro é a F3) e a capa baixada de um endereço. "Neste
+computador" continua sendo o player local de sempre, e não um provedor como os outros (fica para a F2, com as
+páginas unificadas).
+
+**F3, YouTube Music (23/11/2026)**, em [`docs/f3-youtube-music.md`](docs/f3-youtube-music.md): o provedor busca,
+dá o início, álbuns, artistas e playlists pelo `rustypipe` e o áudio pelo cliente visionOS do YouTube (sem conta,
+sem decifrar nada, sem PO token), o caminho que MixMusic, limusic e Prism usam (lido no código deles). Vem com o app
+(`remoto::EMBUTIDOS`: o programa ao lado do `player.exe` entra na lista; dá para desligar, não remover) e recebe a
+pasta `<dados>/provedores-dados/<serviço>` em `TCCPLAYER_PROVEDOR_DADOS`. Testado: iOS só serve o primeiro ~1 MB,
+TV/web do `rustypipe` não decifram mais, Android VR pede login; visionOS serve o arquivo inteiro. O tocador pulou
+para os 410 s de "Around the World" e tocou até o fim; no app (cópia de teste), a busca trouxe 20 faixas e a
+primeira tocou com capa e pré-análise (121 BPM, Ré maior). Não testado ao vivo: início, álbum, artista, playlist
+(sem tela até a F2). Rodar o JavaScript do YouTube (youtubei.js, yt-dlp) foi bloqueado pela segurança do agente e
+não foi preciso.
+
+**F1, parte 4 (22/11/2026)**: a Loja tem a aba Provedores (situação, versão, capacidades, ligar e desligar,
+instalar de uma pasta, remover com "Desfazer", abrir a pasta). `provedores::instalar` copia a pasta para
+`<dados>/provedores/<servico>` por uma pasta temporária (atualizar troca o instalado); `remover` move para
+`<dados>/provedores-removidos/<servico>` (de onde `restaurar` traz de volta) e só mexe em pasta de dentro da pasta dos
+provedores. `Remoto` fecha a thread do provedor antes de mexer na pasta dele (o Windows não deixa mexer na pasta de
+um programa aberto) e faz a cópia em segundo plano; os desligados ficam em `ajustes.provedores_desligados`.
+Conferido na cópia de teste: a aba com o Exemplo pronto, desligar (o processo fechou e o ajuste gravou), religar,
+remover (aviso com "Desfazer", a pasta foi para os removidos) e desfazer (voltou e o provedor reabriu). Não
+conferido pela tela: instalar pela janela de escolher pasta (o teste de unidade instala, atualiza e remove).
+**Com isso a F1 está completa.**
+
+**A Ilha, quinta passada (21/11/2026, a pedido do Rafael)**: arrastar é sempre livre; o cadeado só decide se ela
+vai a qualquer borda (destravada) ou desliza pela borda dela (travada, `ilha::lugar_travado`, esticando ao ser puxada
+para dentro). Vários monitores: arrastando, ela passa para o monitor do ponteiro (`VistaIlha::trocar_de_monitor`
+converte as molas para a forma não pular) e o nome do monitor fica em `ajustes.ilha_monitor` (vazio = o da janela
+principal); também por Configurações › Ilha › Monitor, pelo bloco Monitor na página Ajustes da Ilha e pelo comando
+`IlhaOutroMonitor`. Em pé (barra lateral), as páginas foram refeitas: abas num controle segmentado, Tocando numa
+coluna com a capa do maior tamanho que cabe, Ritmo e Ajustes enchendo a altura (8 blocos: 4 por linha deitada, 2 em
+pé). As regras 1 e 2 (seção 2) perderam as limitações de serviço; o único limite é não quebrar DRM nem baixar música.
 
 **Auditoria (17/11/2026)**, em [`docs/auditoria-2026-11-17.md`](docs/auditoria-2026-11-17.md): a tremida da Ilha
 achada e corrigida com o diagnóstico quadro a quadro (posições fracionárias arredondadas pelo GPUI, região trocada a
@@ -332,6 +406,10 @@ local no controle de mídia do Windows e arrastar nas barras do equalizador (só
 - Captura por app em Windows anteriores ao 10 21H1 (deve cair num aviso, sem travar).
 
 **Dívidas conhecidas:**
+- Faixa de provedor é baixada duas vezes (o tocador e a pré-análise abrem cada um o seu `LeitorHttp`); juntar num
+  cache de pedaços compartilhado.
+- O exe de teste do `provedor-youtube-music` costuma ser bloqueado pelo erro 4551 quando roda com o workspace; ele
+  passa sozinho (`cargo test -p provedor-youtube-music`). Use `--no-fail-fast` para ver o resto.
 - O teste `visual --test desenho` (usa a placa de vídeo) travou uma vez por 50 min em 14/11/2026, com um jogo
   aberto; os outros testes passam. Se travar, rode `cargo test --workspace --exclude visual` e o dele à parte.
 - Sem CI.
@@ -349,10 +427,10 @@ O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`
 | # | Fase | Situação |
 | --- | --- | --- |
 | F0 | Base aberta: GPL-3, `LICENSE`, `THIRD-PARTY-NOTICES.md`, regras novas, `app/deny.toml`, README e CONTRIBUTING | Feita em 16/11/2026 (o `cargo-deny` não instala neste PC: o erro 4551 bloqueia os build scripts dele; as licenças foram conferidas pelo `cargo metadata`) |
-| F1 | Núcleo de provedores: protocolo, modelos, fila com vários serviços, motor tocando streams, cache de análise por ID/ISRC, casador entre serviços | |
+| F1 | Núcleo de provedores: protocolo, modelos, fila com vários serviços, motor tocando streams, cache de análise por ID/ISRC, casador entre serviços | Feita em 22/11/2026 (crate `provedores`, tocador por endereço, cache por ID/ISRC, `remoto.rs`, busca "Nos serviços", fila mista, aba Provedores na Loja); "Neste computador" como provedor ficou para a F2 |
 | F2 | Páginas unificadas e layouts (Palco, Estante), molas no `anim.rs` | |
-| F3 | Provedor YouTube Music (limusic `innertube`/`potoken`) | |
-| F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | |
+| F3 | Provedor YouTube Music | Feita em 23/11/2026: `app/provedores/youtube-music`, embutido; metadados pelo `rustypipe` e áudio pelo cliente visionOS, como MixMusic e limusic ([`docs/f3-youtube-music.md`](docs/f3-youtube-music.md)) |
+| F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | Feita em 22/11/2026 (`letras::fontes`, `ttml`, `traducao`; Configurações › Letras; `ui/letra_cheia.rs`); ficaram estilos e bolinha, cartão e a letra no visual ([`docs/f4-letras.md`](docs/f4-letras.md)) |
 | F5 | **A Ilha** (Dynamic Island): janela flutuante no topo, estados repouso/alerta/expandida | Feita em 16/11/2026 (ver seção 7) |
 | F6 | Provedor Spotify (Web Playback SDK em WebView2, Connect, via YouTube Music, librespot opcional) | |
 | F7 | Modo Escuta preciso + Shazam (SongRec): reconhecer, pré-analisar e alinhar ao som ao vivo | |

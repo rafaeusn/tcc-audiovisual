@@ -1,12 +1,14 @@
 //! A Ilha no Windows: a janela da pílula fica sempre por cima das outras, não rouba o foco de quem está sendo
-//! usado e fica no monitor da janela principal (onde exatamente, a Ilha decide: ver `player::ilha::encaixe`).
+//! usado e fica num dos monitores (o da janela principal, ou o que a pessoa escolheu; onde exatamente, a Ilha decide:
+//! ver `player::ilha::encaixe`).
 //!
 //! Mover e redimensionar vão por mensagem para a própria janela (o GPUI perde o aviso de tamanho quando a troca
 //! acontece dentro de um evento dele). Fora do Windows, tudo aqui não faz nada.
 
-/// O monitor onde uma janela está: o retângulo em pixels do monitor, a área de trabalho (sem a barra de tarefas:
-/// esquerda, topo, direita, baixo) e a escala do DPI dele (1,0 = 100%).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Um monitor: o retângulo em pixels da tela, a área de trabalho (sem a barra de tarefas: esquerda, topo, direita,
+/// baixo), a escala do DPI dele (1,0 = 100%), o nome que o Windows dá a ele (`\\.\DISPLAY2`, guardado nos ajustes
+/// para a Ilha voltar ao mesmo monitor) e se é o principal.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Monitor {
     pub esquerda: i32,
     pub topo: i32,
@@ -14,6 +16,43 @@ pub struct Monitor {
     pub baixo: i32,
     pub area: (i32, i32, i32, i32),
     pub escala: f32,
+    pub nome: String,
+    pub principal: bool,
+}
+
+impl Monitor {
+    /// O ponto (pixels da tela) está dentro deste monitor.
+    pub fn contem(&self, x: i32, y: i32) -> bool {
+        x >= self.esquerda && x < self.direita && y >= self.topo && y < self.baixo
+    }
+}
+
+/// Os monitores ligados: o principal primeiro (o "Monitor 1", como o Windows costuma numerar), depois os outros da
+/// esquerda para a direita (e de cima para baixo).
+pub fn monitores() -> Vec<Monitor> {
+    #[cfg(windows)]
+    {
+        let mut todos = crate::sistema_ilha::monitores();
+        todos.sort_by_key(|m| (!m.principal, m.esquerda, m.topo));
+        todos
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+/// O monitor no ponto `x`, `y` (pixels da tela), ou o mais perto dele.
+pub fn monitor_no_ponto(x: i32, y: i32) -> Option<Monitor> {
+    #[cfg(windows)]
+    {
+        crate::sistema_ilha::monitor_no_ponto(x, y)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (x, y);
+        None
+    }
 }
 
 /// Deixa a janela `hwnd` pronta para ser a Ilha: sem moldura, sempre por cima, sem roubar o foco ao ser clicada.

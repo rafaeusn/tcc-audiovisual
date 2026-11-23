@@ -10,8 +10,8 @@ mensagens de commit e textos da interface.
 
 ## Regras
 
-1. **O núcleo não usa nenhum serviço de streaming sozinho.** Spotify, YouTube Music, SoundCloud e afins entram só
-   como provedores da Loja, desligados por padrão, instalados e conectados pelo usuário.
+1. **Serviços entram como provedores da Loja**, sem limitação de API (oficial ou não). O único limite: nada de
+   quebrar DRM nem de salvar em arquivo faixas de catálogo de um serviço.
 2. **Nenhum segredo no código nem no git.** Chaves de API vêm de variável de ambiente.
 3. **Sem arquivos de áudio no repositório** (o `.gitignore` já bloqueia MP3, FLAC e WAV).
 4. **Código de outro projeto:** só se a licença for compatível com a GPL-3. Mantenha no topo do arquivo um

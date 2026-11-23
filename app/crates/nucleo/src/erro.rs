@@ -23,6 +23,8 @@ pub enum Erro {
     Dados(String),
     #[error("rede: {0}")]
     Rede(String),
+    #[error("provedor: {0}")]
+    Provedor(String),
 }
 
 pub type Resultado<T> = Result<T, Erro>;

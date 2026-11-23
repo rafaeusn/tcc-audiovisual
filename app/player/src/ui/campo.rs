@@ -76,6 +76,7 @@ impl Player {
             }
         } else if self.buscando_musicas {
             self.local.buscar(&self.busca_musicas);
+            self.local.remoto.buscar(&self.busca_musicas);
         }
     }
 

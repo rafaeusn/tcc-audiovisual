@@ -17,6 +17,7 @@ mod dock;
 mod fila;
 mod heroi;
 pub mod ilha;
+mod letra_cheia;
 mod loja;
 mod modulo;
 mod musicas;

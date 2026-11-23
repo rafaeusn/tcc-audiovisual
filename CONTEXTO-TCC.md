@@ -247,7 +247,8 @@ Discord têm código (`crates/servicos`), mas ainda não foram vistos funcionand
 plano a pedido do Rafael (12/11/2026).
 
 ### Não fazer
-- Baixar áudio do YouTube/Spotify (yt-dlp etc.) — viola ToS.
+- Baixar para arquivo (ou redistribuir) faixas do YouTube/Spotify, ou quebrar DRM. Desde 21/11/2026, todo o resto
+  vale: APIs não oficiais, player web, librespot, cache local para tocar e analisar (ver `AGENTS.md`, seção 2).
 - Embutir runtime TouchDesigner no app (não existe; TD é só laboratório).
 - Espalhar pasta `touchdesigner-mcp/modules/` (paths relativos do tox).
 

@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "O que foi ouvido, num arquivo SQLite local: execuções, estatísticas e as letras já buscadas."
 
 [dependencies]
+serde_json = "1"
 nucleo.workspace = true
 log.workspace = true
 rusqlite = { version = "0.37", features = ["bundled"] }

@@ -56,6 +56,7 @@ fn musica_da_linha(l: &rusqlite::Row) -> rusqlite::Result<Musica> {
         duracao_s: l.get(5)?,
         ganho_db: l.get(6)?,
         pico: l.get(7)?,
+        remota: None,
     })
 }
 

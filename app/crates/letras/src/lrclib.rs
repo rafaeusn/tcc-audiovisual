@@ -13,7 +13,7 @@ const RAIZ: &str = "https://lrclib.net/api";
 /// O LRCLIB pede que cada app se identifique. O nome é genérico: não diz quem é a pessoa nem o computador.
 const AGENTE: &str = concat!("Player-Escuta/", env!("CARGO_PKG_VERSION"));
 /// Resposta maior que isto não é uma letra: para de ler.
-const MAXIMO_DA_RESPOSTA: u64 = 2 * 1024 * 1024;
+pub(crate) const MAXIMO_DA_RESPOSTA: u64 = 2 * 1024 * 1024;
 /// Diferença de duração aceita entre a faixa e a letra, em segundos.
 const FOLGA_EXATA_S: f64 = 2.0;
 const FOLGA_MAXIMA_S: f64 = 5.0;
@@ -25,6 +25,8 @@ pub struct Pedido {
     pub artista: String,
     pub album: String,
     pub duracao_s: Option<f64>,
+    /// O id do vídeo, quando a faixa é do YouTube Music (a Unison acha a letra por ele).
+    pub video_id: Option<String>,
 }
 
 /// Uma letra como o LRCLIB devolve.
@@ -94,7 +96,7 @@ pub fn escolher(candidatos: Vec<Registro>, pedido: &Pedido) -> Option<Registro> 
 }
 
 pub struct Cliente {
-    agente: ureq::Agent,
+    pub(crate) agente: ureq::Agent,
 }
 
 impl Cliente {
@@ -201,6 +203,7 @@ mod testes {
 
     fn pedido(duracao: Option<f64>) -> Pedido {
         Pedido {
+            video_id: None,
             titulo: "Canção de Teste".into(),
             artista: "Banda Tal".into(),
             album: String::new(),

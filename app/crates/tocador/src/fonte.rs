@@ -1,9 +1,11 @@
-//! Lê um arquivo de música e entrega som estéreo na taxa da saída.
+//! Lê uma música (arquivo ou endereço na internet) e entrega som estéreo na taxa da saída.
 //!
 //! A decodificação é do `symphonia` (MP3, FLAC, WAV, OGG Vorbis, AAC/M4A). Mono vira estéreo, mais de dois
 //! canais ficam com os dois primeiros, e a taxa do arquivo é convertida para a da placa de som quando difere
 //! (o Windows só aceita a taxa em que o dispositivo está).
 
+use crate::Origem;
+use crate::rede::{Endereco, LeitorHttp};
 use nucleo::{Erro, Resultado};
 use rubato::{FastFixedIn, PolynomialDegree, Resampler};
 use std::path::Path;
@@ -45,8 +47,31 @@ impl Fonte {
         if let Some(extensao) = caminho.extension().and_then(|e| e.to_str()) {
             dica.with_extension(extensao);
         }
+        Self::de_fluxo(fluxo, &dica, taxa_da_saida)
+    }
+
+    /// Abre um endereço na internet (a primeira resposta chega antes de voltar; o resto vem em segundo plano).
+    pub fn abrir_endereco(endereco: &Endereco, taxa_da_saida: u32) -> Resultado<Self> {
+        let leitor = LeitorHttp::abrir(endereco).map_err(|e| Erro::Rede(e.to_string()))?;
+        let fluxo = MediaSourceStream::new(Box::new(leitor), Default::default());
+        let mut dica = Hint::new();
+        if let Some(extensao) = endereco.extensao() {
+            dica.with_extension(&extensao);
+        }
+        Self::de_fluxo(fluxo, &dica, taxa_da_saida)
+    }
+
+    /// Abre um arquivo ou um endereço.
+    pub fn abrir_origem(origem: &Origem, taxa_da_saida: u32) -> Resultado<Self> {
+        match origem {
+            Origem::Arquivo(caminho) => Self::abrir(caminho, taxa_da_saida),
+            Origem::Endereco(e) => Self::abrir_endereco(e, taxa_da_saida),
+        }
+    }
+
+    fn de_fluxo(fluxo: MediaSourceStream, dica: &Hint, taxa_da_saida: u32) -> Resultado<Self> {
         let sondado = symphonia::default::get_probe()
-            .format(&dica, fluxo, &FormatOptions::default(), &MetadataOptions::default())
+            .format(dica, fluxo, &FormatOptions::default(), &MetadataOptions::default())
             .map_err(|e| Erro::Audio(format!("formato não reconhecido: {e}")))?;
         let formato = sondado.format;
         let faixa = formato

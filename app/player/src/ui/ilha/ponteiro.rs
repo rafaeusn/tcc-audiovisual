@@ -4,8 +4,10 @@
 //! ninguém. Cada linha é `segundos x y botão`: o tempo desde que a Ilha apareceu, o ponto em frações da área de
 //! trabalho (0 a 1; um pouco fora vale, para testar a beira) e o botão (1 apertado, 0 solto). Entre duas linhas o
 //! ponteiro anda em linha reta. `#` começa um comentário. Uma linha `segundos comando nome` dá um comando à Ilha
-//! nesse instante (`trava`, `topo`, `baixo`, `esquerda`, `direita`). O relógio do roteiro começa quando aparece o
-//! arquivo `<roteiro>.go` (quem testa o cria na hora certa). Com o roteiro, o mouse de verdade não conta.
+//! nesse instante (`trava`, `topo`, `baixo`, `esquerda`, `direita`, `monitor`). O relógio do roteiro começa quando
+//! aparece o arquivo `<roteiro>.go` (quem testa o cria na hora certa). As frações valem para a área de trabalho do
+//! monitor em que a Ilha estava nessa hora (passando de 0 ou de 1, o ponteiro vai para o monitor ao lado). Com o
+//! roteiro, o mouse de verdade não conta.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -25,6 +27,8 @@ pub(super) enum Ponteiro {
         comandos: Vec<(f32, String)>,
         gatilho: PathBuf,
         inicio: Option<Instant>,
+        /// A área de trabalho (pixels da tela) quando o roteiro começou: as frações valem para ela.
+        area: (i32, i32, i32, i32),
         apertado_antes: bool,
     },
 }
@@ -39,7 +43,14 @@ impl Ponteiro {
                 log::info!("ilha-diag roteiro do ponteiro com {} passos e {} comandos", passos.len(), comandos.len());
                 let mut gatilho = PathBuf::from(&caminho).into_os_string();
                 gatilho.push(".go");
-                Self::Roteiro { passos, comandos, gatilho: gatilho.into(), inicio: None, apertado_antes: false }
+                Self::Roteiro {
+                    passos,
+                    comandos,
+                    gatilho: gatilho.into(),
+                    inicio: None,
+                    area: (0, 0, 1, 1),
+                    apertado_antes: false,
+                }
             }
             Err(e) => {
                 log::warn!("roteiro do ponteiro da Ilha ilegível ({}): {e}", caminho.to_string_lossy());
@@ -48,24 +59,26 @@ impl Ponteiro {
         }
     }
 
-    /// Começa o relógio do roteiro quando o arquivo de partida (`<roteiro>.go`) aparece. Devolve se começou agora.
-    pub(super) fn vigiar(&mut self) -> bool {
-        if let Self::Roteiro { gatilho, inicio, .. } = self
+    /// Começa o relógio do roteiro quando o arquivo de partida (`<roteiro>.go`) aparece, com as frações valendo para
+    /// a área de trabalho `area_agora` (pixels da tela). Devolve se começou agora.
+    pub(super) fn vigiar(&mut self, area_agora: (i32, i32, i32, i32)) -> bool {
+        if let Self::Roteiro { gatilho, inicio, area, .. } = self
             && inicio.is_none()
             && gatilho.exists()
         {
             *inicio = Some(Instant::now());
+            *area = area_agora;
             return true;
         }
         false
     }
 
-    /// Onde está o ponteiro, em pixels da tela. No roteiro, o ponto vem em frações da área de trabalho `area`
-    /// (esquerda, topo, direita, baixo, em pixels da tela); antes do primeiro passo, o ponteiro está longe.
-    pub(super) fn cursor(&self, area: (i32, i32, i32, i32)) -> Option<(i32, i32)> {
+    /// Onde está o ponteiro, em pixels da tela. No roteiro, o ponto vem em frações da área de trabalho de quando ele
+    /// começou; antes do primeiro passo, o ponteiro está longe.
+    pub(super) fn cursor(&self) -> Option<(i32, i32)> {
         match self {
             Self::Sistema => integracao::ilha::cursor(),
-            Self::Roteiro { passos, inicio, .. } => {
+            Self::Roteiro { passos, inicio, area, .. } => {
                 let p = agora(passos, *inicio)?;
                 let (w, h) = ((area.2 - area.0) as f32, (area.3 - area.1) as f32);
                 Some(((area.0 as f32 + p.x * w).round() as i32, (area.1 as f32 + p.y * h).round() as i32))

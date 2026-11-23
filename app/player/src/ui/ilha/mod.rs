@@ -7,8 +7,10 @@
 //! do tamanho da maior forma, e segue a forma sem sair do monitor; só a forma aparece e recebe cliques (a região da
 //! janela acompanha a forma).
 //!
-//! Travada, a Ilha não sai do lugar (um puxão só a estica e ela volta). Destravada, arrasta-se livre pela tela: perto
-//! de uma borda, gruda nela (o ímã); longe, fica solta onde for largada. Travar uma Ilha solta a devolve à última borda.
+//! Arrastar é sempre livre. Travada, a Ilha só desliza ao longo da borda em que está (puxada para dentro da tela, ela
+//! estica um pouco e volta). Destravada, vai para qualquer lugar: perto de uma borda, gruda nela (o ímã); longe, fica
+//! solta onde for largada. Travar uma Ilha solta a devolve à última borda. Com mais de um monitor, ela vai junto com o
+//! ponteiro para o outro (travada, na mesma borda) e lembra em qual ficou.
 //!
 //! Aberta, a Ilha tem páginas (Tocando, Letra, Visual, Ritmo, Ajustes): as abas no alto, arrastar o conteúdo para o
 //! lado ou a roda do mouse passam de uma para outra. Dos lados, ela vira uma barra lateral, com as páginas na vertical.
@@ -77,6 +79,10 @@ struct Dados {
     drop_em_s: Option<f32>,
     /// A letra sincronizada e o instante dela, ou a frase que vai no lugar.
     letra: Result<(Arc<Letra>, f64), &'static str>,
+    /// A tradução e as letras latinas embaixo das linhas perto da de agora (vazio quando desligadas), e se a
+    /// pessoa ligou alguma delas (a letra abre espaço para elas).
+    extras: Vec<(usize, String)>,
+    com_extras: bool,
     progresso: Option<(f64, f64)>,
     bpm: Option<u32>,
     energia: f32,
@@ -90,6 +96,9 @@ struct Dados {
     tema: &'static str,
     tamanho: TamanhoIlha,
     travada: bool,
+    ao_pairar: bool,
+    /// Em que monitor a Ilha está e quantos há (com mais de um).
+    monitor: Option<(usize, usize)>,
     retrato: Retrato,
     paleta_fixa: Option<([f32; 3], [f32; 3])>,
     cinza_no_visual: bool,
@@ -108,8 +117,13 @@ impl Dados {
         let cores = p.cores();
         let rotulo = p.retrato.rotulo;
         let paleta = p.ajustes.paleta_atual();
+        let letra = p.letra_sincronizada();
         Self {
-            origem: if p.origem_local { "Neste computador".to_string() } else { faixa.app.clone() },
+            // A música local diz de onde vem: o computador ou o provedor da faixa.
+            origem: match p.local.atual().filter(|_| p.origem_local) {
+                Some(m) => m.remota.as_ref().map_or_else(|| "Neste computador".to_string(), |r| r.fonte.clone()),
+                None => faixa.app.clone(),
+            },
             titulo: faixa.titulo,
             artista: faixa.artista,
             capa: p.capa.clone(),
@@ -118,7 +132,12 @@ impl Dados {
             tom: tema::cor_de(p.tom),
             volume: if p.mudo { 0.0 } else { p.volume },
             drop_em_s: p.drop_em_s(),
-            letra: p.letra_sincronizada(),
+            extras: match &letra {
+                Ok((l, t)) => p.extras_perto(&l.linhas, *t),
+                Err(_) => Vec::new(),
+            },
+            com_extras: p.letra_tem_extras(),
+            letra,
             progresso: p
                 .midia
                 .posicao
@@ -140,6 +159,8 @@ impl Dados {
             tema: p.ajustes.tema.nome(),
             tamanho: p.ajustes.ilha_tamanho,
             travada: p.ajustes.ilha_travada,
+            ao_pairar: p.ajustes.ilha_ao_pairar,
+            monitor: None,
             retrato: p.retrato,
             paleta_fixa: (!p.ajustes.cores_reativas)
                 .then(|| (paleta.a.map(|v| v as f32 / 255.0), paleta.b.map(|v| v as f32 / 255.0))),
@@ -148,8 +169,8 @@ impl Dados {
     }
 }
 
-/// Um arrasto que começou na Ilha: vira mudança de lugar (destravada), um puxão que volta (travada) ou troca de
-/// página (no conteúdo da Ilha aberta).
+/// Um arrasto que começou na Ilha: vira mudança de lugar (travada, só ao longo da borda) ou troca de página (no
+/// conteúdo da Ilha aberta).
 #[derive(Clone, Copy, Debug)]
 struct Arrasto {
     /// Onde o ponteiro estava ao apertar, em pixels lógicos do monitor.
@@ -166,10 +187,8 @@ struct Arrasto {
 enum ModoDoArrasto {
     /// Ainda não andou o bastante para saber.
     Indefinido,
-    /// Destravada: a Ilha vai junto, gruda nas bordas.
+    /// A Ilha vai junto: destravada, para qualquer borda ou solta; travada, ao longo da borda dela.
     Mover,
-    /// Travada: a Ilha só estica um pouco (resistindo) e volta ao soltar.
-    Travada,
     Paginas,
 }
 
@@ -225,6 +244,8 @@ impl Telas {
             baixo: 1080,
             area: (0, 0, 1920, 1040),
             escala: 1.0,
+            nome: String::new(),
+            principal: true,
         });
         let e = if m.escala.is_finite() { m.escala.max(0.5) } else { 1.0 };
         let l = |v: i32| v as f32 / e;
@@ -237,6 +258,12 @@ impl Telas {
     /// Um ponto da tela (pixels) em pixels lógicos do monitor.
     fn logico(&self, p: (i32, i32)) -> (f32, f32) {
         ((p.0 - self.canto.0) as f32 / self.escala, (p.1 - self.canto.1) as f32 / self.escala)
+    }
+
+    /// Um ponto em pixels lógicos do monitor `outro` visto deste (a forma passando de um monitor para outro).
+    fn de_outro(&self, outro: &Telas, p: (f32, f32)) -> (f32, f32) {
+        let tela = (outro.canto.0 as f32 + p.0 * outro.escala, outro.canto.1 as f32 + p.1 * outro.escala);
+        ((tela.0 - self.canto.0 as f32) / self.escala, (tela.1 - self.canto.1 as f32) / self.escala)
     }
 }
 
@@ -282,7 +309,7 @@ pub struct VistaIlha {
     telas: Telas,
     escala_maxima: f32,
     tamanho_janela: (f32, f32),
-    /// Travada e puxada: quanto ela estica (pixels lógicos), voltando ao soltar.
+    /// Travada e puxada para dentro da tela: quanto ela estica (pixels lógicos), voltando ao soltar.
     puxao: (f32, f32),
     /// Depois de largar a Ilha com o ponteiro em cima, ela só abre de novo depois que o ponteiro sair.
     pairar_bloqueado: bool,
@@ -302,6 +329,8 @@ pub struct VistaIlha {
     principal_na_frente: bool,
     reduzido_no_sistema: bool,
     monitor: Option<integracao::ilha::Monitor>,
+    /// Os nomes dos monitores ligados (em ordem), para a página Ajustes dizer "Monitor 1 de 2".
+    monitores: Vec<String>,
     /// A última faixa vista: na troca de origem a faixa some por um instante, e a Ilha segue mostrando esta.
     ultima_faixa: (String, String),
     /// Ajuda de teste (`TCCPLAYER_ILHA_ABERTA=1`): a Ilha fica aberta como se o mouse estivesse em cima, para
@@ -451,6 +480,7 @@ impl VistaIlha {
             principal_na_frente: false,
             reduzido_no_sistema: false,
             monitor: None,
+            monitores: Vec::new(),
             ultima_faixa: (String::new(), String::new()),
             aberta_para_teste: std::env::var_os("TCCPLAYER_ILHA_ABERTA").is_some_and(|v| v == "1"),
             escondida_para_teste: std::env::var_os("TCCPLAYER_ILHA_ESCONDIDA").is_some_and(|v| v == "1"),
@@ -495,7 +525,7 @@ impl VistaIlha {
 
     /// Onde está o ponteiro, em pixels lógicos do monitor.
     fn ponteiro_no_monitor(&self) -> Option<(f32, f32)> {
-        self.ponteiro.cursor(self.telas.area_na_tela).map(|p| self.telas.logico(p))
+        self.ponteiro.cursor().map(|p| self.telas.logico(p))
     }
 
     /// Onde está o ponteiro, em pixels lógicos da janela.
@@ -542,8 +572,6 @@ impl VistaIlha {
             let leva_pelo_conteudo = !self.travada && !self.modo.de_pe() && dy.abs() > dx.abs();
             a.modo = if comecou_no_conteudo && !leva_pelo_conteudo {
                 ModoDoArrasto::Paginas
-            } else if self.travada {
-                ModoDoArrasto::Travada
             } else {
                 // Fechada para arrastar: o ponteiro fica perto do meio da forma pequena.
                 let repouso = ilha::medidas_no_modo(self.modo, Forma::Repouso, None, s, false);
@@ -556,21 +584,23 @@ impl VistaIlha {
                 ModoDoArrasto::Mover
             };
         }
-        if a.modo == ModoDoArrasto::Mover && self.travada {
-            // Travou no meio do arrasto (pelas Configurações ou um atalho): ela volta para a borda.
-            self.arrasto = None;
-            self.lugar_no_arrasto = None;
-            return;
-        }
         if !self.ponteiro.apertado() {
             // Soltou.
             match a.modo {
                 ModoDoArrasto::Indefinido => self.clicou = true,
                 ModoDoArrasto::Mover => {
+                    self.puxao = (0.0, 0.0);
                     if let Some(lugar) = self.lugar_no_arrasto.take() {
                         self.diag(format_args!("SOLTOU em {lugar:?}"));
                         self.lugar = lugar;
+                        // O monitor onde ela foi largada fica guardado; no da janela principal, sem escolha guardada,
+                        // ela continua seguindo a janela.
+                        let aqui = self.monitor.as_ref().map(|m| m.nome.clone());
+                        let do_player = self.hwnd_principal.and_then(integracao::ilha::monitor).map(|m| m.nome);
                         self.player.update(cx, |p, _| {
+                            if p.ajustes.ilha_monitor.is_some() || aqui != do_player {
+                                p.ajustes.ilha_monitor = aqui.or(p.ajustes.ilha_monitor.take());
+                            }
                             match lugar {
                                 Lugar::Presa(borda, posicao) => {
                                     p.ajustes.ilha_borda = borda;
@@ -583,10 +613,6 @@ impl VistaIlha {
                         });
                     }
                     self.pairar_bloqueado = true;
-                    self.arrastou_em = Some(agora);
-                }
-                ModoDoArrasto::Travada => {
-                    self.puxao = (0.0, 0.0);
                     self.arrastou_em = Some(agora);
                 }
                 ModoDoArrasto::Paginas => {
@@ -606,15 +632,34 @@ impl VistaIlha {
                 let area = self.telas.area;
                 let ponteiro = (ponto.0 - area.x, ponto.1 - area.y);
                 let centro = (ponto.0 - a.pega.0 - area.x, ponto.1 - a.pega.1 - area.y);
-                let lugar = ilha::lugar_no_arrasto(ponteiro, centro, (area.w, area.h), self.lugar_no_arrasto);
+                let lugar = if self.travada {
+                    // Travada: desliza pela borda dela; puxada para dentro da tela, estica resistindo e volta.
+                    let borda = match (self.lugar_no_arrasto, self.lugar) {
+                        (Some(Lugar::Presa(b, _)), _) | (_, Lugar::Presa(b, _)) => b,
+                        _ => BordaIlha::Topo,
+                    };
+                    let para_dentro = match borda {
+                        BordaIlha::Topo => ponteiro.1,
+                        BordaIlha::Baixo => area.h - ponteiro.1,
+                        BordaIlha::Esquerda => ponteiro.0,
+                        BordaIlha::Direita => area.w - ponteiro.0,
+                    };
+                    let estica = elastico((para_dentro - 24.0 * self.escala()).max(0.0), 160.0) * 0.35;
+                    self.puxao = match borda {
+                        BordaIlha::Topo => (0.0, estica),
+                        BordaIlha::Baixo => (0.0, -estica),
+                        BordaIlha::Esquerda => (estica, 0.0),
+                        BordaIlha::Direita => (-estica, 0.0),
+                    };
+                    ilha::lugar_travado(centro, (area.w, area.h), borda)
+                } else {
+                    self.puxao = (0.0, 0.0);
+                    ilha::lugar_no_arrasto(ponteiro, centro, (area.w, area.h), self.lugar_no_arrasto)
+                };
                 if lugar.modo() != self.lugar_no_arrasto.map_or(self.modo, Lugar::modo) {
                     self.diag(format_args!("LUGAR {lugar:?}"));
                 }
                 self.lugar_no_arrasto = Some(lugar);
-            }
-            ModoDoArrasto::Travada => {
-                // Travada, ela resiste: estica pouco, como presa por um elástico, e volta ao soltar.
-                self.puxao = (elastico(dx, 160.0) * 0.35, elastico(dy, 160.0) * 0.35);
             }
             ModoDoArrasto::Paginas => {
                 // Nas pontas, o conteúdo resiste (elástico) em vez de parar seco.
@@ -664,23 +709,29 @@ impl VistaIlha {
     fn decidir(&mut self, cx: &mut Context<Self>) {
         let agora = Instant::now();
         self.player.update(cx, |p, _| p.atualizar_estado());
-        if agora.duration_since(self.sistema_em) >= Duration::from_millis(150) {
+        let levando = self.arrasto.is_some_and(|a| a.modo == ModoDoArrasto::Mover);
+        if levando {
+            // Levando a Ilha, ela vai para o monitor em que o ponteiro está.
+            if let Some((x, y)) = self.ponteiro.cursor()
+                && !self.monitor.as_ref().is_some_and(|m| m.contem(x, y))
+                && let Some(m) = integracao::ilha::monitor_no_ponto(x, y)
+            {
+                self.trocar_de_monitor(Some(m), true);
+            }
+        } else if agora.duration_since(self.sistema_em) >= Duration::from_millis(150) {
             self.sistema_em = agora;
             self.tela_cheia = integracao::ilha::tela_cheia_de_outro();
             self.principal_na_frente = self.hwnd_principal.is_some_and(integracao::ilha::na_frente_ocupando_a_tela);
             self.reduzido_no_sistema = integracao::ilha::movimento_reduzido();
-            if let Some(h) = self.hwnd_principal {
-                let monitor = integracao::ilha::monitor(h);
-                if monitor != self.monitor {
-                    // Outro monitor, outra resolução ou outra barra de tarefas: a Ilha se refaz para caber nele.
-                    self.monitor = monitor;
-                    self.telas = Telas::do_monitor(monitor);
-                    let t = self.telas;
-                    self.escala_maxima = ilha::escala_que_cabe((t.area.w, t.area.h), (t.monitor.w, t.monitor.h));
-                    self.tamanho_janela = ilha::tamanho_da_janela(self.escala_maxima);
-                    self.janela_posta = None;
-                    self.diag(format_args!("MONITOR {:?} escala máxima {:.2}", t.monitor, self.escala_maxima));
-                }
+            // O monitor escolhido (se ainda estiver ligado) ou o da janela principal.
+            let todos = integracao::ilha::monitores();
+            let escolhido = self.player.read(cx).ajustes.ilha_monitor.clone();
+            let monitor = escolhido
+                .and_then(|n| todos.iter().find(|m| m.nome == n).cloned())
+                .or_else(|| self.hwnd_principal.and_then(integracao::ilha::monitor));
+            self.monitores = todos.into_iter().map(|m| m.nome).collect();
+            if monitor.is_some() && monitor != self.monitor {
+                self.trocar_de_monitor(monitor, false);
             }
         }
         // O ponteiro em cima da forma de agora (com uma folga), e o roteiro de teste apertando o botão nela.
@@ -689,7 +740,7 @@ impl VistaIlha {
             && !self.saindo
             && ponteiro.is_some_and(|p| self.caixa.contem(p, 4.0))
             && self.forma != Forma::Oculta;
-        if self.ponteiro.vigiar() {
+        if self.ponteiro.vigiar(self.telas.area_na_tela) {
             self.diag(format_args!("ROTEIRO começou"));
         }
         if self.ponteiro.desceu() && em_cima {
@@ -702,6 +753,7 @@ impl VistaIlha {
                 "baixo" => Some(Comando::PrenderIlha(BordaIlha::Baixo)),
                 "esquerda" => Some(Comando::PrenderIlha(BordaIlha::Esquerda)),
                 "direita" => Some(Comando::PrenderIlha(BordaIlha::Direita)),
+                "monitor" => Some(Comando::IlhaOutroMonitor),
                 _ => None,
             };
             self.diag(format_args!("COMANDO do roteiro {nome}"));
@@ -774,6 +826,43 @@ impl VistaIlha {
         if quer_ver && !self.visivel {
             self.aparecer();
             cx.notify();
+        }
+    }
+
+    /// A Ilha passa para outro monitor (ou o dela mudou de resolução ou de barra de tarefas): ela se refaz para caber
+    /// nele. Levada pelo ponteiro, a forma continua onde está na tela (sem pular); indo por escolha, ela nasce de novo
+    /// no lugar dela no monitor novo.
+    fn trocar_de_monitor(&mut self, monitor: Option<integracao::ilha::Monitor>, levada: bool) {
+        let antes = self.telas;
+        self.telas = Telas::do_monitor(monitor.clone());
+        self.monitor = monitor;
+        let t = self.telas;
+        self.escala_maxima = ilha::escala_que_cabe((t.area.w, t.area.h), (t.monitor.w, t.monitor.h));
+        self.tamanho_janela = ilha::tamanho_da_janela(self.escala_maxima);
+        self.janela_posta = None;
+        self.diag(format_args!(
+            "MONITOR {:?} {:?} escala máxima {:.2}",
+            self.monitor.as_ref().map(|m| m.nome.as_str()),
+            t.monitor,
+            self.escala_maxima
+        ));
+        if !self.visivel {
+            return;
+        }
+        if levada {
+            if let (Some(x), Some(y)) = (self.anim.mola_atual(("ilha-ax", 0)), self.anim.mola_atual(("ilha-ay", 0))) {
+                let (x, y) = t.de_outro(&antes, (x, y));
+                self.anim.definir_mola(("ilha-ax", 0), x);
+                self.anim.definir_mola(("ilha-ay", 0), y);
+            }
+            let c = self.corpo_na_tela;
+            let (x, y) = t.de_outro(&antes, (c.x, c.y));
+            self.corpo_na_tela = Caixa::new(x, y, c.w, c.h);
+            if let Some(a) = self.arrasto.as_mut() {
+                a.inicio = t.de_outro(&antes, a.inicio);
+            }
+        } else if !self.saindo {
+            self.aparecer();
         }
     }
 
@@ -866,6 +955,10 @@ impl Render for VistaIlha {
         } else {
             self.ultima_faixa = (dados.titulo.clone(), dados.artista.clone());
         }
+        if self.monitores.len() > 1 {
+            let aqui = self.monitor.as_ref().and_then(|m| self.monitores.iter().position(|n| *n == m.nome));
+            dados.monitor = aqui.map(|i| (i, self.monitores.len()));
+        }
         let s = self.escala();
         let minima = dados.tamanho == TamanhoIlha::Minima;
         self.anim.quadro(dt, reduzido);
@@ -901,7 +994,7 @@ impl Render for VistaIlha {
         // A âncora: solta e arrastada, vai junto com o ponteiro (1:1); grudando numa borda, voa até ela; no resto
         // (travar, prender por comando), anda numa mola sem quique.
         let movendo = self.arrasto.is_some_and(|a| a.modo == ModoDoArrasto::Mover);
-        let (ax, ay) = if movendo && modo == Modo::Solta {
+        let (ax, ay) = if movendo && (modo == Modo::Solta || self.travada) {
             self.anim.definir_mola(("ilha-ax", 0), ancora_alvo.0);
             self.anim.definir_mola(("ilha-ay", 0), ancora_alvo.1);
             ancora_alvo
@@ -1047,7 +1140,7 @@ impl Render for VistaIlha {
         let corpo_cabe =
             h >= alvo_do_conteudo.altura - 16.0 * s + 8.0 && w >= alvo_do_conteudo.largura - 40.0 * s + 16.0;
         let mut buraco = None;
-        if aberta && opacidade > 0.05 && corpo_cabe && self.arrasto.is_none_or(|a| a.modo != ModoDoArrasto::Travada) {
+        if aberta && opacidade > 0.05 && corpo_cabe {
             let x = esquerda_conteudo + (iv - deslize) * largura_pagina;
             let (x_a, x_b) = (x.max(esquerda_conteudo), (x + largura_pagina).min(esquerda_conteudo + largura_pagina));
             if x_b - x_a > 2.0 {
@@ -1073,11 +1166,11 @@ impl Render for VistaIlha {
                     div().absolute().top_0().left(px((-deslize * largura_pagina).round())).h_full().flex();
                 for pagina in Pagina::TODAS {
                     let corpo = match pagina {
-                        Pagina::Tocando => self.pagina_tocando(&dados, s, de_pe, cx),
+                        Pagina::Tocando => self.pagina_tocando(&dados, s, de_pe, altura_conteudo, cx),
                         Pagina::Letra => self.pagina_letra(&dados, s, altura_conteudo),
                         Pagina::Visual => self.pagina_visual(&dados, s, cx),
                         Pagina::Ritmo => self.pagina_ritmo(&dados, s, de_pe),
-                        Pagina::Ajustes => self.pagina_ajustes(&dados, s, de_pe, cx),
+                        Pagina::Ajustes => self.pagina_ajustes(&dados, s, de_pe, altura_conteudo, cx),
                     };
                     fileira = fileira.child(div().w(px(largura_pagina)).h_full().flex_none().child(corpo));
                 }

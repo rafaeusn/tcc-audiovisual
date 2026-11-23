@@ -1,18 +1,25 @@
-//! A Loja: módulos, temas, skins, layouts e pacotes.
+//! A Loja: módulos, provedores, temas, skins, layouts e pacotes.
+//!
+//! Os provedores (F1) são os programas dos serviços de música: a aba mostra os instalados, com a situação de cada
+//! um, liga e desliga, instala de uma pasta (ou atualiza) e remove (com "Desfazer").
 //!
 //! Nesta versão tudo o que já vem com o app pode ser aplicado daqui (temas, skins, layouts, pacotes e os módulos
 //! do painel). Os módulos que fazem mais que desenhar (usar a internet, entrar numa conta) têm uma ficha: ela
 //! mostra o que o módulo pede, com o motivo de cada coisa, e é ali que se instala. Os que ainda não têm código
 //! aparecem com a ficha completa, mas sem o botão de instalar: a Loja não finge que instala.
 
+use super::painel::interruptor;
 use super::{RAIO_CONTROLE, RAIO_MODULO, com_alfa, icone, texto, titulo};
 use crate::app::{AbaLoja, Player};
+use crate::remoto::Situacao;
 use crate::tema::{self, Cores};
-use gpui::{ClickEvent, Context, Div, FontWeight, Hsla, Stateful, div, prelude::*, px};
+use gpui::{ClickEvent, Context, Div, FontWeight, Hsla, SharedString, Stateful, div, prelude::*, px};
 use nucleo::{Comando, Modulo, Pagina, Skin, Tema};
+use provedores::Capacidade;
 
-const ABAS: [(AbaLoja, &str); 5] = [
+const ABAS: [(AbaLoja, &str); 6] = [
     (AbaLoja::Modulos, "Módulos"),
+    (AbaLoja::Provedores, "Provedores"),
     (AbaLoja::Temas, "Temas"),
     (AbaLoja::Skins, "Skins"),
     (AbaLoja::Layouts, "Layouts"),
@@ -59,6 +66,28 @@ const PACOTES: [Pacote; 2] = [
         painel_aberto: false,
     },
 ];
+
+/// O nome de uma capacidade de provedor, para a lista.
+fn nome_da_capacidade(c: Capacidade) -> &'static str {
+    match c {
+        Capacidade::Busca => "busca",
+        Capacidade::Inicio => "início",
+        Capacidade::Biblioteca => "biblioteca",
+        Capacidade::Playlists => "playlists",
+        Capacidade::EditarPlaylists => "editar playlists",
+        Capacidade::Curtir => "curtir",
+        Capacidade::Artista => "artistas",
+        Capacidade::Album => "álbuns",
+        Capacidade::Radio => "rádio",
+        Capacidade::Letra => "letras",
+        Capacidade::Audio => "áudio",
+        Capacidade::Conta => "conta",
+        Capacidade::Podcast => "podcasts",
+        Capacidade::Video => "vídeos",
+        Capacidade::Canvas => "Canvas",
+        Capacidade::Reconhecer => "reconhecer músicas",
+    }
+}
 
 /// Miniatura da janela: o visual, o painel (de um lado ou de nenhum) e o dock, nas cores de um tema.
 fn miniatura(c: &Cores, contorno: Hsla, imersiva: bool, painel: Option<bool>) -> Div {
@@ -244,6 +273,152 @@ impl Player {
             .child(selo)
     }
 
+    /// Botão em pílula da Loja (cheio, para a ação principal; com contorno, para as outras).
+    fn pilula_da_loja(&self, id: (&'static str, usize), rotulo: &'static str, cheio: bool) -> Stateful<Div> {
+        let c = self.cores();
+        let b = texto(14.0)
+            .id(id)
+            .h(px(36.0))
+            .px(px(14.0))
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(6.0))
+            .rounded(px(999.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .cursor_pointer();
+        if cheio {
+            b.bg(c.inv).text_color(c.inv_texto).hover(|s| s.opacity(0.9)).child(rotulo)
+        } else {
+            b.border_1().border_color(c.linha_2).text_color(c.texto_2).hover(|s| s.bg(c.hover)).child(rotulo)
+        }
+    }
+
+    /// A aba Provedores: os instalados (situação, versão, o que sabem fazer), ligar e desligar, instalar e remover.
+    fn lista_de_provedores(&self, cx: &mut Context<Self>) -> Div {
+        let c = self.cores();
+        let mut lista = div()
+            .flex()
+            .flex_col()
+            .child(texto(16.0).pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Provedores"))
+            .child(texto(14.0).text_color(c.texto_2).pb(px(12.0)).child(
+                "Os serviços de música (YouTube Music, Spotify, SoundCloud...). Cada provedor é um programa à parte: instalado, ele entra na busca da Biblioteca e as faixas dele tocam aqui, com o visual e a análise.",
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.0))
+                    .pb(px(16.0))
+                    .child(self.pilula_da_loja(("prov-instalar", 0), "Instalar de uma pasta", true).on_click(
+                        cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.escolher_provedor(cx);
+                            cx.notify();
+                        }),
+                    ))
+                    .child(self.pilula_da_loja(("prov-pasta", 0), "Abrir a pasta dos provedores", false).on_click(
+                        cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.abrir_pasta_dos_provedores();
+                            cx.notify();
+                        }),
+                    )),
+            );
+        let provedores = &self.local.remoto.provedores;
+        if provedores.is_empty() {
+            return lista.child(
+                div()
+                    .py(px(28.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icone("icones/globe.svg", 28.0, c.texto_3))
+                    .child(texto(14.0).max_w(px(460.0)).text_center().text_color(c.texto_2).child(
+                        "Nenhum provedor instalado ainda. O do YouTube Music é o próximo a chegar; um provedor é uma pasta com o provedor.toml e o programa dele.",
+                    )),
+            );
+        }
+        for (i, p) in provedores.iter().enumerate() {
+            let ligado = p.situacao != Situacao::Desligado;
+            let situacao = match &p.situacao {
+                Situacao::Pronto => "Pronto".to_string(),
+                Situacao::Abrindo => "Abrindo...".to_string(),
+                Situacao::Desligado => "Desligado".to_string(),
+                Situacao::Falhou(m) => format!("Não abriu: {m}"),
+            };
+            let mut detalhes = vec![situacao];
+            if !p.versao.is_empty() {
+                detalhes.push(format!("versão {}", p.versao));
+            }
+            if !p.capacidades.is_empty() {
+                detalhes.push(p.capacidades.iter().map(|c| nome_da_capacidade(*c)).collect::<Vec<_>>().join(", "));
+            }
+            let cor_da_situacao = if matches!(p.situacao, Situacao::Falhou(_)) { c.texto } else { c.texto_2 };
+            let posicao = self.anim.seguir(("prov-interruptor", i as u32), f32::from(u8::from(ligado)), 0.2);
+            let (s_ligar, s_remover) = (p.servico.clone(), p.servico.clone());
+            lista = lista.child(
+                div()
+                    .min_h(px(64.0))
+                    .py(px(10.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(14.0))
+                    .border_b_1()
+                    .border_color(c.linha)
+                    .child(
+                        div()
+                            .size(px(44.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(RAIO_CONTROLE + 2.0))
+                            .bg(c.bloco)
+                            .child(icone("icones/globe.svg", 22.0, if ligado { c.texto } else { c.texto_3 })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                texto(14.0)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child(SharedString::from(format!("{} ({})", p.nome, p.servico))),
+                            )
+                            .child(
+                                texto(14.0)
+                                    .text_color(cor_da_situacao)
+                                    .line_clamp(2)
+                                    .child(SharedString::from(detalhes.join(" · "))),
+                            ),
+                    )
+                    .when(p.embutido, |d| d.child(texto(12.0).flex_none().text_color(c.texto_3).child("Vem com o app")))
+                    .when(!p.embutido, |d| {
+                        d.child(self.pilula_da_loja(("prov-remover", i), "Remover", false).on_click(cx.listener(
+                            move |this, _: &ClickEvent, _, cx| {
+                                this.local.remoto.remover(&s_remover);
+                                cx.notify();
+                            },
+                        )))
+                    })
+                    .child(
+                        div()
+                            .id(("prov-ligar", i))
+                            .cursor_pointer()
+                            .child(interruptor(&c, "prov-interruptor", ligado, posicao))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                this.ligar_provedor(&s_ligar, !ligado);
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        lista
+    }
+
     pub(crate) fn ver_loja(&self, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
         let a = &self.arranjo;
@@ -285,7 +460,7 @@ impl Player {
                             // Em janela estreita a descrição sai: a altura fica para a lista.
                             .when(a.heroi.w >= 640.0, |d| {
                                 d.child(texto(14.0).text_color(c.texto_2).child(
-                                    "Módulos, temas, skins e layouts. O que já vem com o app se aplica com um clique.",
+                                    "Módulos, provedores, temas, skins e layouts. O que já vem com o app se aplica com um clique.",
                                 ))
                             }),
                     )
@@ -302,6 +477,7 @@ impl Player {
         let mut grade = div().flex().flex_wrap().gap(px(12.0));
         let mut lista = div().flex().flex_col();
         match self.aba_loja {
+            AbaLoja::Provedores => lista = self.lista_de_provedores(cx),
             AbaLoja::Temas => {
                 for (i, t) in Tema::TODOS.into_iter().enumerate() {
                     let ct = tema::cores(t);
@@ -520,7 +696,7 @@ impl Player {
             .px(px(lado))
             .pt(px(20.0))
             .pb(px(lado))
-            .child(if self.aba_loja == AbaLoja::Modulos { lista } else { grade });
+            .child(if matches!(self.aba_loja, AbaLoja::Modulos | AbaLoja::Provedores) { lista } else { grade });
         div().size_full().flex().flex_col().child(cabeca).child(corpo)
     }
 }

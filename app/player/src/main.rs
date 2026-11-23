@@ -20,6 +20,7 @@ mod letrista;
 mod local;
 mod preanalista;
 mod recursos;
+mod remoto;
 mod servicos;
 mod tema;
 mod ui;

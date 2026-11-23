@@ -45,6 +45,11 @@ pub fn arquivo_modulos() -> Resultado<PathBuf> {
     Ok(pasta_dados()?.join("modulos.toml"))
 }
 
+/// Onde ficam os provedores instalados (uma pasta por provedor, com o `provedor.toml`).
+pub fn pasta_provedores() -> Resultado<PathBuf> {
+    Ok(pasta_dados()?.join("provedores"))
+}
+
 pub fn pasta_registros() -> Resultado<PathBuf> {
     let pasta = pasta_dados()?.join("registros");
     std::fs::create_dir_all(&pasta).map_err(|e| Erro::arquivo(&pasta, e))?;

@@ -251,6 +251,9 @@ pub const PALETAS: [Paleta; 6] = [
     Paleta { nome: "Violeta", a: [0x6a, 0x00, 0xff], b: [0x00, 0xff, 0xd5] },
 ];
 
+/// As fontes de letra que o app conhece, na ordem padrão (as mesmas de `letras::Fonte`).
+pub const FONTES_DE_LETRA: [&str; 3] = ["better-lyrics", "unison", "lrclib"];
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Ajustes {
@@ -282,12 +285,29 @@ pub struct Ajustes {
     pub ilha_posicao: f32,
     /// A borda onde a Ilha fica presa (quando solta, a última em que esteve: travar a devolve para lá).
     pub ilha_borda: BordaIlha,
-    /// Travada, a Ilha não sai do lugar. Destravada, arrasta-se livre pela tela e gruda na borda de que chega perto.
+    /// Arrastar a Ilha é sempre livre. Travada, ela só desliza ao longo da borda em que está; destravada, vai para
+    /// qualquer borda (ou fica solta no meio da tela).
     pub ilha_travada: bool,
     /// Solta (destravada e longe das bordas): o centro dela, em frações da área de trabalho (0 a 1).
     pub ilha_solta: Option<[f32; 2]>,
+    /// Em que monitor a Ilha fica, pelo nome que o Windows dá a ele (`\\.\DISPLAY2`); vazio, no da janela principal.
+    pub ilha_monitor: Option<String>,
     /// O que o Modo Escuta ouve: vazio = todo o som do PC; senão, o executável de um app (`spotify.exe`).
     pub escuta_app: String,
+    /// Os provedores desligados (pelo serviço). Instalados, eles vêm ligados.
+    pub provedores_desligados: Vec<String>,
+    /// As fontes de letra na ordem em que são perguntadas (`better-lyrics`, `unison`, `lrclib`).
+    pub letra_fontes: Vec<String>,
+    /// As fontes de letra desligadas (nunca perguntadas).
+    pub letra_fontes_desligadas: Vec<String>,
+    /// Uma letra palavra por palavra de uma fonte de baixo ganha de uma por linha de uma de cima.
+    pub letra_palavra_por_palavra: bool,
+    /// Traduzir a letra (embaixo de cada linha) para `letra_idioma`.
+    pub letra_traduzir: bool,
+    /// O idioma da tradução (código: `pt`, `en`, `es`...).
+    pub letra_idioma: String,
+    /// Mostrar, embaixo de cada linha, a letra em letras latinas (coreano, japonês, chinês, russo, grego...).
+    pub letra_romanizar: bool,
     /// Músicas do computador: segundos de crossfade entre uma e outra (0 = sem; a troca continua sem intervalo).
     pub crossfade_s: f32,
     /// Igualar o volume entre as músicas pelo ReplayGain do arquivo.
@@ -326,7 +346,15 @@ impl Default for Ajustes {
             ilha_borda: BordaIlha::Topo,
             ilha_travada: true,
             ilha_solta: None,
+            ilha_monitor: None,
             escuta_app: String::new(),
+            provedores_desligados: Vec::new(),
+            letra_fontes: FONTES_DE_LETRA.iter().map(|s| s.to_string()).collect(),
+            letra_fontes_desligadas: Vec::new(),
+            letra_palavra_por_palavra: false,
+            letra_traduzir: false,
+            letra_idioma: "pt".into(),
+            letra_romanizar: false,
             crossfade_s: 0.0,
             volume_igualado: true,
             eq_ligado: false,
@@ -350,6 +378,31 @@ impl Ajustes {
             .ilha_solta
             .filter(|p| !self.ilha_travada && p.iter().all(|v| v.is_finite()))
             .map(|p| p.map(|v| v.clamp(0.0, 1.0)));
+        self.ilha_monitor = self.ilha_monitor.filter(|m| !m.trim().is_empty());
+        self.provedores_desligados.retain(|s| !s.trim().is_empty());
+        self.provedores_desligados.sort();
+        self.provedores_desligados.dedup();
+        // As fontes de letra: cada uma conhecida uma vez, as que faltam no fim; pelo menos uma ligada.
+        let mut fontes: Vec<String> = Vec::new();
+        for f in self.letra_fontes.iter().map(String::as_str).chain(FONTES_DE_LETRA) {
+            if FONTES_DE_LETRA.contains(&f) && !fontes.iter().any(|j| j == f) {
+                fontes.push(f.to_string());
+            }
+        }
+        self.letra_fontes = fontes;
+        self.letra_fontes_desligadas.retain(|f| FONTES_DE_LETRA.contains(&f.as_str()));
+        self.letra_fontes_desligadas.sort();
+        self.letra_fontes_desligadas.dedup();
+        if self.letra_fontes_desligadas.len() >= FONTES_DE_LETRA.len() {
+            self.letra_fontes_desligadas.retain(|f| f != "lrclib");
+        }
+        let idioma = self.letra_idioma.trim().to_ascii_lowercase();
+        self.letra_idioma =
+            if (2..=8).contains(&idioma.len()) && idioma.chars().all(|c| c.is_ascii_alphabetic() || c == '-') {
+                idioma
+            } else {
+                "pt".into()
+            };
         if self.paleta >= PALETAS.len() {
             self.paleta = Self::default().paleta;
         }
@@ -475,6 +528,23 @@ mod testes {
         assert_eq!(travada.ilha_solta, None, "travada, a Ilha fica na borda");
         let estragada = Ajustes { ilha_travada: false, ilha_solta: Some([f32::NAN, 0.5]), ..Default::default() };
         assert_eq!(estragada.validar().ilha_solta, None);
+        let fontes = Ajustes {
+            letra_fontes: vec!["lrclib".into(), "outra".into(), "lrclib".into()],
+            letra_fontes_desligadas: vec!["better-lyrics".into(), "unison".into(), "lrclib".into()],
+            letra_idioma: "Português do Brasil!".into(),
+            ..Default::default()
+        }
+        .validar();
+        assert_eq!(fontes.letra_fontes, vec!["lrclib", "better-lyrics", "unison"], "as que faltam no fim, sem repetir");
+        assert!(!fontes.letra_fontes_desligadas.contains(&"lrclib".into()), "pelo menos uma fica ligada");
+        assert_eq!(fontes.letra_idioma, "pt");
+        let desligados = Ajustes {
+            provedores_desligados: vec!["b".into(), " ".into(), "a".into(), "b".into()],
+            ..Default::default()
+        };
+        assert_eq!(desligados.validar().provedores_desligados, vec!["a", "b"], "sem vazio nem repetido");
+        let sem_nome = Ajustes { ilha_monitor: Some("  ".into()), ..Default::default() }.validar();
+        assert_eq!(sem_nome.ilha_monitor, None, "monitor sem nome volta a ser o da janela principal");
     }
 
     #[test]

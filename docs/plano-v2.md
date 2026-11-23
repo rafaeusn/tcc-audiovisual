@@ -16,7 +16,8 @@ Documentos ao lado: [relatorio-codigo-aberto.md](relatorio-codigo-aberto.md) (ri
 
 1. **A ideia:** o Player vem com o que já temos (Modo Escuta, player local, visual, análise, temas). Os serviços
    (YouTube Music, Spotify, SoundCloud, Shazam, letras de outras fontes, sem perdas) chegam como **provedores na
-   Loja**, que o usuário instala, conecta e pelos quais se responsabiliza. Desligados por padrão.
+   Loja**. Desde 21/11/2026, sem limitação: já vêm prontos, usam APIs oficiais e não oficiais e não pedem o Client
+   ID do usuário (ver a seção 1).
 2. **A referência mais forte é o MixMusic** (novo, MIT ou GPL-3, então copiável sem restrição). Ele já faz quase
    tudo o que queremos para Windows:
    - YouTube Music e Spotify num player só, com uma busca, uma fila e uma biblioteca;
@@ -67,6 +68,14 @@ Documentos ao lado: [relatorio-codigo-aberto.md](relatorio-codigo-aberto.md) (ri
 | 1. Nunca baixar áudio do YouTube ou do Spotify | 1. **O núcleo não usa nenhum serviço de streaming sozinho.** Tudo o que vem de um serviço passa por um provedor da Loja, instalado e conectado pelo usuário, desligado por padrão e com aviso de responsabilidade. Cache e download offline só se o provedor oferecer e o usuário ligar, sempre cifrados no computador dele. O áudio nunca é enviado a terceiros: ouvir junto sincroniza, não transmite |
 | 2. Spotify só pelo Modo Escuta | 2. **Spotify por provedor**, com o login do app do próprio usuário (Client ID dele). O Modo Escuta continua funcionando sem provedor nenhum |
 | 3 a 9 | Iguais (segredos fora do git, sem letra no chat, commit só quando pedir, não fechar o seu Player...) |
+
+**Regras 1 e 2 de novo, em 21/11/2026** (a orientadora liberou, para fins acadêmicos, o uso sem as limitações):
+
+| 16/11 | 21/11 |
+| --- | --- |
+| Provedor desligado por padrão, com aviso de responsabilidade | **Sem limitação:** APIs oficiais e não oficiais, leitura de páginas, provedores prontos por padrão, sem aviso. Pré-análise, visual sincronizado e cache local do áudio valem para qualquer serviço |
+| Spotify com o Client ID do próprio usuário | Spotify pelo jeito que funcionar melhor: player web, API interna, Connect ou librespot, sem pedir que o usuário crie um app |
+| Cache e download offline só se o provedor oferecer | **Único limite:** nada de quebrar DRM nem de salvar em arquivo (ou redistribuir) faixas de catálogo. O app toca pelo serviço, com a conta do usuário |
 
 ---
 
@@ -133,14 +142,14 @@ Documentos ao lado: [relatorio-codigo-aberto.md](relatorio-codigo-aberto.md) (ri
 
 | Jeito | Quem toca | Precisa | Visual | Pré-análise |
 | --- | --- | --- | --- | --- |
-| **Aqui, pelo player oficial**: Web Playback SDK numa janela WebView2 escondida, com Widevine | O Spotify, na qualidade dele | Premium + o app do próprio usuário (Client ID) | Captura do processo do WebView2 (já temos) | Pela gravação "par" do YouTube Music, alinhada ao som (F7) |
+| **Aqui, pelo player oficial**: o player web (ou o Web Playback SDK) numa janela WebView2 escondida, com Widevine | O Spotify, na qualidade dele | Premium (desde 21/11, sem pedir o Client ID: usa o token do player web) | Captura do processo do WebView2 (já temos) | Pela gravação "par" do YouTube Music, alinhada ao som (F7) |
 | **Spotify Connect** | O app ou aparelho do usuário | Premium | Captura, se tocar neste PC | Igual à de cima |
 | **Pelo YouTube Music** (o "Match" do MixMusic) | O nosso motor | Nada (sem Premium) | Completo | Completa |
 | **librespot** (opcional, como no Spotifast) | O nosso motor | Premium | Completo | Completa |
 
 Observações sobre o Spotify:
-- **Limites:** o modo de desenvolvimento aceita 5 usuários por app, e o dono precisa ter Premium. Por isso cada
-  pessoa cria o próprio app em 2 minutos, como o MixMusic e o Spotifast ensinam.
+- **Limites:** o modo de desenvolvimento da API oficial aceita 5 usuários por app. Desde 21/11 não dependemos dele:
+  o token do player web e a API interna fazem o mesmo, sem cada pessoa criar um app.
 - **Risco:** o librespot quebrou para muita gente em agosto de 2026. Fica como opção, não como padrão.
 - **Extras pela API interna, com o login do usuário:** o Canvas (os vídeos curtos em loop), as letras do Spotify
   (Musixmatch, por palavra), o "Feito para você" e a rádio.
@@ -425,7 +434,7 @@ Tamanho: **P** (alguns dias), **M** (uma a duas semanas), **G** (mais de duas se
 | **F1** | **Núcleo de provedores** | O protocolo, os modelos, a fila com vários serviços, o motor tocando streams (HTTP com range, AAC), o cache de análise por ID e ISRC, o casador entre serviços e "Neste computador" como provedor. A Loja instala provedores de uma pasta (o registro completo vem na F10) | MixMusic (casador, MIT), nuclear (capacidades) | G |
 | **F2** | **Páginas unificadas e layouts** | Início, Busca, Biblioteca, Lista, Faixa, Álbum, Playlist, Artista e Podcast; layouts Palco e Estante; molas no `anim.rs` | Figma, MixMusic | G |
 | **F3** | **Provedor YouTube Music** | Sem conta: busca, artista, álbum, playlist, rádio, explorar, tocar com pré-análise, legendas. Com conta (opcional): biblioteca, curtidas, histórico | limusic (`innertube`, `potoken`, cifra), MixMusic (`streams.md`) | M |
-| **F4** | **Letras 2.0** | Fontes em cadeia, palavra por palavra, tela cheia com estilos e bolinha, tradução, romanização, cartão, ajuste de atraso, a letra no visual | MixMusic (`lyrics/`, MIT), limusic (romanização), `ttml_processor` | M |
+| **F4** | **Letras 2.0** | Fontes em cadeia, palavra por palavra, tela cheia com estilos e bolinha, tradução, romanização, cartão, ajuste de atraso, a letra no visual | MixMusic (`lyrics/`, MIT), limusic (romanização), `ttml_processor` | M — **feita em 22/11/2026** (fontes, palavra por palavra, atraso guardado, tradução, letras latinas, tela cheia); ficaram estilos e bolinha, cartão e a letra no visual ([f4-letras.md](f4-letras.md)) |
 | **F5** | **A Ilha** (pode começar já, em paralelo) | Seção 5 | Spotifast (`notch.rs`), MixMusic (`notch.go`) | M |
 | **F6** | **Provedor Spotify** | Login com o app do usuário (PKCE), biblioteca, busca e início; tocar aqui, por Connect ou pelo YouTube Music; Canvas e letras do Spotify; librespot como opção depois | MixMusic (Web Playback SDK, Match), Spotifast (librespot, Connect), núcleo do SimpMusic (Canvas) | G |
 | **F7** | **Modo Escuta preciso + Shazam** | Reconhecer (SMTC ou SongRec); achar a gravação num provedor ou no computador; pré-analisar; alinhar pela curva de ataques com o som ao vivo (realinhando a cada 10 s e quando a posição pula); conduzir pelo modo arquivo; voltar ao ao vivo se a confiança cair; etiquetar arquivos locais | SongRec (GPL-3), nossa pré-análise | M |

@@ -2,6 +2,9 @@
 //!
 //! A análise vale enquanto o arquivo tem o mesmo tamanho e a mesma data de modificação, e foi feita pela mesma
 //! [`VERSAO`](crate::VERSAO) da análise. Mudou qualquer um, a música é analisada de novo.
+//!
+//! As músicas dos provedores ficam guardadas pela chave da faixa (`servico:id`) e pelo ISRC: a mesma gravação vinda
+//! de outro serviço (o mesmo ISRC) aproveita a análise, sem baixar e analisar de novo.
 
 use crate::{Analise, VERSAO};
 use nucleo::{Erro, Resultado};
@@ -54,7 +57,16 @@ impl Cache {
                  lufs       REAL,
                  pico       REAL NOT NULL,
                  dados      TEXT NOT NULL
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS analises_de_faixas (
+                 chave  TEXT PRIMARY KEY,
+                 isrc   TEXT,
+                 versao INTEGER NOT NULL,
+                 lufs   REAL,
+                 pico   REAL NOT NULL,
+                 dados  TEXT NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS analises_de_faixas_isrc ON analises_de_faixas (isrc);",
         )
         .map_err(erro)?;
         con.query_row("SELECT COUNT(*) FROM analises", [], |l| l.get::<_, i64>(0)).map_err(erro)?;
@@ -107,6 +119,46 @@ impl Cache {
         Ok(())
     }
 
+    /// A análise de uma faixa de provedor: pela chave (`servico:id`) ou, se não houver, pela mesma gravação (o
+    /// ISRC) vinda de qualquer serviço.
+    pub fn ler_faixa(&self, chave: &str, isrc: Option<&str>) -> Option<Analise> {
+        let por_chave: Option<String> = self
+            .con
+            .query_row(
+                "SELECT dados FROM analises_de_faixas WHERE chave = ?1 AND versao = ?2",
+                params![chave, VERSAO],
+                |l| l.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        let dados = por_chave.or_else(|| {
+            let isrc = isrc.filter(|i| !i.is_empty())?;
+            self.con
+                .query_row(
+                    "SELECT dados FROM analises_de_faixas WHERE isrc = ?1 AND versao = ?2 LIMIT 1",
+                    params![isrc, VERSAO],
+                    |l| l.get(0),
+                )
+                .optional()
+                .ok()
+                .flatten()
+        });
+        dados.and_then(|d| serde_json::from_str(&d).ok())
+    }
+
+    pub fn guardar_faixa(&self, chave: &str, isrc: Option<&str>, a: &Analise) -> Resultado<()> {
+        let dados = serde_json::to_string(a).map_err(|e| Erro::Dados(e.to_string()))?;
+        self.con
+            .execute(
+                "INSERT OR REPLACE INTO analises_de_faixas (chave, isrc, versao, lufs, pico, dados)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![chave, isrc.filter(|i| !i.is_empty()), VERSAO, a.lufs, a.pico, dados],
+            )
+            .map_err(erro)?;
+        Ok(())
+    }
+
     /// A sonoridade e o pico de todas as músicas já analisadas (para igualar o volume sem abrir cada análise).
     pub fn sonoridades(&self) -> HashMap<PathBuf, (f32, f32)> {
         let Ok(mut c) =
@@ -153,6 +205,27 @@ mod testes {
         assert!(!c.tem(&arquivo));
         assert!(c.ler(&pasta.join("nao-existe.wav")).is_none());
         let _ = std::fs::remove_dir_all(pasta);
+    }
+
+    #[test]
+    fn faixas_de_provedor_pela_chave_e_pelo_isrc() {
+        let c = Cache::em_memoria().expect("cache");
+        assert!(c.ler_faixa("youtube-music:abc", Some("BRX122600001")).is_none());
+        let a = Analise { versao: VERSAO, duracao_s: 200.0, lufs: Some(-8.0), pico: 1.0, ..Default::default() };
+        c.guardar_faixa("youtube-music:abc", Some("BRX122600001"), &a).expect("guardar");
+        assert_eq!(c.ler_faixa("youtube-music:abc", None), Some(a.clone()), "pela chave");
+        assert_eq!(
+            c.ler_faixa("spotify:xyz", Some("BRX122600001")),
+            Some(a.clone()),
+            "a mesma gravação em outro serviço"
+        );
+        assert!(c.ler_faixa("spotify:xyz", Some("BRX122600002")).is_none(), "outro ISRC");
+        assert!(c.ler_faixa("spotify:xyz", None).is_none());
+        assert!(c.ler_faixa("spotify:xyz", Some("")).is_none(), "ISRC vazio não casa com nada");
+        // Sem ISRC, guarda só pela chave.
+        c.guardar_faixa("soundcloud:1", None, &a).expect("guardar");
+        assert_eq!(c.ler_faixa("soundcloud:1", None), Some(a));
+        assert_eq!(c.quantas(), 0, "as dos arquivos ficam à parte");
     }
 
     #[test]

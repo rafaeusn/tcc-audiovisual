@@ -202,7 +202,16 @@ impl Analise {
 
 /// Analisa o arquivo. `parar` interrompe no meio (o app está fechando, ou chegou uma prioridade).
 pub fn analisar(caminho: &Path, parar: &AtomicBool) -> Resultado<Analise> {
-    let mut fonte = Fonte::abrir(caminho, TAXA)?;
+    analisar_fonte(Fonte::abrir(caminho, TAXA)?, parar)
+}
+
+/// Analisa uma música de qualquer origem: um arquivo, ou o endereço que um provedor entregou (baixado aos
+/// pedaços, como para tocar).
+pub fn analisar_origem(origem: &tocador::Origem, parar: &AtomicBool) -> Resultado<Analise> {
+    analisar_fonte(Fonte::abrir_origem(origem, TAXA)?, parar)
+}
+
+fn analisar_fonte(mut fonte: Fonte, parar: &AtomicBool) -> Resultado<Analise> {
     let mut medidor = sonoridade::Medidor::novo(TAXA);
     let maximo = (DURACAO_MAXIMA_S * f64::from(TAXA)) as usize;
     let mut mono: Vec<f32> =

@@ -132,6 +132,18 @@ pub fn lugar_no_arrasto(ponteiro: (f32, f32), centro: (f32, f32), area: (f32, f3
     }
 }
 
+/// Onde a Ilha travada fica durante o arrasto: na mesma `borda`, na posição do `centro` ao longo dela (relativo à
+/// área de trabalho, de tamanho `area`). Travada, arrastar continua livre, mas ela só desliza pela borda.
+pub fn lugar_travado(centro: (f32, f32), area: (f32, f32), borda: Borda) -> Lugar {
+    let (aw, ah) = (finito(area.0, 1.0).max(1.0), finito(area.1, 1.0).max(1.0));
+    let p = if borda.de_pe() {
+        finito(centro.1, ah / 2.0).clamp(0.0, ah) / ah
+    } else {
+        finito(centro.0, aw / 2.0).clamp(0.0, aw) / aw
+    };
+    Lugar::Presa(borda, p)
+}
+
 /// As medidas da forma no modo (largura e altura na tela, raio dos cantos, tamanho dos ombros). Deitada (no topo,
 /// embaixo ou solta) são as de sempre; solta, sem ombros. Em pé (dos lados), o repouso é uma aba estreita e a aberta,
 /// uma barra lateral; os avisos continuam deitados (um cartão que sai da borda).
@@ -362,6 +374,18 @@ mod testes {
             "sem estar presa, 80 px é longe"
         );
         assert_eq!(presa(lugar_no_arrasto((120.0, 500.0), (120.0, 500.0), AREA, antes)), None, "longe, solta");
+    }
+
+    #[test]
+    fn travada_so_desliza_pela_borda() {
+        // Longe de tudo, no meio da tela: travada, continua no topo, só que mais para a direita.
+        assert_eq!(lugar_travado((1440.0, 520.0), AREA, Borda::Topo), Lugar::Presa(Borda::Topo, 0.75));
+        // Perto de outra borda: não gruda nela.
+        assert_eq!(lugar_travado((5.0, 260.0), AREA, Borda::Direita), Lugar::Presa(Borda::Direita, 0.25));
+        // Fora da tela ou estragado: fica na ponta, ou no meio.
+        assert_eq!(lugar_travado((-300.0, 0.0), AREA, Borda::Baixo), Lugar::Presa(Borda::Baixo, 0.0));
+        assert_eq!(lugar_travado((f32::NAN, 0.0), AREA, Borda::Topo), Lugar::Presa(Borda::Topo, 0.5));
+        assert_eq!(lugar_travado((10.0, 10.0), (0.0, f32::NAN), Borda::Esquerda), Lugar::Presa(Borda::Esquerda, 1.0));
     }
 
     #[test]

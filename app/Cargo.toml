@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "player"]
+members = ["crates/*", "player", "provedores/*"]
 
 [workspace.package]
 edition = "2024"
@@ -23,6 +23,7 @@ servicos = { path = "crates/servicos" }
 tocador = { path = "crates/tocador" }
 biblioteca = { path = "crates/biblioteca" }
 preanalise = { path = "crates/preanalise" }
+provedores = { path = "crates/provedores" }
 
 # O GPUI ainda é pré-1.0: a versão exata fica presa aqui e no Cargo.lock.
 gpui = "=0.2.2"

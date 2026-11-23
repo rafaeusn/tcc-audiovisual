@@ -6,8 +6,8 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRectRgn, DeleteObject, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-    MonitorFromWindow, SetWindowRgn,
+    ClientToScreen, CreateRectRgn, DeleteObject, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, MONITORINFOEXW, MonitorFromPoint, MonitorFromWindow, SetWindowRgn,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
@@ -106,18 +106,19 @@ pub fn ponteiro_relativo(hwnd: isize) -> Option<(f32, f32)> {
     }
 }
 
-pub fn monitor(hwnd: isize) -> Option<crate::ilha::Monitor> {
-    let hwnd = janela(hwnd);
-    // SAFETY: perguntas simples ao Windows com estruturas locais do tamanho certo.
+/// Lê o retângulo, a área de trabalho, o DPI e o nome de um monitor.
+fn ler_monitor(monitor: HMONITOR) -> Option<crate::ilha::Monitor> {
+    let mut info = MONITORINFOEXW::default();
+    info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+    // SAFETY: a estrutura estendida é local e começa pela comum; o tamanho dela vai em `cbSize`, como o Windows pede.
     unsafe {
-        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-        if !GetMonitorInfoW(monitor, &mut info).as_bool() {
+        if !GetMonitorInfoW(monitor, (&raw mut info).cast()).as_bool() {
             return None;
         }
         let (mut dpi, mut dpi_y) = (96u32, 96u32);
         let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
-        let (r, t) = (info.rcMonitor, info.rcWork);
+        let (r, t) = (info.monitorInfo.rcMonitor, info.monitorInfo.rcWork);
+        let fim = info.szDevice.iter().position(|c| *c == 0).unwrap_or(info.szDevice.len());
         Some(crate::ilha::Monitor {
             esquerda: r.left,
             topo: r.top,
@@ -125,8 +126,34 @@ pub fn monitor(hwnd: isize) -> Option<crate::ilha::Monitor> {
             baixo: r.bottom,
             area: (t.left, t.top, t.right, t.bottom),
             escala: dpi.max(96) as f32 / 96.0,
+            nome: String::from_utf16_lossy(&info.szDevice[..fim]),
+            // MONITORINFOF_PRIMARY
+            principal: info.monitorInfo.dwFlags & 1 != 0,
         })
     }
+}
+
+pub fn monitor(hwnd: isize) -> Option<crate::ilha::Monitor> {
+    // SAFETY: só pergunta em que monitor a janela está.
+    ler_monitor(unsafe { MonitorFromWindow(janela(hwnd), MONITOR_DEFAULTTONEAREST) })
+}
+
+pub fn monitor_no_ponto(x: i32, y: i32) -> Option<crate::ilha::Monitor> {
+    // SAFETY: só pergunta em que monitor está o ponto.
+    ler_monitor(unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) })
+}
+
+pub fn monitores() -> Vec<crate::ilha::Monitor> {
+    unsafe extern "system" fn cada(monitor: HMONITOR, _: HDC, _: *mut RECT, dado: LPARAM) -> BOOL {
+        // SAFETY: `dado` é o endereço do vetor abaixo, vivo durante toda a enumeração (que é síncrona).
+        let lista = unsafe { &mut *(dado.0 as *mut Vec<crate::ilha::Monitor>) };
+        lista.extend(ler_monitor(monitor));
+        BOOL(1)
+    }
+    let mut lista: Vec<crate::ilha::Monitor> = Vec::new();
+    // SAFETY: a função de volta só é chamada durante esta chamada, com o endereço do vetor local.
+    let _ = unsafe { EnumDisplayMonitors(None, None, Some(cada), LPARAM((&raw mut lista) as isize)) };
+    lista
 }
 
 pub fn mover(hwnd: isize, x: i32, y: i32, largura: f32, altura: f32) {
@@ -234,7 +261,11 @@ unsafe extern "system" fn ao_receber(
             let altura = ((lparam.0 as usize >> 16) & 0xFFFF) as f32;
             // SAFETY: move a própria janela; as estruturas são locais.
             unsafe {
-                let escala = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
+                // A escala do monitor para onde ela vai (indo para outro monitor, a janela ainda tem a do de antes).
+                let destino = MonitorFromPoint(POINT { x: x + 1, y: y + 1 }, MONITOR_DEFAULTTONEAREST);
+                let (mut dpi, mut dpi_y) = (GetDpiForWindow(hwnd).max(96), 96u32);
+                let _ = GetDpiForMonitor(destino, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
+                let escala = dpi.max(96) as f32 / 96.0;
                 let (w, h) = ((largura * escala).round() as i32, (altura * escala).round() as i32);
                 let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE);
                 // Se a área desenhada não começa no topo da janela (alguma borda do sistema), sobe a janela o

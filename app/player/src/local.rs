@@ -4,6 +4,8 @@
 //!   as playlists. A interface pede e lê a última lista pronta.
 //! - O tocador (crate `tocador`) tem a thread dele. A fila ([`Fila`]) fica aqui: a música de agora é pedida
 //!   com `Tocar`, e a seguinte já vai aberta com `Seguinte`, para entrar sem intervalo (ou com crossfade).
+//! - As faixas dos provedores ([`crate::remoto`]) entram na mesma fila: antes de tocar, o endereço é pedido ao
+//!   provedor; a de agora toca quando ele chega, e a seguinte já é resolvida antes, para entrar sem intervalo.
 //! - A faixa é publicada no controle de mídia do Windows (a mesma caixinha onde aparecem o Spotify e o
 //!   navegador), com a capa. Com isso o histórico, a letra, o Last.fm e o Discord enxergam a música local do
 //!   mesmo jeito que enxergam a de qualquer app, e as teclas de mídia do teclado funcionam.
@@ -319,8 +321,14 @@ pub struct Local {
     pub situacao: Situacao,
     terminadas: u64,
     avancou: u64,
-    /// O que foi pedido ao tocador como "a seguinte": a posição na fila e o arquivo.
-    seguinte_pedida: Option<(usize, PathBuf)>,
+    /// O que foi pedido ao tocador como "a seguinte": a posição na fila e a origem.
+    seguinte_pedida: Option<(usize, tocador::Origem)>,
+    /// As músicas dos provedores.
+    pub remoto: crate::remoto::Remoto,
+    /// A música de agora é de um provedor e o endereço dela ainda não chegou (a chave).
+    esperando_endereco: Option<PathBuf>,
+    /// Um aviso para a pessoa (uma faixa de provedor que não tocou): o app mostra e limpa.
+    pub aviso: Option<String>,
     /// Arquivos que não abriram, seguidos: com a fila toda ruim, para em vez de rodar sem fim.
     falhas_seguidas: usize,
     /// Igualar o volume pelo ReplayGain (vale a partir da próxima música).
@@ -344,8 +352,11 @@ impl Local {
         aleatorio: bool,
         repetir: Repetir,
         analisar_biblioteca: bool,
+        provedores_desligados: &[String],
     ) -> Self {
         let preanalista = crate::preanalista::Preanalista::iniciar(pasta.clone(), analisar_biblioteca);
+        let remoto =
+            crate::remoto::Remoto::iniciar(pasta.as_ref().map(|p| p.join("provedores")), provedores_desligados);
         let lista_viva = Arc::new(Mutex::new(Lista::default()));
         let versao_viva = Arc::new(AtomicU64::new(0));
         let parar = Arc::new(AtomicBool::new(false));
@@ -393,6 +404,9 @@ impl Local {
             terminadas: 0,
             avancou: 0,
             seguinte_pedida: None,
+            remoto,
+            esperando_endereco: None,
+            aviso: None,
             falhas_seguidas: 0,
             volume_igualado: true,
             controles,
@@ -522,26 +536,65 @@ impl Local {
         &self.preanalista
     }
 
+    /// De onde o tocador toca esta música: o arquivo, ou o endereço que o provedor deu (`None` enquanto não deu).
+    fn origem_de(&self, m: &Musica) -> Option<tocador::Origem> {
+        if m.e_remota() {
+            self.remoto.endereco(m).and_then(Result::ok).map(tocador::Origem::Endereco)
+        } else {
+            Some(tocador::Origem::Arquivo(m.caminho.clone()))
+        }
+    }
+
     /// Diz à pré-análise o que analisar primeiro (a de agora e as duas seguintes) e a biblioteca inteira.
     fn guiar_a_preanalise(&mut self) {
+        use crate::preanalista::{Alvo, AlvoRemoto};
         let mut prioridade = Vec::new();
         if let Some(i) = self.fila.atual() {
-            prioridade.extend(self.fila.itens().iter().skip(i).take(3).map(|m| m.caminho.clone()));
+            prioridade.extend(self.fila.itens().iter().skip(i).take(3).map(|m| match &m.remota {
+                None => Alvo::arquivo(m.caminho.clone()),
+                Some(r) => Alvo {
+                    caminho: m.caminho.clone(),
+                    remota: Some(AlvoRemoto {
+                        isrc: r.isrc.clone(),
+                        endereco: self.remoto.endereco(m).and_then(Result::ok),
+                    }),
+                },
+            }));
         }
         self.preanalista.priorizar(prioridade);
         let caminhos = self.lista.caminhos.clone();
         self.preanalista.biblioteca(&caminhos);
     }
 
-    /// Toca a música de agora da fila (do começo).
+    /// Toca a música de agora da fila (do começo). De um provedor, sem o endereço ainda: pede e toca quando chegar.
     fn tocar_atual(&mut self) {
         let Some(musica) = self.fila.musica_atual().cloned() else {
             self.parar();
             return;
         };
+        self.esperando_endereco = None;
+        if musica.e_remota() {
+            match self.remoto.endereco(&musica) {
+                Some(Ok(_)) => {}
+                Some(Err(motivo)) => {
+                    self.nao_tocou(&musica, &motivo);
+                    return;
+                }
+                None => {
+                    // A anterior para já: a pessoa vê que a troca aconteceu enquanto o endereço chega.
+                    self.remoto.resolver(&musica);
+                    self.tocador.mandar(Comando::Parar);
+                    self.esperando_endereco = Some(musica.caminho.clone());
+                    self.carregar_capa(&musica);
+                    self.seguinte_pedida = None;
+                    return;
+                }
+            }
+        }
+        let Some(origem) = self.origem_de(&musica) else { return };
         let ganho = self.ganho(&musica);
-        self.tocador.mandar(Comando::Tocar { caminho: musica.caminho.clone(), ganho });
-        self.carregar_capa(musica.caminho);
+        self.tocador.mandar(Comando::Tocar { origem, ganho });
+        self.carregar_capa(&musica);
         self.publicado = None;
         // A seguinte é pedida de novo no próximo quadro (o tocador esquece a anterior ao trocar de música).
         self.seguinte_pedida = None;
@@ -642,9 +695,23 @@ impl Local {
         }
     }
 
+    /// Uma faixa de provedor não tocou (sem endereço, provedor fechado): avisa e segue para a próxima, como um
+    /// arquivo que não abre.
+    fn nao_tocou(&mut self, musica: &Musica, motivo: &str) {
+        log::warn!("\"{}\" não tocou: {motivo}", musica.titulo);
+        self.aviso = Some(format!("\"{}\" não tocou ({motivo})", musica.titulo));
+        self.remoto.esquecer(musica);
+        self.falhas_seguidas += 1;
+        match self.fila.indice_seguinte(false) {
+            Some(i) if self.falhas_seguidas < self.fila.itens().len() => self.ir_para_na_fila(i),
+            _ => self.parar(),
+        }
+    }
+
     pub fn parar(&mut self) {
         self.tocador.mandar(Comando::Parar);
         self.fila.limpar();
+        self.esperando_endereco = None;
         self.seguinte_pedida = None;
         self.publicado = None;
         if let Some(c) = self.controles.as_mut() {
@@ -657,22 +724,42 @@ impl Local {
         if !self.ativo() {
             return;
         }
-        let quer =
-            self.fila.indice_seguinte(true).and_then(|i| self.fila.itens().get(i).map(|m| (i, m.caminho.clone())));
+        let seguinte = self.fila.indice_seguinte(true).and_then(|i| self.fila.itens().get(i).cloned().map(|m| (i, m)));
+        // A seguinte é de um provedor e o endereço ainda não veio: pede agora (ela entra quando chegar).
+        if let Some((_, m)) = &seguinte
+            && m.e_remota()
+            && self.remoto.endereco(m).is_none()
+        {
+            self.remoto.resolver(m);
+            return;
+        }
+        let quer = seguinte.as_ref().and_then(|(i, m)| self.origem_de(m).map(|o| (*i, o)));
         if quer == self.seguinte_pedida {
             return;
         }
-        let pedido =
-            quer.as_ref().and_then(|(i, caminho)| self.fila.itens().get(*i).map(|m| (caminho.clone(), self.ganho(m))));
+        let pedido = match (&quer, &seguinte) {
+            (Some((_, origem)), Some((_, m))) => Some((origem.clone(), self.ganho(m))),
+            _ => None,
+        };
         self.tocador.mandar(Comando::Seguinte(pedido));
         self.seguinte_pedida = quer;
     }
 
-    /// Lê a capa embutida no arquivo fora da thread da interface, e grava uma cópia para o Windows.
-    fn carregar_capa(&self, arquivo: PathBuf) {
+    /// Lê a capa (embutida no arquivo, ou baixada do endereço que o provedor deu) fora da thread da interface, e
+    /// grava uma cópia para o Windows.
+    fn carregar_capa(&self, musica: &Musica) {
         let destino = self.capa.clone();
+        let arquivo = musica.caminho.clone();
+        let endereco = musica.remota.as_ref().map(|r| r.capa.clone());
         let lendo = std::thread::Builder::new().name("capa".into()).spawn(move || {
-            let lida = biblioteca::capa(&arquivo).and_then(|bytes| {
+            let bytes = match endereco {
+                None => biblioteca::capa(&arquivo),
+                Some(Some(url)) => tocador::rede::baixar_pequeno(&url, 8 * 1024 * 1024)
+                    .map_err(|e| log::debug!("capa não baixada: {e}"))
+                    .ok(),
+                Some(None) => None,
+            };
+            let lida = bytes.and_then(|bytes| {
                 let capa = Capa::decodificar(&bytes)?;
                 Some((Arc::new(capa), gravar_capa(&bytes)))
             });
@@ -686,6 +773,18 @@ impl Local {
     /// Um quadro: lê a lista e o tocador, acompanha a fila quando uma música acaba ou a seguinte entra,
     /// atende as teclas de mídia e mantém o Windows informado.
     pub fn quadro(&mut self) {
+        self.remoto.quadro();
+        // O endereço da faixa de agora chegou (ou não deu).
+        if let Some(chave) = self.esperando_endereco.clone() {
+            match self.fila.musica_atual().cloned() {
+                Some(m) if m.caminho == chave => {
+                    if self.remoto.endereco(&m).is_some() {
+                        self.tocar_atual();
+                    }
+                }
+                _ => self.esperando_endereco = None,
+            }
+        }
         let versao = self.versao_viva.load(Ordering::Acquire);
         if versao != self.versao_vista {
             self.versao_vista = versao;
@@ -698,16 +797,18 @@ impl Local {
         // A seguinte entrou sozinha (sem intervalo ou por crossfade): a fila anda junto.
         if self.situacao.avancou != self.avancou {
             self.avancou = self.situacao.avancou;
-            let arquivo = self.situacao.arquivo.clone();
+            let origem = self.situacao.origem.clone();
             let indice = match self.seguinte_pedida.take() {
-                Some((i, caminho)) if Some(&caminho) == arquivo.as_ref() => Some(i),
-                _ => arquivo.as_ref().and_then(|a| self.fila.itens().iter().position(|m| &m.caminho == a)),
+                Some((i, o)) if Some(&o) == origem.as_ref() => Some(i),
+                _ => origem
+                    .as_ref()
+                    .and_then(|o| self.fila.itens().iter().position(|m| self.origem_de(m).as_ref() == Some(o))),
             };
             if let Some(i) = indice {
                 self.fila.ir_para(i);
             }
-            if let Some(a) = arquivo {
-                self.carregar_capa(a);
+            if let Some(m) = self.fila.musica_atual().cloned() {
+                self.carregar_capa(&m);
             }
             self.publicado = None;
         }
@@ -715,6 +816,10 @@ impl Local {
         if self.situacao.terminadas != self.terminadas {
             self.terminadas = self.situacao.terminadas;
             if self.situacao.erro.is_some() {
+                // Uma faixa de provedor que não abriu pode ter o endereço vencido: da próxima vez, pede de novo.
+                if let Some(m) = self.fila.musica_atual().cloned().filter(Musica::e_remota) {
+                    self.remoto.esquecer(&m);
+                }
                 self.falhas_seguidas += 1;
                 match self.fila.indice_seguinte(false) {
                     Some(i) if self.falhas_seguidas < self.fila.itens().len() => self.ir_para_na_fila(i),
@@ -748,12 +853,13 @@ impl Local {
     /// muda (e de tempos em tempos).
     fn publicar(&mut self) {
         let Some(musica) = self.fila.musica_atual().cloned() else { return };
+        // Só depois que o tocador carregou esta música: antes disso a posição ainda é a da anterior.
+        match self.origem_de(&musica) {
+            Some(o) if self.situacao.origem.as_ref() == Some(&o) => {}
+            _ => return,
+        }
         let Some(controles) = self.controles.as_mut() else { return };
         let tocando = self.situacao.tocando;
-        // Só depois que o tocador carregou este arquivo: antes disso a posição ainda é a da música anterior.
-        if self.situacao.arquivo.as_deref() != Some(musica.caminho.as_path()) {
-            return;
-        }
         let imagem = match ler(&self.capa) {
             Some((arquivo, _, imagem)) if arquivo == musica.caminho => imagem,
             _ => None,
@@ -796,17 +902,14 @@ impl Local {
         };
         // Durante o crossfade, a fila já anda quando a seguinte começa a soar; antes disso, o tocador ainda
         // informa a anterior.
-        let duracao = if self.situacao.arquivo.as_deref() == Some(musica.caminho.as_path()) {
-            self.situacao.duracao_s.max(musica.duracao_s)
-        } else {
-            musica.duracao_s
-        };
+        let carregada = self.origem_de(musica).is_some_and(|o| self.situacao.origem.as_ref() == Some(&o));
+        let duracao = if carregada { self.situacao.duracao_s.max(musica.duracao_s) } else { musica.duracao_s };
         Some(Estado {
             faixa: Some(Faixa {
                 titulo: musica.titulo.clone(),
                 artista: musica.artista.clone(),
                 album: musica.album.clone(),
-                app: "Neste computador".to_string(),
+                app: musica.remota.as_ref().map_or_else(|| "Neste computador".to_string(), |r| r.fonte.clone()),
             }),
             capa,
             tocando: self.situacao.tocando,

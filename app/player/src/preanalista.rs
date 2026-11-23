@@ -5,6 +5,10 @@
 //! interrompida na hora se chegar um pedido da música de agora.
 //!
 //! A interface só lê o que está pronto ([`Preanalista::analise`], [`Preanalista::sonoridade`]); nunca espera.
+//!
+//! As faixas de provedor entram na prioridade como [`Alvo`] remoto: a chave `servico:id` no lugar do caminho. A
+//! análise delas é guardada pela chave e pelo ISRC (a mesma gravação de outro serviço aproveita) e feita a partir
+//! do endereço, baixado como para tocar. Sem o endereço ainda, a faixa espera (só sai do cache).
 
 use preanalise::Analise;
 use preanalise::cache::Cache;
@@ -18,9 +22,30 @@ use std::time::Duration;
 /// Folga entre duas análises da biblioteca (o computador continua livre para o resto).
 const FOLGA_DA_BIBLIOTECA: Duration = Duration::from_millis(300);
 
+/// Uma música a analisar com prioridade: um arquivo, ou uma faixa de provedor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Alvo {
+    /// O arquivo, ou a chave `servico:id` da faixa de provedor.
+    pub caminho: PathBuf,
+    pub remota: Option<AlvoRemoto>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlvoRemoto {
+    pub isrc: Option<String>,
+    /// O endereço do áudio, quando o provedor já deu.
+    pub endereco: Option<tocador::Endereco>,
+}
+
+impl Alvo {
+    pub fn arquivo(caminho: PathBuf) -> Self {
+        Self { caminho, remota: None }
+    }
+}
+
 enum Pedido {
     /// A música de agora primeiro, depois as próximas.
-    Prioridade(Vec<PathBuf>),
+    Prioridade(Vec<Alvo>),
     /// Todas as músicas da biblioteca (analisadas aos poucos, quando não há prioridade).
     Biblioteca(Vec<PathBuf>),
     /// Liga ou desliga a análise da biblioteca em segundo plano.
@@ -57,7 +82,7 @@ fn trancar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub struct Preanalista {
     pedidos: Option<Sender<Pedido>>,
     c: Arc<Compartilhado>,
-    prioridade_pedida: Vec<PathBuf>,
+    prioridade_pedida: Vec<Alvo>,
     biblioteca_pedida: usize,
 }
 
@@ -87,15 +112,15 @@ impl Preanalista {
     }
 
     /// As músicas que a tela precisa já: a de agora primeiro. Só manda se mudou.
-    pub fn priorizar(&mut self, caminhos: Vec<PathBuf>) {
-        if caminhos == self.prioridade_pedida {
+    pub fn priorizar(&mut self, alvos: Vec<Alvo>) {
+        if alvos == self.prioridade_pedida {
             return;
         }
-        self.prioridade_pedida.clone_from(&caminhos);
-        if !caminhos.is_empty() {
+        self.prioridade_pedida.clone_from(&alvos);
+        if !alvos.is_empty() {
             self.c.interromper.store(true, Ordering::Release);
         }
-        self.pedir(Pedido::Prioridade(caminhos));
+        self.pedir(Pedido::Prioridade(alvos));
     }
 
     /// A biblioteca inteira, para analisar aos poucos. Só manda se o tamanho mudou.
@@ -160,7 +185,9 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
         }
     };
     *trancar(&c.sonoridades) = cache.sonoridades();
-    let mut prioridade: Vec<PathBuf> = Vec::new();
+    let mut prioridade: Vec<Alvo> = Vec::new();
+    // Faixas de provedor sem endereço e fora do cache: esperam o endereço (chega com um pedido novo).
+    let mut aguardando: HashSet<PathBuf> = HashSet::new();
     let mut biblioteca: VecDeque<PathBuf> = VecDeque::new();
     let mut total_biblioteca = 0u32;
     // Arquivos que não deram para analisar nesta execução: não tenta de novo até reabrir o app.
@@ -171,8 +198,10 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
 
     while !c.parar.load(Ordering::Acquire) {
         // Espera pedido só quando não há nada a fazer.
-        let ocioso = prioridade.iter().all(|p| trancar(&c.prontas).contains_key(p) || falharam.contains(p))
-            && (!analisar_biblioteca || biblioteca.is_empty());
+        let ocioso = prioridade.iter().all(|a| {
+            let p = &a.caminho;
+            trancar(&c.prontas).contains_key(p) || falharam.contains(p) || aguardando.contains(p)
+        }) && (!analisar_biblioteca || biblioteca.is_empty());
         let primeiro = if ocioso {
             match fila.recv_timeout(Duration::from_millis(500)) {
                 Ok(p) => Some(p),
@@ -186,8 +215,9 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
             match pedido {
                 Pedido::Prioridade(lista) => {
                     // Só as da prioridade ficam à mão: as outras saem da memória (continuam no cache).
-                    trancar(&c.prontas).retain(|k, _| lista.contains(k));
+                    trancar(&c.prontas).retain(|k, _| lista.iter().any(|a| &a.caminho == k));
                     prioridade = lista;
+                    aguardando.clear();
                 }
                 Pedido::Biblioteca(lista) => {
                     total_biblioteca = lista.len() as u32;
@@ -199,9 +229,49 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
         }
 
         // 1. A música de agora e as próximas.
-        let falta =
-            prioridade.iter().find(|p| !trancar(&c.prontas).contains_key(*p) && !falharam.contains(*p)).cloned();
-        if let Some(caminho) = falta {
+        let falta = prioridade
+            .iter()
+            .find(|a| {
+                let p = &a.caminho;
+                !trancar(&c.prontas).contains_key(p) && !falharam.contains(p) && !aguardando.contains(p)
+            })
+            .cloned();
+        if let Some(Alvo { caminho, remota: Some(r) }) = falta {
+            let chave = caminho.to_string_lossy().into_owned();
+            let analise = match (cache.ler_faixa(&chave, r.isrc.as_deref()), r.endereco) {
+                (Some(a), _) => Some(a),
+                (None, None) => {
+                    aguardando.insert(caminho.clone());
+                    None
+                }
+                (None, Some(endereco)) => {
+                    publicar_progresso(Some(chave.clone()), total_biblioteca);
+                    match preanalise::analisar_origem(&tocador::Origem::Endereco(endereco), &c.parar) {
+                        Ok(a) => {
+                            if let Err(e) = cache.guardar_faixa(&chave, r.isrc.as_deref(), &a) {
+                                log::warn!("análise não guardada: {e}");
+                            }
+                            Some(a)
+                        }
+                        Err(e) => {
+                            log::info!("não deu para analisar {chave}: {e}");
+                            falharam.insert(caminho.clone());
+                            None
+                        }
+                    }
+                }
+            };
+            if let Some(a) = analise {
+                if let Some(l) = a.lufs {
+                    trancar(&c.sonoridades).insert(caminho.clone(), (l, a.pico));
+                }
+                trancar(&c.prontas).insert(caminho, Arc::new(a));
+            }
+            publicar_progresso(None, total_biblioteca);
+            c.versao.fetch_add(1, Ordering::Release);
+            continue;
+        }
+        if let Some(Alvo { caminho, remota: None }) = falta {
             let analise = match cache.ler(&caminho) {
                 Some(a) => Some(a),
                 None => {

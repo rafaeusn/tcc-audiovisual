@@ -1,10 +1,10 @@
 id = "player.letra"
 nome = "Letra"
-versao = "1.0.0"
-codigo = 1
+versao = "2.0.0"
+codigo = 2
 autor = "Player"
 categoria = "letras"
-descricao = "Mostra a letra da música no painel, linha a linha, acompanhando o que toca. A letra vem do LRCLIB, um acervo aberto mantido pela comunidade."
+descricao = "Mostra a letra da música no painel e em tela cheia, acompanhando o que toca, palavra por palavra quando a fonte tem os tempos. A letra vem, nesta ordem, da Better Lyrics, da Unison e do LRCLIB (a ordem muda nas Configurações). A tradução, quando ligada, vem da Unison."
 
 [[acoes]]
 nome = "tocando.ler"
@@ -12,12 +12,12 @@ motivo = "Saber qual música está tocando e em que ponto ela está"
 
 [[acoes]]
 nome = "rede"
-motivo = "Buscar a letra: envia título, artista, álbum e duração"
-enderecos = ["lrclib.net"]
+motivo = "Buscar a letra (título, artista, álbum, duração) e traduzir, se você ligar"
+enderecos = ["api.betterlyrics.org", "unison.betterlyrics.org", "lrclib.net"]
 
 [[acoes]]
 nome = "dados.guardar"
-motivo = "Guardar as letras já buscadas, para não pedir de novo"
+motivo = "Guardar as letras, traduções e acertos de sincronia, para não pedir de novo"
 
 [[acoes]]
 nome = "painel.modulo"

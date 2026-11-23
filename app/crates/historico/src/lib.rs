@@ -90,6 +90,9 @@ pub struct LetraGuardada {
     pub sincronizada: Option<String>,
     pub simples: Option<String>,
     pub instrumental: bool,
+    /// De que fonte veio (`better-lyrics`, `unison`, `lrclib`, `manual`); vazio nas guardadas antes das fontes em
+    /// cadeia (eram todas do LRCLIB).
+    pub fonte: Option<String>,
 }
 
 /// O que o banco sabe sobre a letra de uma música.
@@ -153,9 +156,23 @@ impl Banco {
                  simples      TEXT,
                  instrumental INTEGER NOT NULL,
                  buscada_em   INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS atrasos_de_letra (
+                 chave    TEXT PRIMARY KEY,
+                 atraso_s REAL NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS traducoes_de_letra (
+                 chave  TEXT NOT NULL,
+                 idioma TEXT NOT NULL,
+                 linhas TEXT NOT NULL,
+                 PRIMARY KEY (chave, idioma)
              );",
         )
         .map_err(erro)?;
+        // Bancos de antes das fontes em cadeia não têm a coluna da fonte.
+        if con.prepare("SELECT fonte FROM letras LIMIT 0").is_err() {
+            con.execute("ALTER TABLE letras ADD COLUMN fonte TEXT", []).map_err(erro)?;
+        }
         // Uma consulta de verdade: um arquivo que não é um banco só falha aqui.
         con.query_row("SELECT COUNT(*) FROM execucoes", [], |l| l.get::<_, i64>(0)).map_err(erro)?;
         Ok(Self { con })
@@ -359,11 +376,16 @@ impl Banco {
         let linha = self
             .con
             .query_row(
-                "SELECT sincronizada, simples, instrumental, buscada_em FROM letras WHERE chave = ?1",
+                "SELECT sincronizada, simples, instrumental, buscada_em, fonte FROM letras WHERE chave = ?1",
                 params![chave],
                 |l| {
                     Ok((
-                        LetraGuardada { sincronizada: l.get(0)?, simples: l.get(1)?, instrumental: l.get(2)? },
+                        LetraGuardada {
+                            sincronizada: l.get(0)?,
+                            simples: l.get(1)?,
+                            instrumental: l.get(2)?,
+                            fonte: l.get(4)?,
+                        },
                         l.get::<_, i64>(3)?,
                     ))
                 },
@@ -384,10 +406,63 @@ impl Banco {
         let l = letra.unwrap_or(&vazia);
         self.con
             .execute(
-                "INSERT INTO letras (chave, sincronizada, simples, instrumental, buscada_em)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(chave) DO UPDATE SET sincronizada = ?2, simples = ?3, instrumental = ?4, buscada_em = ?5",
-                params![chave, l.sincronizada, l.simples, l.instrumental, agora],
+                "INSERT INTO letras (chave, sincronizada, simples, instrumental, buscada_em, fonte)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(chave) DO UPDATE SET sincronizada = ?2, simples = ?3, instrumental = ?4, buscada_em = ?5,
+                 fonte = ?6",
+                params![chave, l.sincronizada, l.simples, l.instrumental, agora, l.fonte],
+            )
+            .map_err(erro)?;
+        Ok(())
+    }
+
+    /// Quanto a letra desta música foi adiantada (positivo) ou atrasada pela pessoa, em segundos.
+    pub fn atraso_da_letra(&self, chave: &str) -> Resultado<f32> {
+        let s: Option<f64> = self
+            .con
+            .query_row("SELECT atraso_s FROM atrasos_de_letra WHERE chave = ?1", params![chave], |l| l.get(0))
+            .optional()
+            .map_err(erro)?;
+        Ok(s.filter(|v| v.is_finite()).unwrap_or(0.0) as f32)
+    }
+
+    /// Guarda o acerto da letra desta música (zero apaga).
+    pub fn guardar_atraso_da_letra(&self, chave: &str, atraso_s: f32) -> Resultado<()> {
+        if !atraso_s.is_finite() || atraso_s.abs() < 0.001 {
+            self.con.execute("DELETE FROM atrasos_de_letra WHERE chave = ?1", params![chave]).map_err(erro)?;
+        } else {
+            self.con
+                .execute(
+                    "INSERT INTO atrasos_de_letra (chave, atraso_s) VALUES (?1, ?2)
+                     ON CONFLICT(chave) DO UPDATE SET atraso_s = ?2",
+                    params![chave, f64::from(atraso_s)],
+                )
+                .map_err(erro)?;
+        }
+        Ok(())
+    }
+
+    /// A tradução guardada da letra desta música para `idioma` (uma por linha).
+    pub fn traducao_da_letra(&self, chave: &str, idioma: &str) -> Resultado<Option<Vec<Option<String>>>> {
+        let texto: Option<String> = self
+            .con
+            .query_row(
+                "SELECT linhas FROM traducoes_de_letra WHERE chave = ?1 AND idioma = ?2",
+                params![chave, idioma],
+                |l| l.get(0),
+            )
+            .optional()
+            .map_err(erro)?;
+        Ok(texto.and_then(|t| serde_json::from_str(&t).ok()))
+    }
+
+    pub fn guardar_traducao_da_letra(&self, chave: &str, idioma: &str, linhas: &[Option<String>]) -> Resultado<()> {
+        let texto = serde_json::to_string(linhas).map_err(|e| Erro::Dados(e.to_string()))?;
+        self.con
+            .execute(
+                "INSERT INTO traducoes_de_letra (chave, idioma, linhas) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(chave, idioma) DO UPDATE SET linhas = ?3",
+                params![chave, idioma, texto],
             )
             .map_err(erro)?;
         Ok(())
@@ -528,6 +603,21 @@ mod testes {
         let instrumental = LetraGuardada { instrumental: true, ..Default::default() };
         b.guardar_letra("i", Some(&instrumental), AGORA).expect("guardar");
         assert_eq!(b.letra("i", AGORA + 400 * DIA).expect("ler"), Guardada::Letra(instrumental));
+    }
+
+    #[test]
+    fn atraso_e_traducao_guardados_por_musica() {
+        let b = Banco::em_memoria().expect("banco");
+        assert_eq!(b.atraso_da_letra("m").expect("ler"), 0.0);
+        b.guardar_atraso_da_letra("m", 1.5).expect("guardar");
+        assert_eq!(b.atraso_da_letra("m").expect("ler"), 1.5);
+        b.guardar_atraso_da_letra("m", 0.0).expect("zerar");
+        assert_eq!(b.atraso_da_letra("m").expect("ler"), 0.0, "zero apaga");
+        assert_eq!(b.traducao_da_letra("m", "pt").expect("ler"), None);
+        let t = vec![Some("linha um".to_string()), None, Some("linha três".to_string())];
+        b.guardar_traducao_da_letra("m", "pt", &t).expect("guardar");
+        assert_eq!(b.traducao_da_letra("m", "pt").expect("ler"), Some(t));
+        assert_eq!(b.traducao_da_letra("m", "en").expect("ler"), None, "cada idioma é um");
     }
 
     #[test]

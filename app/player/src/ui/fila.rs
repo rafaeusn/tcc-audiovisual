@@ -56,7 +56,10 @@ impl Player {
                         cx.stop_propagation();
                         if let Some(musica) = this.local.fila.tirar(i) {
                             let texto = format!("\"{}\" saiu da fila", musica.titulo);
-                            this.avisar_com_desfazer(texto, crate::app::Desfazer::TirarDaFila { indice: i, musica });
+                            this.avisar_com_desfazer(
+                                texto,
+                                crate::app::Desfazer::TirarDaFila { indice: i, musica: Box::new(musica) },
+                            );
                         }
                         cx.notify();
                     }),

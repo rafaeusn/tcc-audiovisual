@@ -29,10 +29,11 @@ ao tentar de novo; para uma DLL de build, `cargo clean -p <pacote>` e compilar d
 | `audio` | `crates/audio` | Captura do som do sistema (WASAPI loopback via `cpal`) ou de um app só (process loopback), num anel sem trava; volume do sistema |
 | `analise` | `crates/analise` | FFT, descritores, ritmo (BPM, batida) e o diretor automático (port de `preview/*.js`) |
 | `sessao` | `crates/sessao` | "Tocando agora" e controles de mídia do Windows (SMTC), com a capa |
-| `historico` | `crates/historico` | O que foi ouvido, num SQLite local: execuções, estatísticas e as letras já buscadas |
-| `letras` | `crates/letras` | Leitura do formato LRC e busca de letras no LRCLIB (aberto, sem chave) |
+| `historico` | `crates/historico` | O que foi ouvido, num SQLite local: execuções, estatísticas, as letras já buscadas (com a fonte), o acerto de sincronia de cada música e as traduções |
+| `letras` | `crates/letras` | LRC (também com o tempo de cada palavra), TTML, as fontes em cadeia (Better Lyrics, Unison, LRCLIB), a tradução pela Unison e as letras latinas ([F4](../docs/f4-letras.md)) |
 | `modulos` | `crates/modulos` | O formato dos módulos da Loja: manifesto, ações pedidas, aceite, lista de bloqueio, instalados |
-| `tocador` | `crates/tocador` | Toca arquivos: decodifica (MP3, FLAC, WAV, OGG, M4A), mistura (sem intervalo, crossfade, ganho, equalizador, limitador) e entrega à saída de som por uma fila sem trava |
+| `tocador` | `crates/tocador` | Toca arquivos e endereços na internet (baixados aos pedaços, com pulo para qualquer ponto): decodifica (MP3, FLAC, WAV, OGG, M4A), mistura (sem intervalo, crossfade, ganho, equalizador, limitador) e entrega à saída de som por uma fila sem trava |
+| `provedores` | `crates/provedores` | Os provedores de música (YouTube Music, Spotify... como programas à parte): formato comum das faixas, protocolo, casador entre serviços e o registro dos instalados. Ainda sem tela no app ([F1](../docs/f1-provedores.md)) |
 | `preanalise` | `crates/preanalise` | Pré-análise das músicas do computador: o motor da análise roda sobre o arquivo inteiro (energia, trechos, drops, BPM) e mede a sonoridade (LUFS, ITU-R BS.1770); cache em `analises.db` |
 | `biblioteca` | `crates/biblioteca` | As músicas do computador: varre as pastas, lê as etiquetas (com ReplayGain) e guarda num acervo SQLite com busca, álbuns, artistas e playlists |
 | `servicos` | `crates/servicos` | Last.fm (autorização e scrobble), Discord (cartão "ouvindo"), a regra de quando a música conta e o cofre da conta |
@@ -56,11 +57,25 @@ mais recente das outras e nunca espera por elas.
   a música numa mola (passa de leve e assenta). A linha de agora enche como num karaokê, letra por letra, com uma
   borda macia; quando o arquivo traz o tempo de cada palavra (o "LRC com palavras"), enche palavra por palavra no
   tempo dela. As outras linhas apagam e diminuem com a distância, e uma pausa vira "· · ·" enchendo até a próxima
-  linha. A letra vem do [LRCLIB](https://lrclib.net) e fica guardada no banco local. A busca usa o título, o
-  artista, o álbum e a duração da faixa, e só acontece enquanto o módulo está no painel. Precisa que o app de
-  origem informe a posição da música; os botões − e + acertam a sincronia em passos de meio segundo. Quando a
-  busca não acha (ou acha a música errada), a lupa abre a busca manual: digita-se a música, escolhe-se um
-  resultado e ele fica guardado como a letra daquela faixa.
+  linha. A letra vem de três fontes, perguntadas em ordem: Better Lyrics
+  (muita letra palavra por palavra), Unison (a base aberta da Better Lyrics, que acha as faixas do YouTube Music
+  pelo vídeo) e [LRCLIB](https://lrclib.net). A primeira com a letra sincronizada vence; com "Preferir palavra
+  por palavra", a cadeia continua até achar uma assim. O rodapé diz de onde veio a letra. Ela fica guardada no
+  banco local; uma letra guardada antes da F4 (só do LRCLIB) é trocada uma vez se outra fonte tiver uma melhor.
+  A busca usa o título, o artista, o álbum, a duração e (na faixa do YouTube Music) o id do vídeo, e só acontece
+  enquanto o módulo está no painel, na Ilha ou na letra em tela cheia. Precisa que o app de origem informe a
+  posição da música; os botões − e + acertam a sincronia em passos de meio segundo, e o acerto fica guardado
+  para a música. Quando a busca não acha (ou acha a música errada), a lupa abre a busca manual: digita-se a
+  música, escolhe-se um resultado e ele fica guardado como a letra daquela faixa.
+- **Tradução e letras latinas** (Configurações › Letras): com "Traduzir a letra", cada linha ganha a tradução
+  embaixo (português, inglês, espanhol, francês ou japonês), feita pela Unison e guardada por música e idioma.
+  "Letras latinas" mostra embaixo a letra de outra escrita (coreano, japonês, chinês, cirílico, grego...) em
+  letras latinas, feita no próprio computador. Vale no módulo, na Ilha e na tela cheia.
+- **Letra em tela cheia** (`Y`, o botão de expandir no módulo Letra ou a barra de comandos): o visual ocupa a
+  janela inteira, escurecido, e a letra rola grande por cima, a linha de agora enchendo palavra por palavra, com
+  a tradução embaixo, a fonte e o acerto de sincronia no rodapé. O topo arrasta a janela; Esc fecha.
+- **Configurações › Letras**: a ordem das fontes (setas), ligar e desligar cada uma (uma fica sempre ligada),
+  preferir palavra por palavra, traduzir (e o idioma) e letras latinas.
 - **O que o Modo Escuta ouve** (Ajustes): "Todo o PC" (o padrão) ou um app só, escolhido entre os que estão
   com som aberto. Com um app escolhido, o visual ouve só ele (captura por processo do Windows, com os processos
   que o app abre) e o "tocando agora" segue só ele: um anúncio no navegador não mexe em nada de quem escolheu o
@@ -144,23 +159,39 @@ mais recente das outras e nunca espera por elas.
   Ilha): um entalhe preto preso ao topo da tela, com "ombros" curvos que o ligam à borda (no estilo do Nusa e do
   island), por cima de tudo e sem roubar o foco. Fechada, mostra a capa e o som em barras na cor do visual. Avisa
   por um instante a música nova, o volume e, nas músicas pré-analisadas, a contagem "Drop em 3, 2, 1".
-  - **Abre quase na hora** (30 ms com o mouse em cima, ou na borda de cima da tela sobre ela) e fecha 200 ms depois
-    de o mouse sair. Cresce com um leve quique e encolhe sem quique; some encolhendo para a borda.
+  - **Abre na hora** com o mouse em cima e fecha logo depois de ele sair (só o tempo da animação). Cresce com um
+    leve quique e encolhe sem quique; some encolhendo para a borda.
   - **Páginas** quando aberta: *Tocando* (capa grande, título, progresso, controles, abrir o Player), *Letra* (a linha
     cantada grande, enchendo como num karaokê, entre a anterior e as próximas; a troca de linha rola numa mola e a
     linha que chega cresce e acende), *Visual* (o visual de verdade, reagindo ao som, num recorte da Ilha, com a
     escolha entre Spectral, Fluxo e Barras; ele é preparado em segundo plano quando a Ilha abre, então chegar à
     página não trava), *Ritmo* (BPM, energia, estrutura da faixa, contagem do drop e tom) e
-    *Ajustes* (cores reativas, modo seguro, visual, tema, tamanho da Ilha e abrir as Configurações; o que está
-    ligado fica branco, como no painel). Troca pelas
-    abas, arrastando o conteúdo para o lado ou com a roda do mouse.
-  - **Arrastar pela borda de cima** muda a Ilha de lugar (com um ímã no centro); ela lembra onde ficou. "Voltar ao
-    centro" nas Configurações.
+    *Ajustes* (cores reativas, modo seguro, tema, tamanho, trava, monitor, abrir ao pairar e abrir as
+    Configurações; o que está ligado fica branco, como no painel). Troca pelas abas, arrastando o conteúdo para o
+    lado ou com a roda do mouse.
+  - **Arrastar é sempre livre.** Travada (o padrão), a Ilha desliza ao longo da borda em que está; puxada para dentro
+    da tela, estica um pouco e volta. **Destravada** (o cadeado no alto da Ilha aberta), vai para qualquer canto:
+    perto de uma borda (topo, embaixo, esquerda, direita) gruda nela; largada no meio, fica solta; travar a devolve à
+    última borda. Ela lembra onde ficou. "Voltar ao centro do topo" e as quatro bordas também nas Configurações.
+  - **Dos lados, vira uma barra lateral**: fechada, uma aba estreita; aberta, uma coluna com as abas num controle
+    segmentado, a capa do maior tamanho que cabe, nome, progresso, controles centrados e, embaixo, de onde vem o som
+    e "abrir o Player". Ritmo e Ajustes também se arrumam na vertical.
+  - **Mais de um monitor**: arrastando, a Ilha passa para o monitor em que o mouse está (travada, na mesma borda) e
+    fica nele. Também dá para escolher nas Configurações (Do Player, Monitor 1, Monitor 2...), pelo bloco Monitor
+    da página Ajustes da Ilha ou pela barra de comandos ("Mandar a Ilha para o outro monitor").
   - **Tamanhos**: mínima (fechada só com o som em barras), padrão e grande.
   - **Sai do caminho** com jogo, vídeo ou apresentação em tela cheia, com o Player maximizado ou em tela cheia na
     frente e depois de 30 s parada; segue funcionando com a janela minimizada ou na bandeja. Fora da forma, os
     cliques passam para o que está embaixo. O × da Ilha aberta a fecha. Respeita o modo seguro e o "Efeitos de
     animação" do Windows.
+- **Nos serviços** (F1): com provedores instalados em `<pasta de dados>/provedores/<nome>/` (o `provedor.toml` e o
+  programa), a busca da Biblioteca também pergunta a eles. O bloco "Nos serviços" mostra as faixas que chegam, com o
+  nome do serviço; clicar toca (os resultados viram a fila), e dá para pôr a seguir ou no fim da fila, ao lado das
+  músicas do computador. A faixa toca pela rede, com a pré-análise (visual, BPM, drops) feita do mesmo endereço, e a
+  seguinte entra sem intervalo. Um provedor que trava é reaberto sozinho.
+- **YouTube Music** (F3): vem pronto com o app, sem conta. A busca da Biblioteca traz as faixas dele em "Nos
+  serviços", e elas tocam inteiras, com capa, visual, BPM, tom e drops da pré-análise. Na Loja, aba Provedores, ele
+  aparece como "Vem com o app" (dá para desligar).
 - **Configurações** (`Ctrl ,` ou o botão de controles na barra lateral): uma página com seções (Geral, Aparência,
   Visual, Som, Ilha, Atalhos, Sobre). Larga, as seções ficam numa coluna à esquerda; média, viram fichas no topo;
   estreita, a página vai para a área do painel e rola inteira, com o visual em cima. As mudanças valem na hora e
@@ -180,6 +211,10 @@ mais recente das outras e nunca espera por elas.
   e o fim do registro, com o nome do usuário do Windows apagado.
 - **Barra de comandos** (`Ctrl K`): busca e executa qualquer comando pelo nome, sem acento nem maiúscula.
 - **Loja**: temas, skins, layouts e pacotes se aplicam com um clique; os módulos do painel entram e saem por lá.
+  A aba **Provedores** mostra os provedores instalados (situação, versão e o que cada um sabe fazer), liga e
+  desliga cada um (desligado, o programa dele fecha e a busca não pergunta a ele; a escolha fica guardada), instala
+  de uma pasta (a mesma pasta de novo atualiza) e remove, com "Desfazer" no aviso. "Abrir a pasta dos provedores"
+  mostra onde eles ficam.
 - **Módulos com ficha**: quem faz mais que desenhar (usa a internet, entra numa conta) se descreve num manifesto
   (`recursos/modulos/*.toml`): identidade e a lista de ações que pede, de um catálogo fechado, cada uma com o
   motivo escrito pelo autor. A ficha na Loja mostra isso, destaca as ações críticas e só libera "Instalar"
@@ -231,7 +266,8 @@ do quadro com `anim.seguir(chave, alvo, tempo)`.
 - Sem controle de volume no sistema: a barra de volume fica apagada.
 - Sem pasta de dados ou com o banco estragado: o histórico fica desligado (ou recomeça vazio, guardando o
   arquivo antigo como `.corrompido`) e a Biblioteca avisa.
-- Sem internet: o módulo Letra avisa e tenta de novo a cada 20 segundos. "Não tem letra" vale por um dia.
+- Sem internet: o módulo Letra avisa e tenta de novo a cada 20 segundos. "Não tem letra" vale por um dia. Uma
+  fonte fora do ar é pulada; a letra só falha se todas falharem. Sem a tradução, a letra aparece sem ela.
 - Sem barra de tarefas ou bandeja (o Windows recusou a ligação): o app abre sem os botões, sem o ícone e sem a
   janela mini, e fechar a janela sempre encerra.
 - Só uma cópia do app roda por vez. A variável de ambiente `TCCPLAYER_DADOS=<pasta>` troca a pasta de dados e
@@ -239,8 +275,9 @@ do quadro com `anim.seguir(chave, alvo, tempo)`.
   testar o player: `TCCPLAYER_MUDO=1` toca sem som e `TCCPLAYER_PASTA=<pasta>` já põe uma pasta na biblioteca.
 
 Dados do usuário ficam em `%APPDATA%\TccPlayer` (`ajustes.toml`, `modulos.toml`, `historico.db`, `biblioteca.db`, `lastfm.cofre` e `registros\player.log`). Nenhum
-áudio é gravado nem enviado para fora. O histórico fica só no computador. A única coisa que sai é a busca da
-letra (título, artista, álbum e duração), e só com o módulo Letra no painel.
+áudio é gravado nem enviado para fora. O histórico fica só no computador. Da letra saem a busca (título,
+artista, álbum, duração e o id do vídeo do YouTube Music, para a Better Lyrics, a Unison e o LRCLIB) e, com a
+tradução ligada, as linhas da letra para a Unison; só com o módulo Letra ligado.
 
 - **Janela estreita**: com a Biblioteca ou a Loja aberta no layout empilhado, a página fica com o meio inteiro (o
   painel de módulos sai), sem a descrição, e os botões de texto do topo dela viram só ícone, com a dica.
@@ -250,7 +287,7 @@ letra (título, artista, álbum e duração), e só com o módulo Letra no paine
 Espaço tocar/pausar · Ctrl ←/→ faixa anterior/próxima · Ctrl ↑/↓ volume · M mudo · F tela cheia · P painel ·
 Ctrl K comandos · Ctrl , ajustes · V próximo visual · 1/2/3 escolher o visual · T próximo tema · I imersivo ·
 E editar o layout · N janela mini · D Ilha · H Início · B Biblioteca · L Loja · S aleatório · R repetir · Q fila ·
-Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
+Y letra em tela cheia · Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
 `layout.editar`…), o mesmo que os botões e a barra de comandos usam. A lista inteira está em
 `crates/nucleo/src/comando.rs`.
 
@@ -258,7 +295,7 @@ Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto 
 
 Captura por app (hoje é o som do sistema inteiro), no player: tela da fila, tocar sem intervalo entre faixas,
 normalização de volume, equalizador, crossfade, capa da música local no controle do Windows, playlists e
-visões por álbum e artista; ajuste de sincronia da letra lembrado por música, retrospectiva do ano, download de módulos
+visões por álbum e artista; retrospectiva do ano, download de módulos
 pela Loja (catálogo assinado), skins carregadas de arquivo, ir a um ponto da música pelo mapa de energia (e a
 lupa ao passar o mouse), arrastar o visual para trocar de lado (há o botão "Trocar de lado"), medidor de flashes,
 ajuste de sincronia para fone Bluetooth e CI. A Biblioteca abre uma folha dizendo o que vem.

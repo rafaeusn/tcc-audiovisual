@@ -53,6 +53,8 @@ pub enum Comando {
     AlternarTravaIlha,
     /// Prende a Ilha numa borda da tela (sem precisar arrastar).
     PrenderIlha(crate::BordaIlha),
+    /// Manda a Ilha para o próximo monitor (com mais de um).
+    IlhaOutroMonitor,
     CopiarDiagnostico,
     /// Mostrar ou esconder as dicas (nome e atalho) dos botões de ícone.
     AlternarDicas,
@@ -62,10 +64,12 @@ pub enum Comando {
     AlternarRepetir,
     /// A fila de músicas locais (na Biblioteca).
     AbrirFila,
+    /// A letra em tela cheia, sobre o visual.
+    LetraTelaCheia,
 }
 
 impl Comando {
-    pub const TODOS: [Comando; 47] = [
+    pub const TODOS: [Comando; 49] = [
         Comando::TocarPausar,
         Comando::Proxima,
         Comando::Anterior,
@@ -108,11 +112,13 @@ impl Comando {
         Comando::PrenderIlha(crate::BordaIlha::Baixo),
         Comando::PrenderIlha(crate::BordaIlha::Esquerda),
         Comando::PrenderIlha(crate::BordaIlha::Direita),
+        Comando::IlhaOutroMonitor,
         Comando::CopiarDiagnostico,
         Comando::AlternarDicas,
         Comando::AlternarAleatorio,
         Comando::AlternarRepetir,
         Comando::AbrirFila,
+        Comando::LetraTelaCheia,
     ];
 
     /// Nome estável do comando (o mesmo que atalhos e skins vão usar).
@@ -161,11 +167,13 @@ impl Comando {
             Self::PrenderIlha(crate::BordaIlha::Baixo) => "ilha.prender-baixo",
             Self::PrenderIlha(crate::BordaIlha::Esquerda) => "ilha.prender-esquerda",
             Self::PrenderIlha(crate::BordaIlha::Direita) => "ilha.prender-direita",
+            Self::IlhaOutroMonitor => "ilha.outro-monitor",
             Self::CopiarDiagnostico => "ajuda.diagnostico",
             Self::AlternarDicas => "ajuda.dicas",
             Self::AlternarAleatorio => "player.aleatorio",
             Self::AlternarRepetir => "player.repetir",
             Self::AbrirFila => "pagina.fila",
+            Self::LetraTelaCheia => "letra.tela-cheia",
         }
     }
 
@@ -210,16 +218,18 @@ impl Comando {
             Self::TrocarTamanhoIlha(crate::TamanhoIlha::Padrao) => "Ilha no tamanho padrão",
             Self::TrocarTamanhoIlha(crate::TamanhoIlha::Grande) => "Ilha grande",
             Self::CentralizarIlha => "Voltar a Ilha ao centro do topo",
-            Self::AlternarTravaIlha => "Travar ou destravar a Ilha (destravada, arrasta-se pela tela)",
+            Self::AlternarTravaIlha => "Travar ou destravar a Ilha (destravada, vai para qualquer borda)",
             Self::PrenderIlha(crate::BordaIlha::Topo) => "Prender a Ilha no topo da tela",
             Self::PrenderIlha(crate::BordaIlha::Baixo) => "Prender a Ilha embaixo da tela",
             Self::PrenderIlha(crate::BordaIlha::Esquerda) => "Prender a Ilha à esquerda da tela",
             Self::PrenderIlha(crate::BordaIlha::Direita) => "Prender a Ilha à direita da tela",
+            Self::IlhaOutroMonitor => "Mandar a Ilha para o outro monitor",
             Self::CopiarDiagnostico => "Copiar o relatório de diagnóstico",
             Self::AlternarDicas => "Mostrar ou esconder as dicas dos botões",
             Self::AlternarAleatorio => "Ordem aleatória (músicas do computador)",
             Self::AlternarRepetir => "Repetir: nada, a fila ou a música",
             Self::AbrirFila => "Ver a fila de músicas",
+            Self::LetraTelaCheia => "Letra em tela cheia",
         }
     }
 
@@ -238,7 +248,8 @@ impl Comando {
             | Self::ProximoVisual
             | Self::AlternarCoresReativas
             | Self::AlternarModoSeguro
-            | Self::TelaCheia => "Visual",
+            | Self::TelaCheia
+            | Self::LetraTelaCheia => "Visual",
             Self::ProximoTema | Self::TrocarTema(_) | Self::AlternarImersivo | Self::AlternarDicas => "Aparência",
             Self::EditarLayout
             | Self::TrocarLado
@@ -251,7 +262,8 @@ impl Comando {
             | Self::TrocarTamanhoIlha(_)
             | Self::CentralizarIlha
             | Self::AlternarTravaIlha
-            | Self::PrenderIlha(_) => "Layout",
+            | Self::PrenderIlha(_)
+            | Self::IlhaOutroMonitor => "Layout",
             Self::AbrirAjustes
             | Self::AbrirPagina(_)
             | Self::AbrirPaleta
@@ -287,6 +299,7 @@ impl Comando {
             Self::AlternarAleatorio => &["S"],
             Self::AlternarRepetir => &["R"],
             Self::AbrirFila => &["Q"],
+            Self::LetraTelaCheia => &["Y"],
             Self::AbrirPagina(Pagina::Inicio) => &["H"],
             Self::AbrirPagina(Pagina::Biblioteca) => &["B"],
             Self::AbrirPagina(Pagina::Loja) => &["L"],
@@ -320,6 +333,7 @@ impl Comando {
             ("s", false) => Self::AlternarAleatorio,
             ("r", false) => Self::AlternarRepetir,
             ("q", false) => Self::AbrirFila,
+            ("y", false) => Self::LetraTelaCheia,
             ("h", false) => Self::AbrirPagina(Pagina::Inicio),
             ("b", false) => Self::AbrirPagina(Pagina::Biblioteca),
             ("l", false) => Self::AbrirPagina(Pagina::Loja),
@@ -381,6 +395,7 @@ mod testes {
             ("s", false),
             ("r", false),
             ("q", false),
+            ("y", false),
             ("h", false),
             ("b", false),
             ("l", false),

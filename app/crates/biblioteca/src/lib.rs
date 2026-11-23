@@ -16,7 +16,20 @@ pub use leitura::{EXTENSOES, capa, ler, varrer};
 
 use std::path::PathBuf;
 
-/// Uma música do acervo.
+/// De onde vem uma música que não é um arquivo: uma faixa de um provedor (YouTube Music, Spotify...).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Remota {
+    pub servico: String,
+    pub id: String,
+    pub isrc: Option<String>,
+    /// O endereço da capa.
+    pub capa: Option<String>,
+    /// O nome do provedor, para mostrar ("YouTube Music").
+    pub fonte: String,
+}
+
+/// Uma música do acervo, ou uma faixa de provedor (com `remota`). Na faixa de provedor, `caminho` não é um
+/// arquivo: é a chave `servico:id`, que a identifica na fila, na pré-análise e no resto do app.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Musica {
     pub caminho: PathBuf,
@@ -31,9 +44,16 @@ pub struct Musica {
     pub ganho_db: Option<f32>,
     /// O pico da faixa (1 = o máximo sem distorcer), quando o arquivo traz.
     pub pico: Option<f32>,
+    /// Faixa de provedor (não é um arquivo do computador).
+    pub remota: Option<Remota>,
 }
 
 impl Musica {
+    /// É uma faixa de provedor, e não um arquivo.
+    pub fn e_remota(&self) -> bool {
+        self.remota.is_some()
+    }
+
     /// O ganho para tocar esta música com o volume igualado: o ReplayGain mais `preamp_db`, sem deixar o pico
     /// passar de 1. Sem ReplayGain no arquivo, 1 (como está).
     pub fn ganho_igualado(&self, preamp_db: f32) -> f32 {

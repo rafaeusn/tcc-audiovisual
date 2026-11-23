@@ -7,10 +7,11 @@ impl Player {
     /// agora enche como num karaokê (palavra por palavra quando a letra traz os tempos delas) e as outras apagam
     /// com a distância.
     pub(super) fn corpo_letra(&self, cx: &mut Context<Self>) -> Div {
-        /// Altura de cada linha da letra (cabem duas linhas de texto).
-        const LINHA: f32 = 48.0;
         const VISIVEIS: f32 = 4.0;
         let c = self.cores();
+        // Altura de cada linha da letra: cabem duas linhas de texto e, com a tradução ou as letras latinas, a de
+        // baixo.
+        let linha_h: f32 = if self.letra_tem_extras() { 68.0 } else { 48.0 };
         let aviso = |frase: &'static str| div().child(texto(14.0).text_color(c.texto_2).child(frase));
         if self.midia.faixa.as_ref().is_none_or(|f| f.titulo.is_empty()) {
             return aviso("Toque uma música em qualquer app para ver a letra.");
@@ -72,7 +73,7 @@ impl Player {
         let pos = self.anim.mola_amortecida(("letra", 0), alvo, 0.5, 0.86);
         let t = tempo.map_or(0.0, |(t, _)| t);
 
-        let mut janela = div().relative().w_full().h(px(LINHA * VISIVEIS)).overflow_hidden();
+        let mut janela = div().relative().w_full().h(px(linha_h * VISIVEIS)).overflow_hidden();
         let primeira = (pos.floor() as i64 - 1).max(0) as usize;
         for k in primeira..(primeira + 7).min(n) {
             let Some(linha) = letra.linhas.get(k) else { break };
@@ -100,25 +101,41 @@ impl Player {
                     if linha.texto.is_empty() { "· · ·".into() } else { linha.texto.clone().into() };
                 base.text_color(c.texto_2).child(frase)
             };
+            let extra = self.extra_da_linha(k, &linha.texto).map(|e| {
+                div()
+                    .w_full()
+                    .text_size(px(13.0))
+                    .line_height(px(17.0))
+                    .line_clamp(1)
+                    .text_color(com_alfa(c.texto_2, alfa))
+                    .child(e)
+            });
             janela = janela.child(
                 div()
                     .absolute()
                     .left(px(0.0))
-                    .top(px((k as f32 - pos + 1.0) * LINHA))
+                    .top(px((k as f32 - pos + 1.0) * linha_h))
                     .w_full()
-                    .h(px(LINHA))
+                    .h(px(linha_h))
                     .flex()
-                    .items_center()
-                    .child(conteudo),
+                    .flex_col()
+                    .justify_center()
+                    .gap(px(2.0))
+                    .child(conteudo)
+                    .children(extra),
             );
         }
 
+        let de_onde = letra.fonte.as_deref().unwrap_or("LRCLIB");
+        let palavra = letra.linhas.iter().any(|l| !l.palavras.is_empty());
         let fonte = if !letra.sincronizada {
-            "Letra do LRCLIB, sem os tempos"
+            format!("Letra: {de_onde}, sem os tempos")
         } else if tempo.is_none() {
-            "Letra do LRCLIB. Este app não informa a posição da música"
+            format!("Letra: {de_onde}. Este app não informa a posição da música")
+        } else if palavra {
+            format!("Letra: {de_onde}, palavra por palavra")
         } else {
-            "Letra do LRCLIB"
+            format!("Letra: {de_onde}")
         };
         let mut rodape = div()
             .min_h(px(28.0))
@@ -126,6 +143,24 @@ impl Player {
             .items_center()
             .gap(px(8.0))
             .child(texto(12.0).flex_1().min_w(px(0.0)).text_color(c.texto_3).child(fonte))
+            .child(
+                div()
+                    .id("letra-cheia")
+                    .size(px(28.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(999.0))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(c.hover))
+                    .child(icone("icones/expand.svg", 16.0, c.texto_2))
+                    .child(self.marca("letra-cheia"))
+                    .on_hover(self.ao_pairar("letra-cheia", None, "Letra em tela cheia (Y)", cx))
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.executar(Comando::LetraTelaCheia, window, cx)
+                    })),
+            )
             // A letra é de outra música? Dá para procurar a certa.
             .child(
                 div()

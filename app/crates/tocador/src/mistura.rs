@@ -10,8 +10,8 @@
 //! Nada aqui fala com a placa: [`Mistura::produzir`] devolve quadros estéreo e os marcos (quando uma música
 //! começou, quando tudo acabou). Assim dá para testar com fontes de mentira.
 
+use crate::Origem;
 use std::f32::consts::{FRAC_PI_2, PI};
-use std::path::PathBuf;
 
 /// O que a mistura precisa de uma fonte de som (o arquivo decodificado, ou uma de teste).
 pub trait Leitor: Send {
@@ -37,7 +37,7 @@ impl Leitor for crate::fonte::Fonte {
 
 /// Uma música aberta na mistura.
 pub struct Faixa {
-    pub caminho: PathBuf,
+    pub origem: Origem,
     leitor: Box<dyn Leitor>,
     ganho: f32,
     pendente: Vec<f32>,
@@ -49,10 +49,10 @@ pub struct Faixa {
 }
 
 impl Faixa {
-    pub fn nova(caminho: PathBuf, leitor: Box<dyn Leitor>, ganho: f32, taxa: u32) -> Self {
+    pub fn nova(origem: Origem, leitor: Box<dyn Leitor>, ganho: f32, taxa: u32) -> Self {
         let total = (leitor.duracao_s().max(0.0) * f64::from(taxa)) as u64;
         let ganho = if ganho.is_finite() { ganho.clamp(0.0, 4.0) } else { 1.0 };
-        Self { caminho, leitor, ganho, pendente: Vec::new(), lidos: 0, total, acabou: false }
+        Self { origem, leitor, ganho, pendente: Vec::new(), lidos: 0, total, acabou: false }
     }
 
     pub fn duracao_s(&self) -> f64 {
@@ -92,13 +92,13 @@ impl Faixa {
 }
 
 /// Um arquivo e o ganho com que ele toca.
-pub type ArquivoComGanho = (PathBuf, f32);
+pub type ArquivoComGanho = (Origem, f32);
 
 /// O que aconteceu dentro de um pedaço produzido, no quadro indicado.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Marco {
     /// Uma música começou a soar (troca sem intervalo ou início do crossfade).
-    Comecou { caminho: PathBuf, duracao_s: f64 },
+    Comecou { origem: Origem, duracao_s: f64 },
     /// Não há mais nada para tocar.
     Fim,
 }
@@ -257,13 +257,13 @@ impl Mistura {
         self.seguinte = faixa;
     }
 
-    pub fn seguinte(&self) -> Option<&PathBuf> {
-        self.seguinte.as_ref().map(|f| &f.caminho)
+    pub fn seguinte(&self) -> Option<&Origem> {
+        self.seguinte.as_ref().map(|f| &f.origem)
     }
 
     /// A de agora e a seguinte (arquivo e ganho), para reabrir tudo numa saída de som nova.
     pub fn para_retomar(&self) -> (Option<ArquivoComGanho>, Option<ArquivoComGanho>) {
-        let par = |f: &Faixa| (f.caminho.clone(), f.ganho());
+        let par = |f: &Faixa| (f.origem.clone(), f.ganho());
         (self.atual.as_ref().map(par), self.seguinte.as_ref().map(par))
     }
 
@@ -304,10 +304,8 @@ impl Mistura {
             {
                 let restante = atual.restante().unwrap_or(0);
                 if let (Some(saindo), Some(entra)) = (self.atual.take(), self.seguinte.take()) {
-                    marcos.push((
-                        feitos,
-                        Marco::Comecou { caminho: entra.caminho.clone(), duracao_s: entra.duracao_s() },
-                    ));
+                    marcos
+                        .push((feitos, Marco::Comecou { origem: entra.origem.clone(), duracao_s: entra.duracao_s() }));
                     self.saindo = Some(Saindo { faixa: saindo, total: restante, feito: 0 });
                     self.atual = Some(entra);
                 }
@@ -348,7 +346,7 @@ impl Mistura {
                     Some(entra) => {
                         marcos.push((
                             feitos,
-                            Marco::Comecou { caminho: entra.caminho.clone(), duracao_s: entra.duracao_s() },
+                            Marco::Comecou { origem: entra.origem.clone(), duracao_s: entra.duracao_s() },
                         ));
                         self.atual = Some(entra);
                     }
@@ -405,7 +403,7 @@ mod testes {
 
     fn faixa(nome: &str, valor: f32, quadros: u64) -> Faixa {
         let leitor = Constante { valor, quadros, lidos: 0, taxa: TAXA, informa_duracao: true };
-        Faixa::nova(PathBuf::from(nome), Box::new(leitor), 1.0, TAXA)
+        Faixa::nova(Origem::from(nome), Box::new(leitor), 1.0, TAXA)
     }
 
     fn tudo(m: &mut Mistura) -> (Vec<f32>, Vec<(usize, Marco)>) {
@@ -430,7 +428,7 @@ mod testes {
         assert_eq!(som.len(), 1500 * 2, "nenhum quadro de silêncio entre as duas");
         assert_eq!(som[999 * 2], 0.5);
         assert_eq!(som[1000 * 2], -0.5);
-        assert_eq!(marcos, [(1000, Marco::Comecou { caminho: "b".into(), duracao_s: 0.5 }), (1500, Marco::Fim)]);
+        assert_eq!(marcos, [(1000, Marco::Comecou { origem: "b".into(), duracao_s: 0.5 }), (1500, Marco::Fim)]);
     }
 
     #[test]
@@ -442,7 +440,7 @@ mod testes {
         let (som, marcos) = tudo(&mut m);
         // As duas se sobrepõem por 200 quadros: 1000 + 1000 - 200.
         assert_eq!(som.len(), 1800 * 2);
-        assert_eq!(marcos[0], (800, Marco::Comecou { caminho: "b".into(), duracao_s: 1.0 }));
+        assert_eq!(marcos[0], (800, Marco::Comecou { origem: "b".into(), duracao_s: 1.0 }));
         // No meio do crossfade, mesma potência: as duas a 0,5 somam ~0,707 (sin + cos de 45°, vezes 0,5).
         let meio = som[900 * 2];
         assert!((meio - 0.5 * std::f32::consts::SQRT_2).abs() < 0.02, "meio do crossfade = {meio}");

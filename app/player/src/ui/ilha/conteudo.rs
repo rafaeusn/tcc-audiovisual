@@ -131,14 +131,20 @@ impl VistaIlha {
     /// As abas no alto da Ilha aberta, de onde vem o som, a trava e o × que fecha a Ilha. Em pé (a barra lateral,
     /// estreita), as abas são só os ícones.
     pub(super) fn abas(&self, dados: &Dados, s: f32, de_pe: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut abas = div().flex().items_center().gap(px(4.0 * s));
+        // Em pé, as abas viram um controle segmentado que ocupa a largura que sobra (sem amontoar os ícones).
+        let mut abas = div()
+            .flex()
+            .items_center()
+            .gap(px(if de_pe { 2.0 } else { 4.0 } * s))
+            .when(de_pe, |d| d.flex_1().min_w_0().p(px(2.0 * s)).rounded(px(999.0)).bg(branco(0.06)));
         for (i, pagina) in Pagina::TODAS.into_iter().enumerate() {
             let ativa = pagina == self.pagina;
             let com_nome = ativa && !de_pe;
             abas = abas.child(
                 div()
                     .id(("ilha-aba", i))
-                    .h(px(30.0 * s))
+                    .h(px(if de_pe { 28.0 } else { 30.0 } * s))
+                    .when(de_pe, |d| d.flex_1().justify_center())
                     .px(px(if com_nome { 12.0 } else { 8.0 } * s))
                     .flex()
                     .items_center()
@@ -164,7 +170,7 @@ impl VistaIlha {
             .items_center()
             .gap(px(8.0 * s))
             .child(abas)
-            .child(div().flex_1())
+            .when(!de_pe, |d| d.child(div().flex_1()))
             .when(!de_pe, |d| {
                 d.child(
                     texto(pequeno(s)).max_w(px(120.0 * s)).truncate().text_color(cinza()).child(dados.origem.clone()),
@@ -186,9 +192,17 @@ impl VistaIlha {
     }
     /// A página Tocando: a capa, o título, o progresso e os controles. Deitada, a capa ao lado; em pé (a barra
     /// lateral), a capa grande em cima e o resto embaixo.
-    pub(super) fn pagina_tocando(&self, dados: &Dados, s: f32, de_pe: bool, cx: &mut Context<Self>) -> AnyElement {
-        let (pos, dur) = dados.progresso.unwrap_or((0.0, 0.0));
-        let fracao = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
+    pub(super) fn pagina_tocando(
+        &self,
+        dados: &Dados,
+        s: f32,
+        de_pe: bool,
+        altura: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if de_pe {
+            return self.pagina_tocando_em_pe(dados, s, altura, cx);
+        }
         let controles = div()
             .flex()
             .items_center()
@@ -236,7 +250,46 @@ impl VistaIlha {
                     .child(self.barras(dados, 3.5 * s, 20.0 * s)),
             )
             .child(texto(14.0 * s).text_color(branco(0.7)).truncate().child(dados.artista.clone()));
-        let progresso = div()
+        let progresso = Self::progresso(dados, s);
+        let rodape = div().flex().items_center().justify_between().child(controles).child(
+            self.botao("ilha-abrir", "icones/expand.svg", 34.0 * s, false).on_click(cx.listener(
+                |this, _: &ClickEvent, _, cx| {
+                    if !this.acabou_de_arrastar() {
+                        let _ = this.principal.update(cx, |p, _, _| p.trazer_janela());
+                    }
+                },
+            )),
+        );
+        let cartao = div().size_full().p(px(14.0 * s)).rounded(px(24.0 * s)).bg(linear_gradient(
+            100.0,
+            linear_color_stop(com_alfa(dados.tom, 0.30), 0.0),
+            linear_color_stop(com_alfa(dados.tom, 0.04), 1.0),
+        ));
+        cartao
+            .flex()
+            .items_center()
+            .gap(px(18.0 * s))
+            .child(Self::capa(dados, 124.0 * s, 18.0 * s))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .justify_between()
+                    .child(titulo)
+                    .child(progresso)
+                    .child(rodape),
+            )
+            .into_any_element()
+    }
+
+    /// O progresso da faixa: a barra e, embaixo, o tempo que passou e o que falta.
+    fn progresso(dados: &Dados, s: f32) -> Div {
+        let (pos, dur) = dados.progresso.unwrap_or((0.0, 0.0));
+        let fracao = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        div()
             .flex()
             .flex_col()
             .gap(px(6.0 * s))
@@ -257,49 +310,96 @@ impl VistaIlha {
                     } else {
                         String::new()
                     })),
+            )
+    }
+
+    /// A página Tocando na barra lateral: tudo numa coluna centrada, com a capa do maior tamanho que cabe e a mesma
+    /// distância entre os blocos (capa, nome, progresso, controles e, embaixo, de onde vem o som e "abrir o Player").
+    fn pagina_tocando_em_pe(&self, dados: &Dados, s: f32, altura: f32, cx: &mut Context<Self>) -> AnyElement {
+        let largura = Self::largura_da_pagina(s, true);
+        let folga = 16.0 * s;
+        // O que vai embaixo da capa: nome (50), progresso (30), controles (56), rodapé (30) e quatro vãos de 14.
+        let resto = (50.0 + 30.0 + 56.0 + 30.0 + 4.0 * 14.0) * s;
+        let capa = (altura - 2.0 * folga - resto).min(largura - 2.0 * folga).max(96.0 * s).floor();
+        let nome = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0 * s))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0 * s))
+                    .child(
+                        texto(19.0 * s)
+                            .flex_1()
+                            .min_w_0()
+                            .font_weight(FontWeight::BOLD)
+                            .truncate()
+                            .child(dados.titulo.clone()),
+                    )
+                    .child(self.barras(dados, 3.5 * s, 18.0 * s)),
+            )
+            .child(texto(14.0 * s).text_color(branco(0.7)).truncate().child(dados.artista.clone()));
+        let controles = div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(22.0 * s))
+            .child(
+                self.botao("ilha-anterior", "icones/prev.svg", 42.0 * s, false)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.comandar(Comando::Anterior, cx))),
+            )
+            .child(
+                div()
+                    .id("ilha-tocar")
+                    .size(px(56.0 * s))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(999.0))
+                    .bg(branco(1.0))
+                    .cursor_pointer()
+                    .hover(|st| st.opacity(0.92))
+                    .active(|st| st.opacity(0.7))
+                    .child(icone(if dados.tocando { "icones/pause.svg" } else { "icones/play.svg" }, 22.0 * s, preto()))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.comandar(Comando::TocarPausar, cx))),
+            )
+            .child(
+                self.botao("ilha-proxima", "icones/next.svg", 42.0 * s, false)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.comandar(Comando::Proxima, cx))),
             );
-        let rodape = div().flex().items_center().justify_between().child(controles).child(
-            self.botao("ilha-abrir", "icones/expand.svg", 34.0 * s, false).on_click(cx.listener(
+        let rodape = div()
+            .h(px(30.0 * s))
+            .flex()
+            .items_center()
+            .gap(px(8.0 * s))
+            .child(icone("icones/headphones.svg", 14.0 * s, cinza()))
+            .child(texto(pequeno(s)).flex_1().min_w_0().truncate().text_color(cinza()).child(dados.origem.clone()))
+            .child(self.botao("ilha-abrir", "icones/expand.svg", 30.0 * s, false).on_click(cx.listener(
                 |this, _: &ClickEvent, _, cx| {
                     if !this.acabou_de_arrastar() {
                         let _ = this.principal.update(cx, |p, _, _| p.trazer_janela());
                     }
                 },
-            )),
-        );
-        let cartao = div().size_full().p(px(14.0 * s)).rounded(px(24.0 * s)).bg(linear_gradient(
-            if de_pe { 180.0 } else { 100.0 },
-            linear_color_stop(com_alfa(dados.tom, 0.30), 0.0),
-            linear_color_stop(com_alfa(dados.tom, 0.04), 1.0),
-        ));
-        if de_pe {
-            return cartao
-                .flex()
-                .flex_col()
-                .gap(px(16.0 * s))
-                .child(div().flex().justify_center().pt(px(6.0 * s)).child(Self::capa(dados, 168.0 * s, 22.0 * s)))
-                .child(titulo)
-                .child(progresso)
-                .child(rodape)
-                .into_any_element();
-        }
-        cartao
+            )));
+        div()
+            .size_full()
+            .p(px(folga))
+            .rounded(px(24.0 * s))
+            .bg(linear_gradient(
+                180.0,
+                linear_color_stop(com_alfa(dados.tom, 0.30), 0.0),
+                linear_color_stop(com_alfa(dados.tom, 0.04), 1.0),
+            ))
             .flex()
-            .items_center()
-            .gap(px(18.0 * s))
-            .child(Self::capa(dados, 124.0 * s, 18.0 * s))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .justify_between()
-                    .child(titulo)
-                    .child(progresso)
-                    .child(rodape),
-            )
+            .flex_col()
+            .justify_between()
+            .child(div().flex().justify_center().child(Self::capa(dados, capa, 20.0 * s)))
+            .child(nome)
+            .child(Self::progresso(dados, s))
+            .child(controles)
+            .child(rodape)
             .into_any_element()
     }
 
@@ -333,7 +433,8 @@ impl VistaIlha {
         let pos = self.anim.mola_amortecida(chave, alvo, 0.5, 0.84);
         // A linha de agora ocupa uma faixa maior que as outras; tamanho, faixa e brilho mudam aos poucos com a
         // distância até o meio, então a linha que chega cresce e acende enquanto rola.
-        let (faixa_atual, faixa_vizinha) = (56.0 * s, 36.0 * s);
+        // Com a tradução ou as letras latinas ligadas, cada linha ganha espaço para o texto de baixo.
+        let (faixa_atual, faixa_vizinha) = if dados.com_extras { (76.0 * s, 52.0 * s) } else { (56.0 * s, 36.0 * s) };
         let (fonte_atual, fonte_vizinha) = (20.0 * s, 14.5 * s);
         let meio = altura * 0.42;
         let mut caixa = div().relative().size_full().overflow_hidden();
@@ -354,6 +455,7 @@ impl VistaIlha {
                 d.signum() * ((faixa_atual + faixa_vizinha) / 2.0 + (longe - 1.0) * faixa_vizinha)
             };
             let (conteudo, cantado) = linha_da_letra(linhas, k, atual, t);
+            let extra = dados.extras.iter().find(|(i, _)| *i == k).map(|(_, e)| e.clone());
             caixa = caixa.child(
                 div()
                     .absolute()
@@ -362,7 +464,9 @@ impl VistaIlha {
                     .top(px(meio + y - faixa / 2.0))
                     .h(px(faixa))
                     .flex()
-                    .items_center()
+                    .flex_col()
+                    .justify_center()
+                    .gap(px(2.0 * s))
                     .child(
                         div()
                             .w_full()
@@ -377,7 +481,18 @@ impl VistaIlha {
                                 branco(alfa.min(0.4)),
                                 FontWeight::BOLD,
                             )),
-                    ),
+                    )
+                    .when_some(extra, |d, e| {
+                        d.child(
+                            div()
+                                .w_full()
+                                .text_size(px(pequeno(s).max(fonte * 0.62)))
+                                .line_height(px(pequeno(s).max(fonte * 0.62) * 1.25))
+                                .line_clamp(1)
+                                .text_color(branco(alfa * 0.6))
+                                .child(e),
+                        )
+                    }),
             );
         }
         div().size_full().px(px(8.0 * s)).child(caixa).into_any_element()
@@ -432,6 +547,9 @@ impl VistaIlha {
 
     /// A página Ritmo: o BPM, a energia e a estrutura da faixa. Deitada, lado a lado; em pé, um embaixo do outro.
     pub(super) fn pagina_ritmo(&self, dados: &Dados, s: f32, de_pe: bool) -> AnyElement {
+        if de_pe {
+            return self.pagina_ritmo_em_pe(dados, s);
+        }
         let bpm = dados.bpm.map_or_else(|| "--".to_string(), |b| b.to_string());
         let mut medidor = div().flex().gap(px(3.0 * s)).items_end().h(px(28.0 * s));
         for i in 0..14 {
@@ -445,21 +563,7 @@ impl VistaIlha {
                 }),
             );
         }
-        let (pos, dur) = dados.progresso.unwrap_or((0.0, 0.0));
-        let fracao = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
-        let mut mapa = div().h(px(34.0 * s)).flex().items_end().gap(px(2.0 * s)).relative();
-        let n = dados.mapa.len().max(1);
-        for (i, e) in dados.mapa.iter().enumerate() {
-            let tocado = (i as f32 + 0.5) / n as f32 <= fracao;
-            let altura = if *e < 0.0 { 4.0 } else { 6.0 + 28.0 * e.clamp(0.0, 1.0) };
-            mapa = mapa.child(div().flex_1().h(px(altura * s)).rounded(px(2.0 * s)).bg(if *e < 0.0 {
-                branco(0.08)
-            } else if tocado {
-                dados.tom
-            } else {
-                branco(0.28)
-            }));
-        }
+        let mapa = Self::mapa_da_faixa(dados, s, 34.0 * s);
         let rodape = [
             dados.drop_em_s.filter(|d| *d > 0.0 && *d < 120.0).map(|d| format!("Drop em {}", tempo(f64::from(d)))),
             dados.tom_musical.as_ref().map(ToString::to_string),
@@ -506,9 +610,116 @@ impl VistaIlha {
             )
             .into_any_element()
     }
-    /// A página Ajustes: blocos que ligam e desligam (brancos quando ligados, como no painel). Deitada, três por
-    /// linha; em pé, dois.
-    pub(super) fn pagina_ajustes(&self, dados: &Dados, s: f32, de_pe: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// A estrutura da faixa: uma barra por trecho, acesa até onde a música já tocou (os trechos de silêncio, baixos).
+    fn mapa_da_faixa(dados: &Dados, s: f32, altura: f32) -> Div {
+        let (pos, dur) = dados.progresso.unwrap_or((0.0, 0.0));
+        let fracao = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        let mut mapa = div().h(px(altura)).flex().items_end().gap(px(2.0 * s));
+        let n = dados.mapa.len().max(1);
+        for (i, e) in dados.mapa.iter().enumerate() {
+            let tocado = (i as f32 + 0.5) / n as f32 <= fracao;
+            let h = if *e < 0.0 { 4.0 * s } else { 6.0 * s + (altura - 6.0 * s) * e.clamp(0.0, 1.0) };
+            mapa = mapa.child(div().flex_1().h(px(h)).rounded(px(2.0 * s)).bg(if *e < 0.0 {
+                branco(0.08)
+            } else if tocado {
+                dados.tom
+            } else {
+                branco(0.28)
+            }));
+        }
+        mapa
+    }
+
+    /// A página Ritmo na barra lateral: o BPM grande e o clima no alto, o medidor de energia na largura toda, a
+    /// estrutura da faixa e, embaixo, o drop e o tom em fichas.
+    fn pagina_ritmo_em_pe(&self, dados: &Dados, s: f32) -> AnyElement {
+        let bpm = dados.bpm.map_or_else(|| "--".to_string(), |b| b.to_string());
+        let mut medidor = div().flex().gap(px(3.0 * s)).items_end().h(px(36.0 * s));
+        for i in 0..18 {
+            let limiar = i as f32 / 18.0;
+            medidor = medidor.child(
+                div().flex_1().h(px((8.0 + 28.0 * limiar) * s)).rounded(px(2.0 * s)).bg(if dados.energia > limiar {
+                    dados.cor_do_rotulo
+                } else {
+                    branco(0.12)
+                }),
+            );
+        }
+        let fichas = [
+            dados.drop_em_s.filter(|d| *d > 0.0 && *d < 120.0).map(|d| format!("Drop em {}", tempo(f64::from(d)))),
+            dados.tom_musical.as_ref().map(ToString::to_string),
+        ];
+        let secao = |titulo: &'static str| texto(12.0 * s).text_color(cinza()).child(titulo);
+        div()
+            .size_full()
+            .p(px(16.0 * s))
+            .rounded(px(24.0 * s))
+            .bg(branco(0.04))
+            .flex()
+            .flex_col()
+            .justify_between()
+            .child(
+                div()
+                    .flex()
+                    .items_end()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .items_end()
+                            .gap(px(6.0 * s))
+                            .child(numero(64.0 * s).child(bpm))
+                            .child(texto(12.0 * s).pb(px(10.0 * s)).text_color(cinza()).child("BPM")),
+                    )
+                    .child(
+                        texto(13.0 * s)
+                            .mb(px(10.0 * s))
+                            .px(px(10.0 * s))
+                            .py(px(4.0 * s))
+                            .rounded(px(999.0))
+                            .bg(com_alfa(dados.cor_do_rotulo, 0.16))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(dados.cor_do_rotulo)
+                            .child(dados.rotulo.nome()),
+                    ),
+            )
+            .child(div().flex().flex_col().gap(px(10.0 * s)).child(secao("Energia")).child(medidor))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0 * s))
+                    .child(secao("Estrutura da faixa"))
+                    .child(Self::mapa_da_faixa(dados, s, 64.0 * s)),
+            )
+            .child(div().flex().flex_wrap().gap(px(8.0 * s)).min_h(px(30.0 * s)).children(
+                fichas.into_iter().flatten().map(|t| {
+                    texto(13.0 * s)
+                        .h(px(30.0 * s))
+                        .px(px(12.0 * s))
+                        .flex()
+                        .items_center()
+                        .rounded(px(999.0))
+                        .bg(branco(0.08))
+                        .text_color(branco(0.88))
+                        .child(t)
+                }),
+            ))
+            .into_any_element()
+    }
+
+    /// A página Ajustes: blocos que ligam e desligam (brancos quando ligados, como no painel). Deitada, quatro por
+    /// linha em duas linhas; em pé, dois por linha, mais altos, enchendo a barra.
+    pub(super) fn pagina_ajustes(
+        &self,
+        dados: &Dados,
+        s: f32,
+        de_pe: bool,
+        altura: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let altura_do_bloco =
+            if de_pe { ((altura - 3.0 * 10.0 * s) / 4.0).clamp(68.0 * s, 104.0 * s) } else { 68.0 * s };
         let bloco = |id: &'static str,
                      caminho: &'static str,
                      nome: &'static str,
@@ -524,7 +735,7 @@ impl VistaIlha {
                 .id(id)
                 .flex_1()
                 .min_w_0()
-                .h(px(68.0 * s))
+                .h(px(altura_do_bloco))
                 .p(px(12.0 * s))
                 .flex()
                 .flex_col()
@@ -550,7 +761,11 @@ impl VistaIlha {
         let (trava, estado_da_trava): (&'static str, SharedString) = if dados.travada {
             ("icones/lock.svg", "Travada".into())
         } else {
-            ("icones/unlock.svg", "Destravada: arraste".into())
+            ("icones/unlock.svg", "Qualquer borda".into())
+        };
+        let estado_do_monitor: SharedString = match dados.monitor {
+            Some((i, n)) => format!("{} de {n}", i + 1).into(),
+            None => "Só um ligado".into(),
         };
         let blocos = [
             bloco(
@@ -571,6 +786,10 @@ impl VistaIlha {
                 })),
             bloco("ilha-aj-trava", trava, "Trava", estado_da_trava, dados.travada)
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.comandar(Comando::AlternarTravaIlha, cx))),
+            bloco("ilha-aj-monitor", "icones/monitor.svg", "Monitor", estado_do_monitor, false)
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.comandar(Comando::IlhaOutroMonitor, cx))),
+            bloco("ilha-aj-pairar", "icones/swap.svg", "Abrir ao pairar", liga(dados.ao_pairar), dados.ao_pairar)
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.comandar(Comando::AlternarIlhaAoPairar, cx))),
             bloco("ilha-aj-config", "icones/sliders.svg", "Configurações", "Abrir no Player".into(), false).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
                     if this.acabou_de_arrastar() {
@@ -584,7 +803,7 @@ impl VistaIlha {
                 }),
             ),
         ];
-        let por_linha = if de_pe { 2 } else { 3 };
+        let por_linha = if de_pe { 2 } else { 4 };
         let mut coluna = div().size_full().flex().flex_col().gap(px(10.0 * s));
         let mut linha = div().flex().gap(px(10.0 * s));
         for (i, b) in blocos.into_iter().enumerate() {

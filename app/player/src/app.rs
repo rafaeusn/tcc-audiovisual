@@ -93,13 +93,15 @@ pub struct Aviso {
 /// O que o "Desfazer" do aviso (ou `Ctrl Z`) devolve.
 pub enum Desfazer {
     /// A música tirada da fila volta para a posição em que estava.
-    TirarDaFila { indice: usize, musica: biblioteca::Musica },
+    TirarDaFila { indice: usize, musica: Box<biblioteca::Musica> },
     /// As músicas tiradas por "Limpar a seguir" voltam para o fim da fila.
     LimparASeguir(Vec<biblioteca::Musica>),
     /// A pasta tirada volta (e é lida de novo).
     TirarPasta(std::path::PathBuf),
     /// Playlist apagada ou música tirada de playlist: a thread da biblioteca guarda os detalhes.
     NaBiblioteca,
+    /// O provedor removido (o serviço) volta.
+    RestaurarProvedor(String),
 }
 
 /// A janela de pôr músicas numa playlist (ou criar uma nova).
@@ -133,6 +135,7 @@ pub struct Arrasto {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AbaLoja {
     Modulos,
+    Provedores,
     Temas,
     Skins,
     Layouts,
@@ -297,6 +300,9 @@ pub struct Player {
     pub(crate) areas: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
     /// O resultado da última busca manual de letra.
     pub(crate) procura: letrista::Procura,
+    /// A tradução da letra (quando ligada) e o que foi pedido: a chave da música e o idioma.
+    pub(crate) traducao: letrista::EstadoDaTraducao,
+    pub(crate) traducao_pedida: Option<(String, String)>,
     /// Quando o ponteiro se mexeu pela última vez (os controles da janela mini somem com ele parado).
     pub(crate) ponteiro_em: Instant,
     /// Barra de tarefas, bandeja e janela mini (vazio se o sistema não aceitou a ligação).
@@ -311,6 +317,8 @@ pub struct Player {
     abrindo_ilha: bool,
     /// A Ilha está mostrando a letra (então a letra é buscada mesmo sem o módulo Letra no painel).
     pub(crate) letra_pela_ilha: bool,
+    /// A letra em tela cheia, sobre o visual.
+    pub(crate) letra_cheia: bool,
     /// O tema e a skin vistos por último, e até quando o tom do dock troca rápido depois de uma mudança.
     estilo_visto: (Tema, bool),
     troca_de_estilo_ate: Instant,
@@ -424,6 +432,7 @@ impl Player {
                 ajustes.aleatorio,
                 ajustes.repetir,
                 ajustes.analisar_biblioteca,
+                &ajustes.provedores_desligados,
             ),
             era_local: false,
             outro: Estado::default(),
@@ -454,6 +463,9 @@ impl Player {
             ilha: None,
             abrindo_ilha: false,
             letra_pela_ilha: false,
+            letra_cheia: false,
+            traducao: letrista::EstadoDaTraducao::default(),
+            traducao_pedida: None,
             estilo_visto: (ajustes.tema, ajustes.skin == Skin::Imersiva),
             troca_de_estilo_ate: agora,
             ajustes,
@@ -465,6 +477,7 @@ impl Player {
         player.avisar_servicos();
         player.aplicar_reproducao();
         player.manter_o_player_local_andando(cx);
+        player.configurar_letras();
         // Ajuda de teste: pastas de músicas (separadas por `;`) para já entrar na biblioteca ao abrir.
         if let Some(pastas) = std::env::var_os("TCCPLAYER_PASTA") {
             for pasta in std::env::split_paths(&pastas).filter(|p| !p.as_os_str().is_empty()) {
@@ -632,7 +645,8 @@ impl Player {
     pub(crate) fn desfazer(&mut self) -> bool {
         let Some(d) = self.aviso.take().and_then(|a| a.desfazer) else { return false };
         match d {
-            Desfazer::TirarDaFila { indice, musica } => self.local.fila.inserir(indice, musica),
+            Desfazer::TirarDaFila { indice, musica } => self.local.fila.inserir(indice, *musica),
+            Desfazer::RestaurarProvedor(servico) => self.local.remoto.restaurar(servico),
             Desfazer::LimparASeguir(musicas) => self.local.fila.adicionar(musicas),
             Desfazer::TirarPasta(pasta) => self.local.adicionar_pasta(pasta),
             Desfazer::NaBiblioteca => self.local.desfazer_na_biblioteca(),
@@ -696,7 +710,7 @@ impl Player {
                     self.ajustes.ilha_solta = None;
                     self.avisar("Ilha travada");
                 } else {
-                    self.avisar("Ilha destravada: arraste para qualquer borda da tela");
+                    self.avisar("Ilha destravada: arraste para qualquer borda ou monitor");
                 }
                 self.salvar();
             }
@@ -707,6 +721,25 @@ impl Player {
                 self.ajustes.ilha_solta = None;
                 self.avisar(format!("A Ilha agora fica {}", borda.nome().to_lowercase()));
                 self.salvar();
+            }
+            Comando::IlhaOutroMonitor => {
+                // O próximo monitor depois do que a Ilha usa agora (o escolhido ou, sem escolha, o da janela).
+                let todos = integracao::ilha::monitores();
+                if todos.len() < 2 {
+                    self.avisar("Só há um monitor ligado");
+                } else {
+                    let atual = self
+                        .ajustes
+                        .ilha_monitor
+                        .clone()
+                        .or_else(|| hwnd_da_janela(window).and_then(integracao::ilha::monitor).map(|m| m.nome));
+                    let i =
+                        todos.iter().position(|m| Some(&m.nome) == atual.as_ref()).map_or(0, |i| (i + 1) % todos.len());
+                    self.ajustes.ilha = true;
+                    self.ajustes.ilha_monitor = Some(todos[i].nome.clone());
+                    self.avisar(format!("A Ilha foi para o monitor {}", i + 1));
+                    self.salvar();
+                }
             }
             Comando::TrocarTamanhoIlha(t) => {
                 if self.ajustes.ilha_tamanho != t {
@@ -800,6 +833,8 @@ impl Player {
                     self.paleta = None;
                 } else if self.ficha.is_some() {
                     self.fechar_ficha();
+                } else if self.letra_cheia {
+                    self.letra_cheia = false;
                 } else if self.mini {
                     self.alternar_mini(window);
                 } else if window.is_fullscreen() {
@@ -848,6 +883,17 @@ impl Player {
             Comando::TrocarLado => {
                 self.ajustes.painel_a_esquerda = !self.ajustes.painel_a_esquerda;
                 self.salvar();
+            }
+            Comando::LetraTelaCheia => {
+                if self.mini {
+                    self.alternar_mini(window);
+                }
+                self.letra_cheia = !self.letra_cheia;
+                if self.letra_cheia && !self.modulo_ativo(crate::catalogo::ID_LETRA) {
+                    self.avisar("O módulo Letra está desligado na Loja");
+                }
+                self.paleta = None;
+                self.edicao = false;
             }
         }
         cx.notify();
@@ -1003,6 +1049,51 @@ impl Player {
         .detach();
     }
 
+    /// Escolhe a pasta de um provedor para instalar.
+    pub(crate) fn escolher_provedor(&mut self, cx: &mut Context<Self>) {
+        let escolha = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Instalar provedor".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(pastas))) = escolha.await {
+                let _ = this.update(cx, |this, cx| {
+                    for pasta in pastas {
+                        this.local.remoto.instalar(pasta);
+                    }
+                    this.avisar("Instalando o provedor...");
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Liga ou desliga um provedor e guarda a escolha.
+    pub(crate) fn ligar_provedor(&mut self, servico: &str, ligado: bool) {
+        self.local.remoto.ligar(servico, ligado);
+        self.ajustes.provedores_desligados = self.local.remoto.desligados();
+        self.salvar();
+    }
+
+    /// Abre a pasta dos provedores no Explorador (criando-a, se ainda não existe).
+    pub(crate) fn abrir_pasta_dos_provedores(&mut self) {
+        let Some(pasta) = self.local.remoto.pasta().map(std::path::Path::to_path_buf) else { return };
+        if let Err(e) = std::fs::create_dir_all(&pasta) {
+            self.avisar(format!("Não deu para criar a pasta dos provedores ({e})"));
+            return;
+        }
+        #[cfg(windows)]
+        let aberto = std::process::Command::new("explorer").arg(&pasta).spawn();
+        #[cfg(not(windows))]
+        let aberto = std::process::Command::new("xdg-open").arg(&pasta).spawn();
+        if let Err(e) = aberto {
+            log::warn!("não deu para abrir a pasta dos provedores: {e}");
+        }
+    }
+
     /// Tecla com a busca de músicas ativa: digitar filtra a lista; Esc ou Enter devolvem os atalhos.
     fn tecla_na_busca_de_musicas(&mut self, ev: &KeyDownEvent, cx: &mut Context<Self>) {
         let k = &ev.keystroke;
@@ -1081,6 +1172,15 @@ impl Player {
         self.situacao = self.escuta.situacao();
         self.apps_com_som = self.escuta.apps();
         self.local.quadro();
+        if let Some(aviso) = self.local.aviso.take() {
+            self.avisar(aviso);
+        }
+        if let Some(aviso) = self.local.remoto.aviso.take() {
+            match self.local.remoto.removido.take() {
+                Some(servico) => self.avisar_com_desfazer(aviso, Desfazer::RestaurarProvedor(servico)),
+                None => self.avisar(aviso),
+            }
+        }
         let outro_mudou = self.ler_outro();
         self.origem_local = self.escolher_origem();
         self.origem_local_fora.store(self.origem_local, std::sync::atomic::Ordering::Release);
@@ -1133,7 +1233,8 @@ impl Player {
             Pedido {
                 painel_aberto: self.ajustes.painel_aberto,
                 gaveta_aberta: self.gaveta_aberta,
-                tela_cheia,
+                // A letra em tela cheia usa o visual na janela inteira, como a tela cheia.
+                tela_cheia: tela_cheia || self.letra_cheia,
                 painel_a_esquerda: self.ajustes.painel_a_esquerda,
                 imersivo: self.imersivo(),
                 mini: self.mini,
@@ -1302,7 +1403,11 @@ impl Render for Player {
         if self.erro_visual.is_some() {
             raiz = raiz.bg(c.parede);
         }
-        raiz = raiz.child(self.ver_heroi(cx));
+        if self.letra_cheia {
+            raiz = raiz.child(self.ver_letra_cheia(cx));
+        } else {
+            raiz = raiz.child(self.ver_heroi(cx));
+        }
         if !a.so_visual {
             raiz = raiz.child(self.ver_topo(cx)).child(self.ver_dock(cx));
             if let Some(r) = a.trilho {
