@@ -11,7 +11,6 @@ use gpui::{
     App, Bounds, Context, Div, ElementInputHandler, EntityInputHandler, FontWeight, Pixels, Point, SharedString,
     UTF16Selection, Window, canvas, div, prelude::*, px,
 };
-use nucleo::Pagina;
 use std::ops::Range;
 
 /// Quantas letras um campo aceita.
@@ -52,13 +51,15 @@ pub fn trocar(s: &mut String, faixa: Range<usize>, novo: &str) -> Range<usize> {
 impl Player {
     /// O texto do campo que está recebendo o teclado agora.
     fn campo_ativo(&mut self) -> Option<&mut String> {
+        // Lido antes: depois dos empréstimos abaixo, `self` não pode mais ser lido inteiro.
+        let na_biblioteca = self.campo_de_busca_ativo();
         if let Some(j) = self.janela_playlist.as_mut() {
             return Some(&mut j.nome);
         }
         if let Some(p) = self.paleta.as_mut() {
             return Some(&mut p.consulta);
         }
-        if self.buscando_musicas && self.pagina == Pagina::Biblioteca {
+        if self.buscando_musicas && na_biblioteca {
             return Some(&mut self.busca_musicas);
         }
         None

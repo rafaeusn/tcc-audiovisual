@@ -17,6 +17,12 @@ const DOCK_EMPILHADO: f32 = 116.0;
 const NAV: f32 = 64.0;
 const PAINEL: f32 = 380.0;
 const PAINEL_ESTREITO: f32 = 340.0;
+/// Largura da lateral da Estante (espaços, páginas e salvos).
+pub const LATERAL: f32 = 248.0;
+/// Largura do trilho "Tocando" da Estante (o visual no alto, os módulos embaixo).
+pub const TOCANDO: f32 = 340.0;
+/// Altura da faixa do visual no empilhado da Estante.
+pub const FAIXA_DO_VISUAL: f32 = 72.0;
 /// Raio dos cantos do visual, do painel e do dock.
 pub const RAIO: f32 = 28.0;
 
@@ -65,6 +71,10 @@ pub struct Pedido {
     /// Uma página com lista (Biblioteca, Loja) está aberta. No empilhado ela fica com o meio inteiro: no cartão de
     /// cima, dividindo a altura com o painel, a lista nem aparecia.
     pub pagina_cheia: bool,
+    /// O layout Estante (lateral, folha e trilho Tocando).
+    pub estante: bool,
+    /// Na Estante, quanto o visual já cresceu até a janela inteira (0 no trilho, 1 na janela).
+    pub expansao: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,6 +96,10 @@ pub struct Arranjo {
     pub gaveta: Option<Ret>,
     pub dock: Ret,
     pub nav: Option<Ret>,
+    /// Estante: a lateral com os espaços, as páginas e os salvos.
+    pub lateral: Option<Ret>,
+    /// Estante: o trilho Tocando inteiro (o visual no alto dele; os módulos em `painel` ou `gaveta`).
+    pub tocando: Option<Ret>,
     /// Tamanho-base do título da faixa sobre o visual (64, 40 ou 28). O herói ainda encolhe nomes compridos.
     pub titulo: f32,
     /// Janela baixa: números e espaços menores.
@@ -129,9 +143,15 @@ pub fn calcular(largura: f32, altura: f32, p: Pedido) -> Arranjo {
             gaveta: None,
             dock: vazio,
             nav: None,
+            lateral: None,
+            tocando: None,
             titulo,
             compacto,
         };
+    }
+
+    if p.estante {
+        return estante(janela, modo, compacto, p);
     }
 
     if modo == Modo::Empilhado {
@@ -164,6 +184,8 @@ pub fn calcular(largura: f32, altura: f32, p: Pedido) -> Arranjo {
             gaveta: None,
             dock,
             nav: Some(nav),
+            lateral: None,
+            tocando: None,
             titulo: 28.0,
             compacto,
         };
@@ -210,12 +232,113 @@ pub fn calcular(largura: f32, altura: f32, p: Pedido) -> Arranjo {
         gaveta,
         dock,
         nav: None,
+        lateral: None,
+        tocando: None,
         titulo,
         compacto,
     }
 }
 
+/// O retângulo do visual crescendo até a janela (`e` de 0 a 1), com o raio sumindo.
+fn expandir(visual: Ret, raio: f32, janela: Ret, e: f32) -> (Ret, f32) {
+    let e = if e.is_finite() { e.clamp(0.0, 1.0) } else { 0.0 };
+    if e >= 0.999 {
+        return (janela, 0.0);
+    }
+    let entre = |a: f32, b: f32| a + (b - a) * e;
+    let r = Ret::new(
+        entre(visual.x, janela.x),
+        entre(visual.y, janela.y),
+        entre(visual.w, janela.w),
+        entre(visual.h, janela.h),
+    );
+    (r, raio * (1.0 - e))
+}
+
+/// A altura do visual no alto do trilho Tocando: um retângulo 4:3, sem passar de 45% da altura.
+fn altura_do_visual(largura: f32, altura: f32) -> f32 {
+    (largura * 0.75).min(altura * 0.45).max(120.0)
+}
+
+/// O layout Estante. Largo: lateral, folha (o herói) e o trilho Tocando, com o dock sob a folha e o trilho. Gaveta:
+/// a barra de ícones e o Tocando como gaveta (o visual só com ela aberta). Empilhado: a faixa do visual acima do
+/// dock.
+fn estante(janela: Ret, modo: Modo, compacto: bool, p: Pedido) -> Arranjo {
+    let (w, h) = (janela.w, janela.h);
+    let y0 = TOPO + MARGEM;
+    let vazio = Ret::default();
+    let base = Arranjo {
+        modo,
+        janela,
+        so_visual: false,
+        trilho: None,
+        topo: Ret::new(MARGEM, 0.0, w - 2.0 * MARGEM, TOPO),
+        heroi: vazio,
+        visual: vazio,
+        raio_visual: RAIO,
+        painel: None,
+        gaveta: None,
+        dock: vazio,
+        nav: None,
+        lateral: None,
+        tocando: None,
+        titulo: 40.0,
+        compacto,
+    };
+    let mut a = match modo {
+        Modo::Largo => {
+            let lateral = Ret::new(MARGEM, y0, LATERAL, (h - y0 - MARGEM).max(120.0));
+            let x1 = lateral.x + lateral.w + MARGEM;
+            let dock = Ret::new(x1, h - MARGEM - DOCK, w - MARGEM - x1, DOCK);
+            let meio_h = (dock.y - MARGEM - y0).max(120.0);
+            let tocando = Ret::new(w - MARGEM - TOCANDO, y0, TOCANDO, meio_h);
+            let heroi = Ret::new(x1, y0, (tocando.x - MARGEM - x1).max(120.0), meio_h);
+            let visual = Ret::new(tocando.x, y0, TOCANDO, altura_do_visual(TOCANDO, meio_h));
+            let resto = tocando.base() - visual.base() - MARGEM;
+            let painel = (resto >= 80.0).then(|| Ret::new(tocando.x, visual.base() + MARGEM, TOCANDO, resto));
+            Arranjo { lateral: Some(lateral), tocando: Some(tocando), heroi, visual, painel, dock, ..base }
+        }
+        Modo::Gaveta => {
+            let x0 = TRILHO + MARGEM;
+            let conteudo_w = w - x0 - MARGEM;
+            let dock = Ret::new(x0, h - MARGEM - DOCK, conteudo_w, DOCK);
+            let meio_h = (dock.y - MARGEM - y0).max(120.0);
+            let heroi = Ret::new(x0, y0, conteudo_w, meio_h);
+            let topo = Ret::new(TRILHO, 0.0, w - TRILHO - MARGEM, TOPO);
+            let trilho = Some(Ret::new(0.0, 0.0, TRILHO, h));
+            if p.gaveta_aberta {
+                let gw = TOCANDO.min(conteudo_w - 48.0);
+                let tocando = Ret::new(w - MARGEM - gw, y0, gw, meio_h);
+                let visual = Ret::new(tocando.x, y0, gw, altura_do_visual(gw, meio_h));
+                let resto = tocando.base() - visual.base() - MARGEM;
+                let gaveta = (resto >= 80.0).then(|| Ret::new(tocando.x, visual.base() + MARGEM, gw, resto));
+                // A gaveta empurra a página (não abre por cima): o visual é desenhado por baixo da interface.
+                let heroi = Ret::new(x0, y0, (tocando.x - MARGEM - x0).max(120.0), meio_h);
+                Arranjo { trilho, topo, heroi, dock, tocando: Some(tocando), visual, gaveta, ..base }
+            } else {
+                Arranjo { trilho, topo, heroi, dock, ..base }
+            }
+        }
+        Modo::Empilhado => {
+            let lw = w - 2.0 * MARGEM;
+            let nav = Ret::new(0.0, h - NAV, w, NAV);
+            let dock = Ret::new(MARGEM, nav.y - 8.0 - DOCK_EMPILHADO, lw, DOCK_EMPILHADO);
+            let faixa = Ret::new(MARGEM, dock.y - 8.0 - FAIXA_DO_VISUAL, lw, FAIXA_DO_VISUAL);
+            // Janela baixa: sem lugar para a página e a faixa, a faixa sai (a página, opaca, a cobriria).
+            let cabe = faixa.y - 8.0 - y0 >= 160.0;
+            let (visual, fim) = if cabe { (faixa, faixa.y - 8.0) } else { (vazio, dock.y - 8.0) };
+            let heroi = Ret::new(MARGEM, y0, lw, (fim - y0).max(120.0));
+            Arranjo { heroi, visual, dock, nav: Some(nav), titulo: 28.0, raio_visual: 16.0, ..base }
+        }
+    };
+    let (visual, raio) = expandir(a.visual, a.raio_visual, janela, p.expansao);
+    a.visual = visual;
+    a.raio_visual = raio;
+    a
+}
+
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod testes {
     use super::*;
 
@@ -227,6 +350,8 @@ mod testes {
         imersivo: false,
         mini: false,
         pagina_cheia: false,
+        estante: false,
+        expansao: 0.0,
     };
 
     fn dentro(r: &Ret, j: &Ret) -> bool {
@@ -235,6 +360,79 @@ mod testes {
 
     fn cruza(a: &Ret, b: &Ret) -> bool {
         a.x < b.direita() - 0.01 && b.x < a.direita() - 0.01 && a.y < b.base() - 0.01 && b.y < a.base() - 0.01
+    }
+
+    const ESTANTE: Pedido = Pedido { estante: true, ..ABERTO };
+
+    #[test]
+    fn estante_larga_tem_lateral_folha_e_trilho() {
+        let a = calcular(1440.0, 900.0, ESTANTE);
+        assert_eq!(a.modo, Modo::Largo);
+        let lateral = a.lateral.expect("lateral");
+        let tocando = a.tocando.expect("trilho Tocando");
+        let painel = a.painel.expect("módulos embaixo do visual");
+        assert!(a.trilho.is_none(), "a lateral toma o lugar da barra de ícones");
+        assert_eq!(lateral.w, LATERAL);
+        assert_eq!(tocando.w, TOCANDO);
+        for r in [&lateral, &a.heroi, &tocando, &a.dock, &a.topo] {
+            assert!(dentro(r, &a.janela), "{r:?}");
+        }
+        assert!(!cruza(&lateral, &a.heroi) && !cruza(&a.heroi, &tocando) && !cruza(&lateral, &a.dock));
+        assert!(!cruza(&a.heroi, &a.dock) && !cruza(&tocando, &a.dock));
+        // O visual no alto do trilho, os módulos embaixo dele, dentro do trilho.
+        assert_eq!((a.visual.x, a.visual.y, a.visual.w), (tocando.x, tocando.y, tocando.w));
+        assert!(a.visual.h >= 180.0 && a.visual.h < tocando.h / 2.0, "{:?}", a.visual);
+        assert!(!cruza(&a.visual, &painel) && painel.base() <= tocando.base() + 0.01 && painel.y >= a.visual.base());
+        // O dock fica sob a folha e o trilho, não sob a lateral.
+        assert_eq!(a.dock.x, a.heroi.x);
+        assert!((a.dock.x + a.dock.w - (tocando.x + tocando.w)).abs() < 0.01);
+        assert!(!a.so_visual);
+    }
+
+    #[test]
+    fn estante_gaveta_visual_so_com_a_gaveta() {
+        let fechada = calcular(1000.0, 800.0, ESTANTE);
+        assert_eq!(fechada.modo, Modo::Gaveta);
+        assert!(fechada.trilho.is_some() && fechada.lateral.is_none(), "o trilho de ícones");
+        assert!(fechada.visual.w < 2.0, "fechada, o visual não aparece: {:?}", fechada.visual);
+        let aberta = calcular(1000.0, 800.0, Pedido { gaveta_aberta: true, ..ESTANTE });
+        let tocando = aberta.tocando.expect("o Tocando na gaveta");
+        let modulos = aberta.gaveta.expect("os módulos na gaveta");
+        assert_eq!((aberta.visual.x, aberta.visual.y, aberta.visual.w), (tocando.x, tocando.y, tocando.w));
+        assert!(aberta.visual.h >= 160.0);
+        assert!(modulos.y >= aberta.visual.base() && modulos.base() <= tocando.base() + 0.01);
+        // A gaveta empurra a página: por cima da folha o visual (desenhado por baixo da interface) não apareceria.
+        assert!(!cruza(&aberta.heroi, &tocando), "{:?} {:?}", aberta.heroi, tocando);
+        assert!(aberta.heroi.w < fechada.heroi.w);
+    }
+
+    #[test]
+    fn estante_empilhada_visual_acima_do_dock() {
+        let a = calcular(600.0, 900.0, ESTANTE);
+        assert_eq!(a.modo, Modo::Empilhado);
+        assert!(a.painel.is_none() && a.lateral.is_none());
+        assert_eq!(a.visual.h, FAIXA_DO_VISUAL);
+        assert!(a.visual.base() <= a.dock.y && !cruza(&a.visual, &a.heroi) && !cruza(&a.visual, &a.dock));
+        assert!(a.heroi.h > 300.0, "a página fica com o resto: {:?}", a.heroi);
+        assert!(a.nav.is_some());
+        // Janela baixa: a faixa sai, para a página (opaca) não cobrir o visual.
+        let baixa = calcular(600.0, 420.0, ESTANTE);
+        assert!(baixa.visual.w < 2.0 || !cruza(&baixa.visual, &baixa.heroi), "{:?} {:?}", baixa.visual, baixa.heroi);
+    }
+
+    #[test]
+    fn expandir_leva_o_visual_a_janela_inteira() {
+        let base = calcular(1440.0, 900.0, ESTANTE);
+        let meio = calcular(1440.0, 900.0, Pedido { expansao: 0.5, ..ESTANTE });
+        let fim = calcular(1440.0, 900.0, Pedido { expansao: 1.0, ..ESTANTE });
+        assert!(meio.visual.w > base.visual.w && meio.visual.w < 1440.0);
+        assert!(meio.raio_visual < base.raio_visual);
+        assert_eq!(fim.visual, fim.janela);
+        assert_eq!(fim.raio_visual, 0.0);
+        assert_eq!(meio.heroi, base.heroi, "as outras regiões ficam onde estão (só esmaecem)");
+        // O empilhado também expande da faixa.
+        let e = calcular(600.0, 900.0, Pedido { expansao: 1.0, ..ESTANTE });
+        assert_eq!(e.visual, e.janela);
     }
 
     #[test]

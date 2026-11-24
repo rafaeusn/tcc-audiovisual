@@ -33,3 +33,9 @@ temp/
 
 # Corpus de calibração (baixado por tools/fetch_corpus.mjs)
 corpus/
+
+# Mockups das conversas de design (superpowers)
+.superpowers/
+
+# Credenciais cifradas dos provedores (nunca no git)
+*.dpapi

@@ -123,6 +123,7 @@ fn desenhar(modelo: Modelo, retratos: &[Retrato], seguro: bool, nome: &str) -> O
                 fundo: wgpu::Color { r: 0.0, g: 0.0, b: 0.2, a: 1.0 },
                 retangulo: (margem, margem, W as f32 - 2.0 * margem, H as f32 - 2.0 * margem),
                 raio: 28.0,
+                interno: None,
             },
             &Quadro { retrato: r, modelo, cores: None, modo_seguro: seguro, cinza: false, dt: PASSO },
         );

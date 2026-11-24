@@ -10,6 +10,7 @@ use crate::diario::{Diario, Periodo, Relatorio};
 use crate::escuta::{Escuta, Fonte, Situacao};
 use crate::gravador::Gravador;
 use crate::letrista::{self, Letrista};
+use crate::navegacao::Rota;
 use crate::tema::{self, Cores};
 use analise::{Retrato, Rotulo};
 use gpui::{
@@ -27,6 +28,8 @@ use std::time::{Duration, Instant};
 mod letra;
 mod loja;
 mod midia;
+mod navegar;
+mod salvos;
 mod volume;
 
 /// Colunas do medidor de energia do painel (uma a cada meio segundo).
@@ -106,8 +109,8 @@ pub enum Desfazer {
 
 /// A janela de pôr músicas numa playlist (ou criar uma nova).
 pub struct JanelaPlaylist {
-    /// As músicas que vão entrar.
-    pub musicas: Vec<std::path::PathBuf>,
+    /// As músicas que vão entrar (do computador ou de um serviço).
+    pub musicas: Vec<biblioteca::Musica>,
     /// O nome da playlist nova, enquanto a pessoa escreve.
     pub nome: String,
     /// Só criar (sem músicas) e abrir a playlist nova.
@@ -173,7 +176,40 @@ pub struct Player {
     pub(crate) erro_visual: Option<SharedString>,
     pub(crate) placa: SharedString,
     proxima_camada: Instant,
-    pub(crate) pagina: Pagina,
+    /// As páginas abertas: o espaço e a pilha de cada um. Sem página, só o visual (no Palco).
+    pub(crate) nav: crate::navegacao::Navegacao,
+    /// A paleta de onde a transição de cor do espaço parte (a da hora da troca).
+    pub(crate) paleta_de: crate::espacos::PaletaDoEspaco,
+    /// A paleta deste quadro (a transição anda uma vez por quadro, em `quadro`).
+    pub(crate) paleta_agora: crate::espacos::PaletaDoEspaco,
+    /// As capas das páginas dos serviços (baixadas e guardadas em disco).
+    pub(crate) capas: crate::capas::Capas,
+    /// Curtidas e salvos que a biblioteca ainda não confirmou (para dois cliques rápidos ficarem no último).
+    pub(crate) salvos_pendentes: std::collections::HashMap<salvos::ChaveDoSalvo, bool>,
+    /// As faixas e os álbuns da página de detalhe aberta, já separados (uma playlist longa não é copiada a cada quadro).
+    pub(crate) detalhe_lido: RefCell<Option<salvos::DetalheLido>>,
+    /// Já disse, nesta abertura, por onde as músicas de um serviço sem áudio tocam.
+    pub(crate) avisou_do_match: bool,
+    /// Já disse, nesta abertura, que o serviço tocava em outro app e para ao tocar aqui.
+    pub(crate) avisou_que_toma_a_vez: bool,
+    /// A biblioteca do espaço aberto, já junta.
+    pub(crate) biblioteca_lida: RefCell<Option<salvos::BibliotecaLida>>,
+    /// Quantos cartões as grades longas (Biblioteca do serviço, discografia) mostram; cresce no "Ver mais".
+    pub(crate) cartoes_a_mostrar: usize,
+    /// O tipo escolhido na Biblioteca de um serviço (`None` = tudo).
+    pub(crate) filtro_salvos: Option<biblioteca::TipoSalvo>,
+    /// O chip escolhido na página Busca.
+    pub(crate) filtro_busca: crate::paginas::FiltroDaBusca,
+    /// A aba aberta na página da faixa.
+    pub(crate) aba_da_faixa: crate::paginas::AbaDaFaixa,
+    /// O cartão sob o mouse (a capa dele cresce).
+    pub(crate) cartao_sob: Option<usize>,
+    /// De que lado a página nova entra (1 = da direita, ao abrir; -1 = da esquerda, ao voltar).
+    pub(crate) entrada_de: f32,
+    /// A página do artista mostra todas as populares.
+    pub(crate) ver_mais: bool,
+    /// A rolagem de cada prateleira de cartões.
+    pub(crate) rolagens: std::cell::RefCell<std::collections::HashMap<usize, gpui::ScrollHandle>>,
     /// A seção aberta na página Configurações.
     pub(crate) secao_config: crate::ui::configuracoes::Secao,
     pub(crate) gaveta_aberta: bool,
@@ -274,7 +310,6 @@ pub struct Player {
     pub(crate) origem_local: bool,
     /// A mesma informação, para a bandeja e os botões da barra de tarefas (que agem fora da interface).
     origem_local_fora: Arc<std::sync::atomic::AtomicBool>,
-    pub(crate) aba_biblioteca: AbaBiblioteca,
     /// O texto da busca de músicas e se o teclado está nela.
     pub(crate) busca_musicas: String,
     pub(crate) buscando_musicas: bool,
@@ -309,6 +344,10 @@ pub struct Player {
     sistema: Option<integracao::Integracao>,
     /// A janela está no modo mini (pequena, no canto, por cima das outras).
     pub(crate) mini: bool,
+    /// Estante: o visual do trilho crescido até a janela inteira.
+    pub(crate) expandido: bool,
+    /// Quanto o visual já cresceu (0 no trilho, 1 na janela), lido pela tela para esmaecer o resto.
+    pub(crate) expansao: f32,
     /// Quando o estado (som, mídia, threads) foi atualizado pela última vez: a Ilha também atualiza, e a guarda
     /// evita rodar duas vezes no mesmo quadro.
     estado_em: Instant,
@@ -338,7 +377,7 @@ impl Player {
         let vp = window.viewport_size();
         let tamanho = (f32::from(vp.width), f32::from(vp.height));
         let cores = tema::cores(ajustes.tema);
-        let fonte = fonte_de(&ajustes.escuta_app, false);
+        let fonte = fonte_de(&ajustes.escuta_app, false, None);
         let (escuta, sessao) = (Escuta::iniciar(fonte.clone()), Sessao::iniciar());
         sessao.filtrar(&filtro_de(&ajustes.escuta_app));
         let diario = Diario::iniciar(banco.clone(), sessao.leitor(), escuta.leitor());
@@ -365,7 +404,23 @@ impl Player {
             erro_visual: None,
             placa: "".into(),
             proxima_camada: agora,
-            pagina: Pagina::Inicio,
+            nav: crate::navegacao::Navegacao::new(crate::navegacao::Espaco::da_chave(&ajustes.espaco)),
+            paleta_de: crate::espacos::neutra(&tema::cores(ajustes.tema)),
+            paleta_agora: crate::espacos::neutra(&tema::cores(ajustes.tema)),
+            capas: crate::capas::Capas::iniciar(nucleo::caminhos::pasta_dados().ok().map(|d| d.join("capas"))),
+            salvos_pendentes: std::collections::HashMap::new(),
+            detalhe_lido: RefCell::new(None),
+            avisou_do_match: false,
+            avisou_que_toma_a_vez: false,
+            biblioteca_lida: RefCell::new(None),
+            cartoes_a_mostrar: crate::ui::CARTOES_POR_VEZ,
+            filtro_salvos: None,
+            filtro_busca: crate::paginas::FiltroDaBusca::Tudo,
+            aba_da_faixa: crate::paginas::AbaDaFaixa::Letra,
+            cartao_sob: None,
+            entrada_de: 1.0,
+            ver_mais: false,
+            rolagens: std::cell::RefCell::default(),
             secao_config: Default::default(),
             gaveta_aberta: false,
             arranjo: arranjo::calcular(
@@ -441,7 +496,6 @@ impl Player {
             ultimo_foi_local: false,
             origem_local: false,
             origem_local_fora: Arc::default(),
-            aba_biblioteca: AbaBiblioteca::default(),
             busca_musicas: String::new(),
             buscando_musicas: false,
             marcado: None,
@@ -459,6 +513,8 @@ impl Player {
             ponteiro_em: agora,
             sistema: None,
             mini: false,
+            expandido: false,
+            expansao: 0.0,
             estado_em: agora,
             ilha: None,
             abrindo_ilha: false,
@@ -545,7 +601,11 @@ impl Player {
         }
         self.mini = alvo;
         if alvo {
-            self.pagina = Pagina::Inicio;
+            // Na Estante a página fica aberta (a janela mini só não a mostra).
+            if self.ajustes.layout != nucleo::Layout::Estante {
+                self.nav.fechar();
+            }
+            self.expandido = false;
             self.gaveta_aberta = false;
             self.paleta = None;
             // Janelas por cima e campos de texto não cabem na janela mini.
@@ -588,7 +648,7 @@ impl Player {
 
     /// A skin imersiva depende do visual: sem ele, a interface volta à forma padrão.
     pub(crate) fn imersivo(&self) -> bool {
-        self.ajustes.skin == Skin::Imersiva && self.erro_visual.is_none()
+        self.ajustes.skin == Skin::Imersiva && self.erro_visual.is_none() && !self.estante()
     }
 
     pub(crate) fn cores(&self) -> Cores {
@@ -790,8 +850,10 @@ impl Player {
                 if self.mini {
                     self.alternar_mini(window);
                 }
-                self.executar(Comando::AbrirPagina(Pagina::Biblioteca), window, cx);
+                // A Fila abre no espaço em que a pessoa está (num serviço, não vira a Biblioteca dele).
                 self.abrir_aba_da_biblioteca(AbaBiblioteca::Fila);
+                self.fechar_gaveta_fora_da_estante();
+                self.edicao = false;
             }
             Comando::AlternarDicas => {
                 self.ajustes.dicas = !self.ajustes.dicas;
@@ -801,6 +863,9 @@ impl Player {
                     "Dicas dos botões desligadas"
                 });
                 self.salvar();
+            }
+            Comando::AlternarPainel if self.estante() && self.arranjo.modo == Modo::Largo => {
+                self.avisar("Na Estante larga o trilho Tocando fica sempre à vista");
             }
             Comando::AlternarPainel => match self.arranjo.modo {
                 Modo::Largo => {
@@ -812,8 +877,12 @@ impl Player {
             },
             Comando::AbrirAjustes => {
                 self.buscando_musicas = false;
-                self.pagina = if self.pagina == Pagina::Configuracoes { Pagina::Inicio } else { Pagina::Configuracoes };
-                self.gaveta_aberta = false;
+                if self.pagina() == Pagina::Configuracoes {
+                    self.fechar_folha();
+                } else {
+                    self.abrir_rota(Rota::Configuracoes);
+                }
+                self.fechar_gaveta_fora_da_estante();
                 self.edicao = false;
             }
             Comando::AbrirPagina(p) => {
@@ -821,8 +890,13 @@ impl Player {
                     self.pedir_relatorio();
                 }
                 self.buscando_musicas = false;
-                self.pagina = p;
-                self.gaveta_aberta = false;
+                match p {
+                    Pagina::Inicio => self.fechar_folha(),
+                    Pagina::Biblioteca => self.abrir_rota(Rota::Biblioteca),
+                    Pagina::Loja => self.abrir_rota(Rota::Loja),
+                    Pagina::Configuracoes => self.abrir_rota(Rota::Configuracoes),
+                }
+                self.fechar_gaveta_fora_da_estante();
                 self.edicao = false;
             }
             Comando::AbrirPaleta => {
@@ -835,6 +909,8 @@ impl Player {
                     self.fechar_ficha();
                 } else if self.letra_cheia {
                     self.letra_cheia = false;
+                } else if self.expandido {
+                    self.expandido = false;
                 } else if self.mini {
                     self.alternar_mini(window);
                 } else if window.is_fullscreen() {
@@ -843,8 +919,34 @@ impl Player {
                     self.sair_da_edicao();
                 } else if self.gaveta_aberta {
                     self.gaveta_aberta = false;
-                } else if self.pagina != Pagina::Inicio {
-                    self.pagina = Pagina::Inicio;
+                } else if self.estante() {
+                    // Na Estante a página não fecha: o Esc volta uma página.
+                    if self.pode_navegar() && self.nav.voltar_sem_vazias() {
+                        self.depois_de_navegar();
+                        self.entrada_de = -1.0;
+                    }
+                } else if self.pagina() != Pagina::Inicio {
+                    self.nav.fechar();
+                }
+            }
+            Comando::TrocarLayout => {
+                let novo = match self.ajustes.layout {
+                    nucleo::Layout::Palco => nucleo::Layout::Estante,
+                    nucleo::Layout::Estante => nucleo::Layout::Palco,
+                };
+                self.trocar_layout(novo);
+            }
+            Comando::ExpandirVisual => {
+                if self.mini || self.letra_cheia || window.is_fullscreen() {
+                    // O visual já está na janela inteira.
+                } else if self.estante() {
+                    self.expandido = !self.expandido;
+                    if self.expandido && self.arranjo.modo == Modo::Gaveta {
+                        // Na gaveta, o visual cresce do Tocando: fechado, ele abre (e fica aberto ao encolher).
+                        self.gaveta_aberta = true;
+                    }
+                } else {
+                    self.avisar("Expandir o visual vale no layout Estante (Ctrl L troca o layout)");
                 }
             }
             Comando::TrocarVisual(m) => self.trocar_visual(m),
@@ -875,7 +977,9 @@ impl Player {
                     self.avisar("Saia da tela cheia para personalizar o layout");
                 } else {
                     self.edicao = true;
-                    self.pagina = Pagina::Inicio;
+                    if !self.estante() {
+                        self.nav.fechar();
+                    }
                     self.mostrar_painel();
                     self.avisar("Modo edição: arraste um módulo sobre outro para trocar");
                 }
@@ -883,6 +987,35 @@ impl Player {
             Comando::TrocarLado => {
                 self.ajustes.painel_a_esquerda = !self.ajustes.painel_a_esquerda;
                 self.salvar();
+            }
+            Comando::Voltar => {
+                let voltou = self.pode_navegar()
+                    && if self.estante() { self.nav.voltar_sem_vazias() } else { self.nav.voltar() };
+                if voltou {
+                    self.depois_de_navegar();
+                    self.entrada_de = -1.0;
+                }
+            }
+            Comando::Avancar => {
+                let foi = self.pode_navegar()
+                    && if self.estante() { self.nav.avancar_sem_vazias() } else { self.nav.avancar() };
+                if foi {
+                    self.depois_de_navegar();
+                }
+            }
+            Comando::AbrirEspaco(n) => {
+                if let Some((e, _)) = self.espacos().get(usize::from(n)).cloned() {
+                    self.trocar_espaco(e);
+                }
+            }
+            Comando::CurtirFaixa => self.curtir_a_que_toca(),
+            Comando::FixarPagina => self.fixar_a_pagina(),
+            Comando::ProximoEspaco => {
+                let espacos = self.espacos();
+                let i = espacos.iter().position(|(e, _)| e == self.nav.espaco()).map_or(0, |i| (i + 1) % espacos.len());
+                if let Some((e, _)) = espacos.get(i).cloned() {
+                    self.trocar_espaco(e);
+                }
             }
             Comando::LetraTelaCheia => {
                 if self.mini {
@@ -998,11 +1131,12 @@ impl Player {
     // ------------------------------------------------------------------ músicas locais
 
     pub(crate) fn abrir_aba_da_biblioteca(&mut self, aba: AbaBiblioteca) {
-        self.aba_biblioteca = aba;
         self.buscando_musicas = false;
-        if aba == AbaBiblioteca::Historico {
-            self.pedir_relatorio();
-        }
+        self.abrir_rota(match aba {
+            AbaBiblioteca::Musicas => Rota::Biblioteca,
+            AbaBiblioteca::Fila => Rota::Fila,
+            AbaBiblioteca::Historico => Rota::Historico,
+        });
     }
 
     /// Toca a música `i` da lista da Biblioteca; as seguintes viram a fila.
@@ -1040,7 +1174,6 @@ impl Player {
                     for pasta in pastas {
                         this.local.adicionar_pasta(pasta);
                     }
-                    this.aba_biblioteca = AbaBiblioteca::Musicas;
                     this.avisar("Lendo as músicas da pasta...");
                     cx.notify();
                 });
@@ -1148,7 +1281,7 @@ impl Player {
             self.versao_diario = versao;
             self.relatorio = self.diario.relatorio();
         }
-        if self.pagina == Pagina::Biblioteca {
+        if self.pagina() == Pagina::Biblioteca {
             self.t_relatorio += dt;
             if self.t_relatorio >= RENOVAR_RESUMO_S {
                 self.pedir_relatorio();
@@ -1172,6 +1305,9 @@ impl Player {
         self.situacao = self.escuta.situacao();
         self.apps_com_som = self.escuta.apps();
         self.local.quadro();
+        self.conferir_espaco();
+        self.conferir_salvos_pendentes();
+        self.pedir_paginas_da_rota();
         if let Some(aviso) = self.local.aviso.take() {
             self.avisar(aviso);
         }
@@ -1185,7 +1321,8 @@ impl Player {
         self.origem_local = self.escolher_origem();
         self.origem_local_fora.store(self.origem_local, std::sync::atomic::Ordering::Release);
         // Com um app escolhido, a música local ainda move o visual: enquanto ela é a origem, a escuta ouve o Player.
-        let fonte = fonte_de(&self.ajustes.escuta_app, self.origem_local);
+        let processo = self.local.processo_externo();
+        let fonte = fonte_de(&self.ajustes.escuta_app, self.origem_local, processo.as_deref());
         if fonte != self.fonte_pedida {
             self.escuta.escolher(fonte.clone());
             self.fonte_pedida = fonte;
@@ -1223,10 +1360,22 @@ impl Player {
         // Com "Efeitos de animação" desligado no Windows ou o modo seguro, nada desliza: vai direto ao fim.
         self.anim.quadro(dt, self.movimento_reduzido || self.ajustes.modo_seguro);
         self.atualizar_estado();
+        self.atualizar_paleta();
 
         let vp = window.viewport_size();
         let (w, h) = (f32::from(vp.width), f32::from(vp.height));
         let tela_cheia = window.is_fullscreen();
+        // A Estante sempre mostra uma página; o visual do trilho cresce até a janela numa mola curta.
+        let estante = self.estante();
+        if estante {
+            self.nav.garantir_pagina();
+        } else {
+            self.expandido = false;
+        }
+        let expansao = self.anim.seguir(("estante-expande", 0), f32::from(u8::from(self.expandido)), 0.32);
+        // No fim da expansão, o arranjo é o da tela cheia (o herói com o título grande).
+        let expandido_de_vez = estante && self.expandido && expansao >= 0.999;
+        self.expansao = if estante { expansao } else { 0.0 };
         self.arranjo = arranjo::calcular(
             w,
             h,
@@ -1234,11 +1383,13 @@ impl Player {
                 painel_aberto: self.ajustes.painel_aberto,
                 gaveta_aberta: self.gaveta_aberta,
                 // A letra em tela cheia usa o visual na janela inteira, como a tela cheia.
-                tela_cheia: tela_cheia || self.letra_cheia,
+                tela_cheia: tela_cheia || self.letra_cheia || expandido_de_vez,
                 painel_a_esquerda: self.ajustes.painel_a_esquerda,
                 imersivo: self.imersivo(),
                 mini: self.mini,
-                pagina_cheia: matches!(self.pagina, Pagina::Biblioteca | Pagina::Loja),
+                pagina_cheia: matches!(self.pagina(), Pagina::Biblioteca | Pagina::Loja),
+                estante,
+                expansao,
             },
         );
         if self.arranjo.modo != Modo::Gaveta {
@@ -1298,11 +1449,18 @@ impl Player {
             self.tecla_na_janela_playlist(ev, cx);
             return;
         }
-        if self.buscando_musicas && self.pagina == Pagina::Biblioteca {
+        // Alt ← e Alt → (voltar e avançar) valem também com o teclado no campo de busca.
+        let m = &ev.keystroke.modifiers;
+        if m.alt && !m.shift && !m.control {
+            if let Some(comando) = Comando::do_atalho_alt(ev.keystroke.key.as_str()) {
+                self.executar(comando, window, cx);
+            }
+            return;
+        }
+        if self.campo_de_busca_ativo() {
             self.tecla_na_busca_de_musicas(ev, cx);
             return;
         }
-        let m = &ev.keystroke.modifiers;
         if m.alt || m.shift {
             return;
         }
@@ -1319,8 +1477,11 @@ impl Player {
 }
 
 /// A fonte do Modo Escuta para o app escolhido nos ajustes (`""` = todo o som). Com um app escolhido e uma
-/// música local tocando, ouve o próprio Player.
-fn fonte_de(exe: &str, local_tocando: bool) -> Fonte {
+/// música local tocando, ouve o próprio Player, ou o `processo` que faz o som dela (o Soloist).
+fn fonte_de(exe: &str, local_tocando: bool, processo: Option<&str>) -> Fonte {
+    if let Some(processo) = processo.filter(|_| local_tocando && !exe.is_empty()) {
+        return Fonte::App(processo.to_string());
+    }
     match (exe.is_empty(), local_tocando) {
         (true, _) => Fonte::Tudo,
         (false, true) => Fonte::Proprio,
@@ -1403,12 +1564,15 @@ impl Render for Player {
         if self.erro_visual.is_some() {
             raiz = raiz.bg(c.parede);
         }
+        let estante = self.estante();
         if self.letra_cheia {
             raiz = raiz.child(self.ver_letra_cheia(cx));
+        } else if estante && !a.so_visual {
+            raiz = raiz.child(self.ver_estante(cx));
         } else {
             raiz = raiz.child(self.ver_heroi(cx));
         }
-        if !a.so_visual {
+        if !a.so_visual && !estante {
             raiz = raiz.child(self.ver_topo(cx)).child(self.ver_dock(cx));
             if let Some(r) = a.trilho {
                 raiz = raiz.child(self.ver_trilho(r, cx));
@@ -1451,6 +1615,19 @@ impl Render for Player {
                             });
                         }
                     });
+                    // Os botões "voltar" e "avançar" do mouse navegam as páginas, como no navegador.
+                    let ao_navegar = entidade.clone();
+                    window.on_mouse_event(move |ev: &gpui::MouseDownEvent, fase, window, cx| {
+                        if fase != DispatchPhase::Bubble {
+                            return;
+                        }
+                        let comando = match ev.button {
+                            gpui::MouseButton::Navigate(gpui::NavigationDirection::Back) => Comando::Voltar,
+                            gpui::MouseButton::Navigate(gpui::NavigationDirection::Forward) => Comando::Avancar,
+                            _ => return,
+                        };
+                        let _ = ao_navegar.update(cx, |this, cx| this.executar(comando, window, cx));
+                    });
                     let ao_soltar = entidade.clone();
                     window.on_mouse_event(move |_: &MouseUpEvent, fase, _, cx| {
                         if fase == DispatchPhase::Bubble {
@@ -1471,7 +1648,15 @@ impl Render for Player {
 
 #[cfg(test)]
 mod testes_da_origem {
-    use super::origem_e_local;
+    use super::{Fonte, fonte_de, origem_e_local};
+
+    #[test]
+    fn o_visual_ouve_quem_faz_o_som() {
+        assert_eq!(fonte_de("", true, Some("soloist.exe")), Fonte::Tudo, "quem ouve tudo continua ouvindo tudo");
+        assert_eq!(fonte_de("opera.exe", true, Some("soloist.exe")), Fonte::App("soloist.exe".into()));
+        assert_eq!(fonte_de("opera.exe", true, None), Fonte::Proprio);
+        assert_eq!(fonte_de("opera.exe", false, Some("soloist.exe")), Fonte::App("opera.exe".into()));
+    }
 
     #[test]
     fn quem_toca_vence_e_o_ultimo_desempata() {

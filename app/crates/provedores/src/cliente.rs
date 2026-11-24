@@ -186,6 +186,49 @@ impl Provedor {
     }
 }
 
+impl Provedor {
+    /// Como está a conta (só para provedores com a capacidade `Conta`).
+    pub fn conta(&self, prazo: Duration) -> Resultado<crate::protocolo::Conta> {
+        match self.pedir(CorpoDoPedido::Conta, prazo)? {
+            CorpoDaResposta::Conta(c) => Ok(c),
+            outra => Err(inesperada(&outra)),
+        }
+    }
+
+    /// Começa o login; o provedor continua sozinho (pergunte [`Self::conta`] depois).
+    pub fn entrar(&self, prazo: Duration) -> Resultado<()> {
+        match self.pedir(CorpoDoPedido::Entrar, prazo)? {
+            CorpoDaResposta::Ok => Ok(()),
+            outra => Err(inesperada(&outra)),
+        }
+    }
+
+    pub fn sair(&self, prazo: Duration) -> Resultado<()> {
+        match self.pedir(CorpoDoPedido::Sair, prazo)? {
+            CorpoDaResposta::Ok => Ok(()),
+            outra => Err(inesperada(&outra)),
+        }
+    }
+}
+
+impl Provedor {
+    /// Como está o tocador do serviço (só para provedores com a capacidade `TocaSozinho`).
+    pub fn tocador(&self, prazo: Duration) -> Resultado<crate::protocolo::EstadoDoTocador> {
+        match self.pedir(CorpoDoPedido::Tocador, prazo)? {
+            CorpoDaResposta::Tocador(e) => Ok(*e),
+            outra => Err(inesperada(&outra)),
+        }
+    }
+
+    /// Um pedido que só responde `ok` (ligar ou desligar o tocador, mandar nele).
+    pub fn ordenar(&self, pedido: CorpoDoPedido, prazo: Duration) -> Resultado<()> {
+        match self.pedir(pedido, prazo)? {
+            CorpoDaResposta::Ok => Ok(()),
+            outra => Err(inesperada(&outra)),
+        }
+    }
+}
+
 fn inesperada(r: &CorpoDaResposta) -> Erro {
     erro(format!("resposta inesperada do provedor: {r:?}"))
 }

@@ -26,7 +26,7 @@ fn nome_curto(dispositivo: &str) -> &str {
 
 impl Player {
     fn pagina_ativa(&self, p: Pagina) -> bool {
-        self.pagina == p
+        self.pagina() == p
     }
 
     fn item_do_trilho(
@@ -83,7 +83,7 @@ impl Player {
             .child(self.item_do_trilho(
                 "nav-ajustes",
                 "icones/sliders.svg",
-                self.pagina == Pagina::Configuracoes,
+                self.pagina() == Pagina::Configuracoes,
                 Comando::AbrirAjustes,
                 cx,
             ))
@@ -302,7 +302,7 @@ impl Player {
             "bnav-ajustes",
             "Configurações",
             "icones/sliders.svg",
-            self.pagina == Pagina::Configuracoes,
+            self.pagina() == Pagina::Configuracoes,
             Comando::AbrirAjustes,
         ));
         for (id, rotulo, caminho, ativo, comando) in itens {

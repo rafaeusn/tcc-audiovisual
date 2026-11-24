@@ -38,6 +38,34 @@ const RUIDO: [&str; 22] = [
     "prod",
 ];
 
+/// Abaixo disto, o título (ou o artista) é outro, por mais que o resto bata.
+const TITULO_MINIMO: f32 = 0.5;
+const ARTISTA_MINIMO: f32 = 0.3;
+
+/// O que faz de um título outra gravação, pelo número do grupo (palavras já sem acento).
+const VERSOES: [(&str, u8); 14] = [
+    ("ao vivo", 0),
+    ("live", 0),
+    ("karaoke", 1),
+    ("instrumental", 1),
+    ("acustico", 2),
+    ("acustica", 2),
+    ("acoustic", 2),
+    ("unplugged", 2),
+    ("remix", 3),
+    ("sped up", 4),
+    ("nightcore", 4),
+    ("slowed", 5),
+    ("cover", 6),
+    ("tribute", 6),
+];
+
+/// Os grupos de versão que aparecem num título (minúsculo e sem acento), como bits.
+fn versoes(titulo: &str) -> u8 {
+    let palavras = format!(" {} ", titulo.split(|c: char| !c.is_alphanumeric()).collect::<Vec<_>>().join(" "));
+    VERSOES.iter().filter(|(v, _)| palavras.contains(&format!(" {v} "))).fold(0, |b, (_, g)| b | (1 << g))
+}
+
 fn e_ruido(trecho: &str) -> bool {
     let t = trecho.to_lowercase();
     let palavras: Vec<&str> = t.split(|c: char| !c.is_alphanumeric()).filter(|p| !p.is_empty()).collect();
@@ -52,7 +80,7 @@ fn e_ruido(trecho: &str) -> bool {
 }
 
 /// Tira os parênteses e colchetes de ruído e o "feat." do título.
-fn sem_ruido(titulo: &str) -> String {
+pub fn sem_ruido(titulo: &str) -> String {
     let mut saida = String::with_capacity(titulo.len());
     let mut resto = titulo;
     while let Some(i) = resto.find(['(', '[']) {
@@ -172,7 +200,22 @@ fn nota_sem_isrc(alvo: &Faixa, candidato: &Faixa) -> f32 {
     }
     let duracao = nota_da_duracao(alvo.duracao_s, candidato.duracao_s);
     let bonus = if candidato.video { 0.0 } else { 0.05 };
-    (0.45 * titulo + 0.35 * artista + 0.20 * duracao + bonus).clamp(0.0, 1.0)
+    let nota = (0.45 * titulo + 0.35 * artista + 0.20 * duracao + bonus).clamp(0.0, 1.0);
+    // Em alfabetos diferentes os nomes não se comparam: o título e a duração decidem.
+    let latino = |nomes: &[String]| nomes.iter().any(|n| n.chars().any(|c| c.is_ascii_alphabetic()));
+    let comparaveis =
+        !artistas_alvo.is_empty() && !artistas_cand.is_empty() && latino(&artistas_alvo) == latino(&artistas_cand);
+    let outro_artista = artista < ARTISTA_MINIMO && comparaveis;
+    // (No título inteiro: o ruído pode levar o "live" junto.)
+    let outra_versao = versoes(&normalizar(&alvo.titulo)) != versoes(&normalizar(&candidato.titulo));
+    let desconto = if titulo < TITULO_MINIMO || outro_artista {
+        0.4
+    } else if outra_versao {
+        0.25
+    } else {
+        0.0
+    };
+    (nota - desconto).max(0.0)
 }
 
 /// O melhor par para `alvo` entre os `candidatos` (o índice e a nota), se algum passar de [`LIMIAR`].
@@ -236,6 +279,40 @@ mod testes {
         assert!(nota(&alvo, &outra) < LIMIAR, "{}", nota(&alvo, &outra));
         assert!(nota(&alvo, &remix) < nota(&alvo, &f("One More Time", &["Daft Punk"], 321.0, false)));
         assert!(nota(&alvo, &homonima) < LIMIAR, "{}", nota(&alvo, &homonima));
+    }
+
+    #[test]
+    fn a_mesma_duracao_nao_basta() {
+        let alvo = f("Canção do Mar", &["Ana"], 200.0, false);
+        let outra = f("Fim de Tarde", &["Ana"], 200.0, false);
+        assert!(nota(&alvo, &outra) < LIMIAR, "outra música do artista: {}", nota(&alvo, &outra));
+        let cover = f("Canção do Mar", &["Grupo Tributo"], 200.0, false);
+        assert!(nota(&alvo, &cover) < LIMIAR, "outro artista: {}", nota(&alvo, &cover));
+        // Nomes em alfabetos diferentes não dá para comparar: o título e a duração decidem.
+        let sem = f("Canção do Mar", &[], 200.0, false);
+        assert!(nota(&alvo, &sem) >= LIMIAR, "sem artista para comparar: {}", nota(&alvo, &sem));
+        let japones = f("Lemon", &["米津玄師"], 255.0, false);
+        let latino = f("Lemon", &["Kenshi Yonezu"], 255.0, false);
+        assert!(nota(&japones, &latino) >= LIMIAR, "{}", nota(&japones, &latino));
+    }
+
+    #[test]
+    fn karaoke_e_ao_vivo_nao_passam_pela_original() {
+        let alvo = f("Canção do Mar", &["Ana"], 200.0, false);
+        for outra in ["Canção do Mar (Karaoke Version)", "Canção do Mar (Ao Vivo)", "Canção do Mar - Instrumental"]
+        {
+            let c = f(outra, &["Ana"], 230.0, false);
+            assert!(nota(&alvo, &c) < LIMIAR, "{outra}: {}", nota(&alvo, &c));
+        }
+        let ao_vivo = f("Canção do Mar - Ao Vivo", &["Ana"], 230.0, false);
+        assert!(nota(&ao_vivo, &f("Canção do Mar (Live)", &["Ana"], 230.0, false)) >= LIMIAR, "as duas ao vivo");
+        assert!(nota(&ao_vivo, &alvo) < LIMIAR);
+        let remaster = f("Canção do Mar - Live / Remastered 2011", &["Ana"], 230.0, false);
+        assert!(nota(&remaster, &alvo) < LIMIAR, "o ruído não leva o \"live\" junto: {}", nota(&remaster, &alvo));
+        let video = f("Canção do Mar (Official Live Video)", &["Ana"], 230.0, true);
+        assert!(nota(&alvo, &video) < LIMIAR, "{}", nota(&alvo, &video));
+        let olive = f("Olive", &["Ana"], 200.0, false);
+        assert!(nota(&olive, &olive) >= LIMIAR, "\"live\" só como palavra inteira");
     }
 
     #[test]

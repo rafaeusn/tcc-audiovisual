@@ -130,6 +130,25 @@ impl Skin {
     }
 }
 
+/// O layout da janela. `Palco`: o visual no centro e as páginas numa folha por cima dele. `Estante`: a lateral com
+/// os espaços e os salvos, a página no meio e o trilho "Tocando" com o visual ao vivo.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Palco,
+    Estante,
+}
+
+impl Layout {
+    pub fn nome(self) -> &'static str {
+        match self {
+            Self::Palco => "Palco",
+            Self::Estante => "Estante",
+        }
+    }
+}
+
 /// A borda da tela onde a Ilha fica presa: no topo (o padrão), embaixo ou de um dos lados, como uma barra lateral.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -269,6 +288,8 @@ pub struct Ajustes {
     /// Painel à esquerda do visual (o padrão é à direita).
     pub painel_a_esquerda: bool,
     pub skin: Skin,
+    /// Palco ou Estante.
+    pub layout: Layout,
     /// Parar o mouse num botão de ícone mostra o nome e o atalho dele.
     pub dicas: bool,
     /// Fechar a janela só a esconde: o app continua na bandeja, ouvindo e contando o histórico.
@@ -308,6 +329,8 @@ pub struct Ajustes {
     pub letra_idioma: String,
     /// Mostrar, embaixo de cada linha, a letra em letras latinas (coreano, japonês, chinês, russo, grego...).
     pub letra_romanizar: bool,
+    /// O espaço aberto da última vez (`tudo`, `computador` ou `servico:<nome>`).
+    pub espaco: String,
     /// Músicas do computador: segundos de crossfade entre uma e outra (0 = sem; a troca continua sem intervalo).
     pub crossfade_s: f32,
     /// Igualar o volume entre as músicas pelo ReplayGain do arquivo.
@@ -336,6 +359,7 @@ impl Default for Ajustes {
             painel_aberto: true,
             painel_a_esquerda: false,
             skin: Skin::Padrao,
+            layout: Layout::Palco,
             dicas: true,
             fechar_na_bandeja: false,
             ilha: false,
@@ -355,6 +379,7 @@ impl Default for Ajustes {
             letra_traduzir: false,
             letra_idioma: "pt".into(),
             letra_romanizar: false,
+            espaco: "tudo".into(),
             crossfade_s: 0.0,
             volume_igualado: true,
             eq_ligado: false,
@@ -403,6 +428,12 @@ impl Ajustes {
             } else {
                 "pt".into()
             };
+        let espaco = self.espaco.trim();
+        self.espaco = if (1..=80).contains(&espaco.len()) && !espaco.chars().any(char::is_control) {
+            espaco.to_string()
+        } else {
+            "tudo".into()
+        };
         if self.paleta >= PALETAS.len() {
             self.paleta = Self::default().paleta;
         }
@@ -485,6 +516,16 @@ mod testes {
     }
 
     #[test]
+    fn layout_padrao_e_palco_e_volta_do_toml() {
+        assert_eq!(Ajustes::default().layout, Layout::Palco);
+        let lido: Ajustes = toml::from_str("layout = \"estante\"").expect("toml");
+        assert_eq!(lido.layout, Layout::Estante);
+        let escrito = toml::to_string(&Ajustes { layout: Layout::Estante, ..Default::default() }).expect("toml");
+        assert!(escrito.contains("layout = \"estante\""), "{escrito}");
+        assert_eq!(Layout::Estante.nome(), "Estante");
+    }
+
+    #[test]
     fn ida_e_volta() {
         let pasta = pasta_temp("ida");
         let arq = pasta.join("ajustes.toml");
@@ -545,6 +586,11 @@ mod testes {
         assert_eq!(desligados.validar().provedores_desligados, vec!["a", "b"], "sem vazio nem repetido");
         let sem_nome = Ajustes { ilha_monitor: Some("  ".into()), ..Default::default() }.validar();
         assert_eq!(sem_nome.ilha_monitor, None, "monitor sem nome volta a ser o da janela principal");
+        assert_eq!(Ajustes::default().espaco, "tudo");
+        let espaco = Ajustes { espaco: " servico:youtube-music ".into(), ..Default::default() }.validar();
+        assert_eq!(espaco.espaco, "servico:youtube-music");
+        let comprido = Ajustes { espaco: "x".repeat(500), ..Default::default() }.validar();
+        assert_eq!(comprido.espaco, "tudo", "chave estragada volta a Tudo");
     }
 
     #[test]

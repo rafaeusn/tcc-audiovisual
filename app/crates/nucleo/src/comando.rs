@@ -66,10 +66,27 @@ pub enum Comando {
     AbrirFila,
     /// A letra em tela cheia, sobre o visual.
     LetraTelaCheia,
+    /// A página anterior (como no navegador).
+    Voltar,
+    /// A página seguinte, depois de voltar.
+    Avancar,
+    /// O próximo espaço (Tudo, o computador, cada serviço).
+    ProximoEspaco,
+    /// Troca entre os layouts Palco e Estante.
+    TrocarLayout,
+    /// Na Estante, o visual do trilho cresce até a janela inteira (e volta).
+    ExpandirVisual,
+    /// Abre o espaço desta posição na fileira (0 = Tudo, 1 = o computador, depois os serviços). `Ctrl 1` a `Ctrl 9`;
+    /// fica fora de `TODOS` (seriam nove linhas iguais na barra de comandos).
+    AbrirEspaco(u8),
+    /// Curte (ou descurte) a faixa de serviço que está tocando.
+    CurtirFaixa,
+    /// Fixa (ou desfixa) na lateral o álbum, a playlist, o artista ou a faixa da página aberta (e salva, se não estava).
+    FixarPagina,
 }
 
 impl Comando {
-    pub const TODOS: [Comando; 49] = [
+    pub const TODOS: [Comando; 56] = [
         Comando::TocarPausar,
         Comando::Proxima,
         Comando::Anterior,
@@ -119,6 +136,13 @@ impl Comando {
         Comando::AlternarRepetir,
         Comando::AbrirFila,
         Comando::LetraTelaCheia,
+        Comando::Voltar,
+        Comando::Avancar,
+        Comando::ProximoEspaco,
+        Comando::TrocarLayout,
+        Comando::ExpandirVisual,
+        Comando::CurtirFaixa,
+        Comando::FixarPagina,
     ];
 
     /// Nome estável do comando (o mesmo que atalhos e skins vão usar).
@@ -174,6 +198,14 @@ impl Comando {
             Self::AlternarRepetir => "player.repetir",
             Self::AbrirFila => "pagina.fila",
             Self::LetraTelaCheia => "letra.tela-cheia",
+            Self::Voltar => "pagina.voltar",
+            Self::Avancar => "pagina.avancar",
+            Self::ProximoEspaco => "espaco.proximo",
+            Self::TrocarLayout => "layout.trocar",
+            Self::ExpandirVisual => "visual.expandir",
+            Self::AbrirEspaco(_) => "espaco.abrir",
+            Self::CurtirFaixa => "player.curtir",
+            Self::FixarPagina => "pagina.fixar",
         }
     }
 
@@ -230,6 +262,14 @@ impl Comando {
             Self::AlternarRepetir => "Repetir: nada, a fila ou a música",
             Self::AbrirFila => "Ver a fila de músicas",
             Self::LetraTelaCheia => "Letra em tela cheia",
+            Self::Voltar => "Voltar à página anterior",
+            Self::Avancar => "Avançar para a página seguinte",
+            Self::ProximoEspaco => "Ir para o próximo espaço",
+            Self::TrocarLayout => "Trocar o layout (Palco ou Estante)",
+            Self::ExpandirVisual => "Expandir o visual (Estante)",
+            Self::AbrirEspaco(_) => "Ir para o espaço da posição",
+            Self::CurtirFaixa => "Curtir a faixa que toca",
+            Self::FixarPagina => "Fixar na lateral o que está aberto",
         }
     }
 
@@ -243,7 +283,8 @@ impl Comando {
             | Self::DiminuirVolume
             | Self::Silenciar
             | Self::AlternarAleatorio
-            | Self::AlternarRepetir => "Player",
+            | Self::AlternarRepetir
+            | Self::CurtirFaixa => "Player",
             Self::TrocarVisual(_)
             | Self::ProximoVisual
             | Self::AlternarCoresReativas
@@ -263,13 +304,20 @@ impl Comando {
             | Self::CentralizarIlha
             | Self::AlternarTravaIlha
             | Self::PrenderIlha(_)
-            | Self::IlhaOutroMonitor => "Layout",
+            | Self::IlhaOutroMonitor
+            | Self::TrocarLayout
+            | Self::ExpandirVisual => "Layout",
             Self::AbrirAjustes
             | Self::AbrirPagina(_)
             | Self::AbrirPaleta
             | Self::Fechar
             | Self::CopiarDiagnostico
-            | Self::AbrirFila => "Ir para",
+            | Self::AbrirFila
+            | Self::Voltar
+            | Self::Avancar
+            | Self::ProximoEspaco
+            | Self::AbrirEspaco(_)
+            | Self::FixarPagina => "Ir para",
         }
     }
 
@@ -300,10 +348,39 @@ impl Comando {
             Self::AlternarRepetir => &["R"],
             Self::AbrirFila => &["Q"],
             Self::LetraTelaCheia => &["Y"],
+            Self::Voltar => &["Alt", "←"],
+            Self::Avancar => &["Alt", "→"],
+            Self::ProximoEspaco => &["Ctrl", "Tab"],
+            Self::TrocarLayout => &["Ctrl", "L"],
+            Self::ExpandirVisual => &["X"],
+            Self::CurtirFaixa => &["C"],
+            Self::AbrirEspaco(n) => {
+                const NUMEROS: [&[&str]; 9] = [
+                    &["Ctrl", "1"],
+                    &["Ctrl", "2"],
+                    &["Ctrl", "3"],
+                    &["Ctrl", "4"],
+                    &["Ctrl", "5"],
+                    &["Ctrl", "6"],
+                    &["Ctrl", "7"],
+                    &["Ctrl", "8"],
+                    &["Ctrl", "9"],
+                ];
+                NUMEROS.get(usize::from(n)).copied().unwrap_or(&[])
+            }
             Self::AbrirPagina(Pagina::Inicio) => &["H"],
             Self::AbrirPagina(Pagina::Biblioteca) => &["B"],
             Self::AbrirPagina(Pagina::Loja) => &["L"],
             _ => &[],
+        }
+    }
+
+    /// Atalho com Alt → comando (voltar e avançar, como no navegador).
+    pub fn do_atalho_alt(tecla: &str) -> Option<Self> {
+        match tecla {
+            "left" => Some(Self::Voltar),
+            "right" => Some(Self::Avancar),
+            _ => None,
         }
     }
 
@@ -334,6 +411,11 @@ impl Comando {
             ("r", false) => Self::AlternarRepetir,
             ("q", false) => Self::AbrirFila,
             ("y", false) => Self::LetraTelaCheia,
+            ("tab", true) => Self::ProximoEspaco,
+            ("l", true) => Self::TrocarLayout,
+            ("x", false) => Self::ExpandirVisual,
+            ("c", false) => Self::CurtirFaixa,
+            (n, true) if n.len() == 1 && ("1"..="9").contains(&n) => Self::AbrirEspaco(n.as_bytes()[0] - b'1'),
             ("h", false) => Self::AbrirPagina(Pagina::Inicio),
             ("b", false) => Self::AbrirPagina(Pagina::Biblioteca),
             ("l", false) => Self::AbrirPagina(Pagina::Loja),
@@ -350,10 +432,19 @@ mod testes {
     fn atalhos_conhecidos() {
         assert_eq!(Comando::do_atalho("space", false), Some(Comando::TocarPausar));
         assert_eq!(Comando::do_atalho("2", false), Some(Comando::TrocarVisual(Modelo::Fluxo)));
-        assert_eq!(Comando::do_atalho("2", true), None);
+        // Ctrl com número abre o espaço daquela posição (sem tirar 1, 2 e 3 dos visuais).
+        assert_eq!(Comando::do_atalho("2", true), Some(Comando::AbrirEspaco(1)));
+        assert_eq!(Comando::do_atalho("1", true), Some(Comando::AbrirEspaco(0)));
+        assert_eq!(Comando::do_atalho("9", true), Some(Comando::AbrirEspaco(8)));
+        assert_eq!(Comando::do_atalho("0", true), None);
+        assert_eq!(Comando::AbrirEspaco(3).teclas(), ["Ctrl", "4"]);
+        assert_eq!(Comando::do_atalho("c", false), Some(Comando::CurtirFaixa));
         assert_eq!(Comando::do_atalho("k", true), Some(Comando::AbrirPaleta));
         assert_eq!(Comando::do_atalho("q", false), Some(Comando::AbrirFila));
         assert_eq!(Comando::do_atalho("z", false), None);
+        assert_eq!(Comando::do_atalho_alt("left"), Some(Comando::Voltar));
+        assert_eq!(Comando::do_atalho_alt("right"), Some(Comando::Avancar));
+        assert_eq!(Comando::do_atalho("tab", true), Some(Comando::ProximoEspaco));
     }
 
     #[test]
@@ -399,9 +490,14 @@ mod testes {
             ("h", false),
             ("b", false),
             ("l", false),
+            ("tab", true),
+            ("l", true),
+            ("x", false),
+            ("c", false),
         ]
         .into_iter()
         .filter_map(|(t, c)| Comando::do_atalho(t, c))
+        .chain(["left", "right"].into_iter().filter_map(Comando::do_atalho_alt))
         .collect();
         for c in Comando::TODOS {
             assert_eq!(!c.teclas().is_empty(), alcancaveis.contains(&c), "{}", c.id());

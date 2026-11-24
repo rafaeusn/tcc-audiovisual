@@ -33,8 +33,25 @@ pub struct Alvo {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AlvoRemoto {
     pub isrc: Option<String>,
+    /// A gravação que toca de verdade, quando é um par de outro serviço (`servico:id`): a análise é dela.
+    pub par: Option<String>,
     /// O endereço do áudio, quando o provedor já deu.
     pub endereco: Option<tocador::Endereco>,
+}
+
+/// A chave da análise de uma faixa de provedor no cache e o ISRC dela.
+fn chave_da_analise<'a>(caminho: &'a str, r: &'a AlvoRemoto) -> (&'a str, Option<&'a str>) {
+    match &r.par {
+        Some(par) => (par, None),
+        None => (caminho, r.isrc.as_deref()),
+    }
+}
+
+/// As faixas cujo par mudou: a análise que está à mão é de outra gravação.
+fn pares_trocados(antes: &[Alvo], depois: &[Alvo]) -> Vec<PathBuf> {
+    let par = |a: &Alvo| a.remota.as_ref().and_then(|r| r.par.clone());
+    let trocou = |d: &&Alvo| antes.iter().any(|a| a.caminho == d.caminho && par(a) != par(d));
+    depois.iter().filter(trocou).map(|d| d.caminho.clone()).collect()
 }
 
 impl Alvo {
@@ -215,7 +232,9 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
             match pedido {
                 Pedido::Prioridade(lista) => {
                     // Só as da prioridade ficam à mão: as outras saem da memória (continuam no cache).
-                    trancar(&c.prontas).retain(|k, _| lista.iter().any(|a| &a.caminho == k));
+                    let trocados = pares_trocados(&prioridade, &lista);
+                    trancar(&c.prontas).retain(|k, _| lista.iter().any(|a| &a.caminho == k) && !trocados.contains(k));
+                    falharam.retain(|k| !trocados.contains(k));
                     prioridade = lista;
                     aguardando.clear();
                 }
@@ -237,18 +256,19 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
             })
             .cloned();
         if let Some(Alvo { caminho, remota: Some(r) }) = falta {
-            let chave = caminho.to_string_lossy().into_owned();
-            let analise = match (cache.ler_faixa(&chave, r.isrc.as_deref()), r.endereco) {
+            let faixa = caminho.to_string_lossy().into_owned();
+            let (chave, isrc) = chave_da_analise(&faixa, &r);
+            let analise = match (cache.ler_faixa(chave, isrc), r.endereco.clone()) {
                 (Some(a), _) => Some(a),
                 (None, None) => {
                     aguardando.insert(caminho.clone());
                     None
                 }
                 (None, Some(endereco)) => {
-                    publicar_progresso(Some(chave.clone()), total_biblioteca);
+                    publicar_progresso(Some(faixa.clone()), total_biblioteca);
                     match preanalise::analisar_origem(&tocador::Origem::Endereco(endereco), &c.parar) {
                         Ok(a) => {
-                            if let Err(e) = cache.guardar_faixa(&chave, r.isrc.as_deref(), &a) {
+                            if let Err(e) = cache.guardar_faixa(chave, isrc, &a) {
                                 log::warn!("análise não guardada: {e}");
                             }
                             Some(a)
@@ -334,5 +354,29 @@ fn rodar(arquivo: &Path, fila: &Receiver<Pedido>, c: &Compartilhado, mut analisa
         }
         publicar_progresso(None, total_biblioteca);
         std::thread::sleep(FOLGA_DA_BIBLIOTECA);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn a_analise_e_da_gravacao_que_toca() {
+        let alvo = |par: Option<&str>| Alvo {
+            caminho: PathBuf::from("spotify:s1"),
+            remota: Some(AlvoRemoto { isrc: Some("BRXXX2600001".into()), par: par.map(Into::into), endereco: None }),
+        };
+        let direto = alvo(None).remota.expect("remota");
+        assert_eq!(chave_da_analise("spotify:s1", &direto), ("spotify:s1", Some("BRXXX2600001")));
+        let pelo_par = alvo(Some("yt:v1")).remota.expect("remota");
+        assert_eq!(chave_da_analise("spotify:s1", &pelo_par), ("yt:v1", None), "o ISRC é da gravação do outro serviço");
+        let trocou = [PathBuf::from("spotify:s1")];
+        assert_eq!(pares_trocados(&[alvo(Some("yt:v1"))], &[alvo(Some("yt:v2"))]), trocou);
+        assert_eq!(pares_trocados(&[alvo(None)], &[alvo(Some("yt:v1"))]), trocou);
+        assert!(pares_trocados(&[alvo(Some("yt:v1"))], &[alvo(Some("yt:v1"))]).is_empty());
+        assert!(pares_trocados(&[], &[alvo(Some("yt:v1"))]).is_empty(), "faixa nova na fila");
+        assert!(pares_trocados(&[alvo(Some("yt:v1"))], &[]).is_empty());
     }
 }

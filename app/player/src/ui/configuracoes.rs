@@ -21,18 +21,20 @@ pub enum Secao {
     Som,
     Ilha,
     Letras,
+    Servicos,
     Atalhos,
     Sobre,
 }
 
 /// Seção, nome, ícone e o que tem nela.
-const SECOES: [(Secao, &str, &str, &str); 8] = [
+const SECOES: [(Secao, &str, &str, &str); 9] = [
     (Secao::Geral, "Geral", "icones/panel.svg", "Janela, bandeja e dicas dos botões."),
     (Secao::Aparencia, "Aparência", "icones/tone.svg", "Tema, skin, cores e o modo seguro."),
     (Secao::Visual, "Visual", "icones/eye.svg", "Qual visual se move com a música."),
     (Secao::Som, "Som", "icones/wave.svg", "O que o Modo Escuta ouve e como as músicas do computador tocam."),
     (Secao::Ilha, "Ilha", "icones/ilha.svg", "A pílula com o que toca, presa ao topo da tela."),
     (Secao::Letras, "Letras", "icones/lyrics.svg", "De onde vêm as letras, tradução e letras latinas."),
+    (Secao::Servicos, "Serviços", "icones/globe.svg", "As contas e por onde as músicas de cada serviço tocam."),
     (Secao::Atalhos, "Atalhos", "icones/keyboard.svg", "As teclas de cada comando."),
     (Secao::Sobre, "Sobre", "icones/info.svg", "Versão, privacidade e diagnóstico."),
 ];
@@ -41,7 +43,8 @@ impl Player {
     /// Em janela estreita (layout empilhado), as Configurações ocupam a área do painel, e não uma folha por cima
     /// do visual (que ali seria baixa demais).
     pub(crate) fn configuracoes_no_painel(&self) -> bool {
-        self.pagina == Pagina::Configuracoes && self.arranjo.modo == Modo::Empilhado
+        // Na Estante não há painel no empilhado: as Configurações ficam na folha, como as outras páginas.
+        self.pagina() == Pagina::Configuracoes && self.arranjo.modo == Modo::Empilhado && !self.estante()
     }
 
     fn secao_escolhida(&self) -> (usize, &'static str, &'static str) {
@@ -59,6 +62,7 @@ impl Player {
             Secao::Som => vec![b.escuta, b.reproducao],
             Secao::Ilha => vec![self.bloco_ilha(largura, cx)],
             Secao::Letras => vec![self.bloco_letras(largura, cx)],
+            Secao::Servicos => self.bloco_servicos(largura, cx),
             Secao::Atalhos => vec![b.atalhos],
             Secao::Sobre => vec![b.sobre],
         }

@@ -4,6 +4,7 @@
 use super::{Botao, caixa, icone, saida, texto, titulo};
 use crate::app::Player;
 use crate::arranjo::RAIO;
+use crate::navegacao::Rota;
 use gpui::{Context, Div, FontWeight, Hsla, SharedString, WindowControlArea, div, prelude::*, px, rgba};
 use nucleo::{Comando, Pagina};
 
@@ -42,7 +43,8 @@ impl Player {
         }
 
         // Sem a camada do visual: explica o que houve em vez de deixar um buraco.
-        if let Some(erro) = &self.erro_visual {
+        // Na Estante (sem expandir) o herói é a página: o aviso vai para o quadro do visual.
+        if let Some(erro) = self.erro_visual.as_ref().filter(|_| !self.estante() || a.so_visual) {
             return heroi
                 .bg(gpui::black())
                 .flex()
@@ -77,8 +79,8 @@ impl Player {
             .child(
                 texto(14.0).text_color(claro(0xf2)).font_weight(FontWeight::SEMIBOLD).child(self.ajustes.modelo.nome()),
             )
-            // Na janela mini o visual inteiro arrasta a janela: o botão precisa ficar "por cima" disso.
-            .when(self.mini, |d| d.occlude())
+            // Na janela mini (e expandido na Estante) o visual inteiro arrasta a janela: o botão fica "por cima".
+            .when(self.mini || self.expandido, |d| d.occlude())
             .child(self.marca("visual-chip"))
             .on_hover(self.ao_pairar("visual-chip", Some(Comando::ProximoVisual), "", cx))
             .on_click(self.ao_clicar(Comando::ProximoVisual, cx));
@@ -151,6 +153,10 @@ impl Player {
                     )),
                 )
             });
+            if a.so_visual && self.estante() && self.expandido {
+                // Estante com o visual expandido: o botão encolher leva de volta ao trilho (Esc também).
+                topo = topo.child(redondo("visual-encolher", "icones/shrink.svg", 40.0, Comando::ExpandirVisual, cx));
+            }
             if self.mini {
                 // Na janela mini: voltar ao tamanho de antes.
                 topo = topo.opacity(mostra).child(redondo(
@@ -268,7 +274,7 @@ impl Player {
                 )
             });
 
-        if self.pagina != Pagina::Inicio && !a.so_visual && !self.configuracoes_no_painel() {
+        if self.pagina() != Pagina::Inicio && !a.so_visual && !self.configuracoes_no_painel() {
             // Com uma página aberta, o título e os botões do visual saem: só o visual fica por trás da folha.
             heroi.child(self.ver_folha(cx))
         } else {
@@ -276,7 +282,7 @@ impl Player {
             self.anim.definir(("folha", 0), 0.0);
             // Na janela mini não há topo: o visual inteiro arrasta a janela (os botões ficam por cima).
             heroi
-                .when(self.mini, |h| {
+                .when(self.mini || (a.so_visual && self.estante() && self.expandido), |h| {
                     h.child(div().absolute().size_full().occlude().window_control_area(WindowControlArea::Drag))
                 })
                 .child(rodape)
@@ -290,6 +296,7 @@ impl Player {
     /// fechar é imediato.
     fn ver_folha(&self, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
+        let paleta = self.paleta_do_espaco();
         let p = self.anim.seguir(("folha", 0), 1.0, 0.24);
         let folha = div()
             .absolute()
@@ -299,17 +306,46 @@ impl Player {
             .h(px((self.arranjo.heroi.h - 24.0 * (1.0 - p)).max(0.0)))
             .opacity(p)
             .rounded(px(RAIO))
-            .bg(c.folha)
+            .bg(paleta.folha)
+            .border_1()
+            .border_color(paleta.filete)
+            .overflow_hidden()
             .occlude()
             .flex()
-            .flex_col();
-        if self.pagina == Pagina::Loja {
+            .flex_col()
+            // O degradê da cor do espaço no topo, por baixo do conteúdo.
+            .child(div().absolute().top_0().left_0().w_full().h(px(160.0)).bg(gpui::linear_gradient(
+                180.0,
+                gpui::linear_color_stop(paleta.topo, 0.0),
+                gpui::linear_color_stop(crate::ui::com_alfa(paleta.topo, 0.0), 1.0),
+            )))
+            .child(self.ver_topo_da_folha(cx));
+        // As páginas dos serviços.
+        let pagina_de_servico: Option<Div> = match self.nav.atual() {
+            Some(Rota::ParaVoce) => Some(self.ver_para_voce(cx)),
+            Some(Rota::Faixa(item)) => Some(self.ver_faixa(item, cx)),
+            Some(Rota::Busca) => Some(self.ver_busca(cx)),
+            Some(rota @ (Rota::Album(_) | Rota::Playlist(_) | Rota::Artista(_))) => Some(self.ver_detalhe(rota, cx)),
+            Some(Rota::Biblioteca) => match self.nav.espaco() {
+                crate::navegacao::Espaco::Servico(s) => Some(self.ver_biblioteca_do_servico(s, cx)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(pagina) = pagina_de_servico {
+            // Cada página guarda a própria rolagem (abrir um álbum começa do topo; voltar volta onde estava).
+            let chave = self.nav.atual().map_or(0, crate::paginas::chave_da_rota);
+            return folha
+                .child(div().id(("folha-servico", chave)).flex_1().min_h(px(0.0)).overflow_y_scroll().child(pagina));
+        }
+        let folha = folha;
+        if self.pagina() == Pagina::Loja {
             return folha.child(self.ver_loja(cx));
         }
-        if self.pagina == Pagina::Biblioteca {
+        if self.pagina() == Pagina::Biblioteca {
             return folha.child(self.ver_biblioteca(cx));
         }
-        if self.pagina == Pagina::Configuracoes {
+        if self.pagina() == Pagina::Configuracoes {
             return folha.child(self.ver_configuracoes(cx));
         }
         // Página sem conteúdo próprio: diz o que vem, sem inventar dados.

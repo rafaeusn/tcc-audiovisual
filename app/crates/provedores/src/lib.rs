@@ -14,6 +14,9 @@ pub mod servidor;
 pub use casador::{LIMIAR, melhor_par, nota};
 pub use cliente::Provedor;
 pub use modelo::{Album, Artista, Capacidade, Faixa, Item, Playlist, Prateleira};
-pub use protocolo::{Apresentacao, CorpoDaResposta, CorpoDoPedido, Fonte, VERSAO_DO_PROTOCOLO};
+pub use protocolo::{
+    Acao, Apresentacao, Conta, CorpoDaResposta, CorpoDoPedido, EstadoDoTocador, Fonte, Identidade, MAXIMO_DA_LOGO,
+    Segredo, SituacaoDaConta, SituacaoDaFaixa, SituacaoDoTocador, Tocando, VERSAO_DO_PROTOCOLO,
+};
 pub use registro::{Instalado, Manifesto, instalados, instalar, remover, restaurar};
-pub use servidor::{Servico, servir};
+pub use servidor::{EmSegundoPlano, Servico, servir};

@@ -226,9 +226,14 @@ impl Player {
                 cinza: self.ajustes.tema == Tema::Mono,
                 dt,
             };
+            // Enquanto o visual da Estante cresce (ou encolhe), ele é desenhado no tamanho da janela e esticado no
+            // retângulo: recriar os alvos a cada quadro engasgava e apagava o rastro do visual.
+            let animando = self.expansao > 0.0 && self.expansao < 0.999;
+            let interno = animando.then_some((a.janela.w * escala, a.janela.h * escala));
             if let Some(c) = self.camada.as_mut() {
                 c.redimensionar((a.janela.w * escala) as u32, (a.janela.h * escala) as u32);
-                c.desenhar(fundo, (v.x * escala, v.y * escala, v.w * escala, v.h * escala), raio, &quadro);
+                let r = (v.x * escala, v.y * escala, v.w * escala, v.h * escala);
+                c.desenhar_esticado(fundo, r, interno, raio, &quadro);
             }
         }
         #[cfg(not(windows))]
@@ -296,7 +301,7 @@ impl Player {
         }
         self.versao_sessao = versao;
         let mut estado = self.sessao.estado();
-        if estado.faixa.as_ref().is_some_and(|f| f.app == crate::local::NOME_NO_SISTEMA) {
+        if estado.faixa.as_ref().is_some_and(|f| e_o_player(&f.app)) {
             estado = Estado { disponivel: estado.disponivel, ..Default::default() };
         }
         self.outro = estado;
@@ -338,4 +343,9 @@ impl Player {
             self.salvar();
         }
     }
+}
+
+/// A sessão é do Player, ou do Soloist que ele abre: não é "outro app".
+fn e_o_player(app: &str) -> bool {
+    app == crate::local::NOME_NO_SISTEMA || app.to_lowercase().contains("soloist")
 }

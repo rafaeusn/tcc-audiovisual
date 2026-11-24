@@ -46,6 +46,16 @@ pub struct Destino<'a> {
     /// (x, y, largura, altura) em pixels físicos.
     pub retangulo: (f32, f32, f32, f32),
     pub raio: f32,
+    /// Desenhar o visual neste tamanho (pixels físicos) e esticar no retângulo. Enquanto o retângulo anima (o visual
+    /// da Estante crescendo até a janela), os alvos ficam num tamanho só e nada é recriado a cada quadro.
+    pub interno: Option<(f32, f32)>,
+}
+
+/// O tamanho dos alvos: o interno, se pedido, ou o do retângulo; sempre entre 2 e [`LADO_MAXIMO`].
+pub fn tamanho_dos_alvos(lw: f32, lh: f32, interno: Option<(f32, f32)>) -> (u32, u32) {
+    let (w, h) = interno.unwrap_or((lw, lh));
+    let lado = |v: f32| if v.is_finite() { (v.round().max(0.0) as u32).clamp(2, LADO_MAXIMO) } else { 2 };
+    (lado(w), lado(h))
 }
 
 struct Alvo {
@@ -429,7 +439,7 @@ impl Motor {
             queue.submit([enc.finish()]);
             return;
         }
-        let (w, h) = ((lw.round() as u32).clamp(2, LADO_MAXIMO), (lh.round() as u32).clamp(2, LADO_MAXIMO));
+        let (w, h) = tamanho_dos_alvos(lw, lh, destino.interno);
         if self.alvos.as_ref().is_none_or(|a| (a.w, a.h) != (w, h)) {
             self.alvos = Some(self.criar_alvos(device, w, h));
         }
@@ -636,4 +646,18 @@ fn bloco_pontos(q: &QuadroSpectral, luz: &Luz, w: f32, h: f32) -> [f32; 40] {
     b[32..36].copy_from_slice(&[luz.cor_a[0], luz.cor_a[1], luz.cor_a[2], 1.0]);
     b[36..40].copy_from_slice(&[luz.cor_b[0], luz.cor_b[1], luz.cor_b[2], 1.0]);
     b
+}
+
+#[cfg(test)]
+mod testes {
+    use super::tamanho_dos_alvos;
+
+    #[test]
+    fn os_alvos_seguem_o_tamanho_interno_quando_pedido() {
+        assert_eq!(tamanho_dos_alvos(340.4, 255.0, None), (340, 255));
+        // Enquanto o retângulo cresce, os alvos ficam no tamanho final: nada é recriado a cada quadro.
+        assert_eq!(tamanho_dos_alvos(500.0, 400.0, Some((1440.0, 900.0))), (1440, 900));
+        assert_eq!(tamanho_dos_alvos(1.0, 1.0, Some((f32::NAN, 0.0))), (2, 2), "valores estragados não quebram");
+        assert_eq!(tamanho_dos_alvos(99_999.0, 10.0, None), (8192, 10));
+    }
 }

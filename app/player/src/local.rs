@@ -10,9 +10,12 @@
 //!   navegador), com a capa. Com isso o histórico, a letra, o Last.fm e o Discord enxergam a música local do
 //!   mesmo jeito que enxergam a de qualquer app, e as teclas de mídia do teclado funcionam.
 
+use crate::externo::Lido;
 use crate::fila::Fila;
+use crate::pares::QuemToca;
 use biblioteca::{Acervo, Filtro, Grupo, Musica, Origem, Playlist};
 use nucleo::Repetir;
+use provedores::{Acao, EstadoDoTocador, SituacaoDaFaixa, SituacaoDoTocador};
 use sessao::{Capa, Estado, Faixa, Posicao};
 use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig};
 use std::path::{Path, PathBuf};
@@ -59,6 +62,9 @@ pub struct Lista {
     pub varrendo: Option<String>,
     /// O acervo abriu (há pasta de dados).
     pub disponivel: bool,
+    /// O que a pessoa curtiu e salvou dos serviços (os fixados primeiro), com o item já lido (a tela não lê JSON a
+    /// cada quadro; `None` quando os dados estragaram).
+    pub salvos: Arc<Vec<(biblioteca::Salvo, Option<provedores::Item>)>>,
 }
 
 enum Pedido {
@@ -75,14 +81,18 @@ enum Pedido {
     /// Cria uma playlist com estas músicas; com `abrir`, ela passa a ser a mostrada.
     CriarPlaylist {
         nome: String,
-        musicas: Vec<PathBuf>,
+        musicas: Vec<Musica>,
         abrir: bool,
     },
     ApagarPlaylist(i64),
-    AdicionarAPlaylist(i64, Vec<PathBuf>),
+    /// As músicas entram no fim (as de serviço também: o que mostrar delas fica guardado no acervo).
+    AdicionarAPlaylist(i64, Vec<Musica>),
     TirarDaPlaylist(i64, PathBuf),
     /// Desfaz o último "apagar playlist" ou "tirar da playlist".
     Desfazer,
+    Salvar(biblioteca::Salvo),
+    TirarSalvo(String, biblioteca::TipoSalvo, String),
+    Fixar(String, biblioteca::TipoSalvo, String, bool),
 }
 
 /// O que a thread da biblioteca sabe desfazer.
@@ -135,9 +145,31 @@ impl Biblio<'_> {
             caminhos: Arc::new(self.acervo.caminhos().unwrap_or_default()),
             varrendo,
             disponivel: true,
+            salvos: Arc::new(
+                self.acervo
+                    .salvos(None, None)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| {
+                        let item = crate::paginas::item_do_salvo(&s);
+                        (s, item)
+                    })
+                    .collect(),
+            ),
         };
         trocar(self.lista, nova);
         self.versao.fetch_add(1, Ordering::Release);
+    }
+
+    /// Põe as músicas no fim da playlist. As de serviço guardam antes o que mostrar delas.
+    fn por_na_playlist(&mut self, id: i64, musicas: &[Musica]) {
+        if let Err(e) = self.acervo.guardar_remotas(musicas) {
+            log::warn!("não foi possível guardar as faixas de serviço da playlist: {e}");
+        }
+        let caminhos: Vec<PathBuf> = musicas.iter().map(|m| m.caminho.clone()).collect();
+        if let Err(e) = self.acervo.adicionar_a_playlist(id, &caminhos) {
+            log::warn!("não foi possível pôr as músicas na playlist: {e}");
+        }
     }
 
     fn varrer(&mut self, pasta: &Path) {
@@ -198,9 +230,7 @@ impl Biblio<'_> {
             }
             Pedido::CriarPlaylist { nome, musicas, abrir } => match self.acervo.criar_playlist(&nome) {
                 Ok(id) => {
-                    if let Err(e) = self.acervo.adicionar_a_playlist(id, &musicas) {
-                        log::warn!("não foi possível pôr as músicas na playlist: {e}");
-                    }
+                    self.por_na_playlist(id, &musicas);
                     if abrir {
                         self.mostrar(Origem::Playlist(id));
                     }
@@ -217,16 +247,19 @@ impl Biblio<'_> {
                     self.mostrar(Origem::Todas);
                 }
             }
-            Pedido::AdicionarAPlaylist(id, musicas) => {
-                if let Err(e) = self.acervo.adicionar_a_playlist(id, &musicas) {
-                    log::warn!("não foi possível pôr as músicas na playlist: {e}");
-                }
-            }
+            Pedido::AdicionarAPlaylist(id, musicas) => self.por_na_playlist(id, &musicas),
             Pedido::TirarDaPlaylist(id, caminho) => match self.acervo.tirar_da_playlist(id, &caminho) {
                 Ok(Some(posicao)) => self.volta = Some(Volta::TiradaDaPlaylist { id, posicao, caminho }),
                 Ok(None) => {}
                 Err(e) => log::warn!("não foi possível tirar a música da playlist: {e}"),
             },
+            Pedido::Salvar(s) => avisar(self.acervo.salvar(&s), "salvar"),
+            Pedido::TirarSalvo(servico, tipo, id) => {
+                avisar(self.acervo.tirar_salvo(&servico, tipo, &id).map(|_| ()), "tirar dos salvos");
+            }
+            Pedido::Fixar(servico, tipo, id, fixado) => {
+                avisar(self.acervo.fixar(&servico, tipo, &id, fixado).map(|_| ()), "fixar");
+            }
             Pedido::Desfazer => match self.volta.take() {
                 Some(Volta::PlaylistApagada { nome, caminhos, estava_aberta }) => {
                     match self.acervo.criar_playlist(&nome) {
@@ -306,6 +339,91 @@ fn gravar_capa(bytes: &[u8]) -> Option<PathBuf> {
     Some(caminho)
 }
 
+/// A faixa de agora toca no tocador do próprio serviço (o Soloist).
+struct Externo {
+    caminho: PathBuf,
+    servico: String,
+    /// A ordem de tocar: só vale o estado lido depois dela.
+    ordem: u64,
+    /// Já avisou que o serviço passou a tocar em outro aparelho.
+    avisou_outro_lugar: bool,
+    /// O que a pessoa acabou de mandar: fica na tela até a leitura confirmar, ou até esta hora (o tocador do serviço
+    /// demora a obedecer, e a leitura de antes faria o botão voltar atrás).
+    espera: Option<(Esperado, Instant)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Esperado {
+    Tocando(bool),
+    /// Para onde pulou, e quando.
+    Posicao(f64, Instant),
+}
+
+/// Quanto o pedido de pausar, continuar ou pular vale sem confirmação; e o de tocar (o tocador do serviço abre a faixa).
+const PEDIDO_VALE: Duration = Duration::from_millis(1500);
+const TOCAR_VALE: Duration = Duration::from_secs(16);
+/// Quão perto do pedido a posição lida confirma o pulo.
+const PULO_CONFIRMADO_S: f64 = 2.5;
+
+/// A situação lida com o que a pessoa mandou por cima, enquanto não confirma. `None` na espera: confirmou ou venceu.
+fn com_o_pedido(
+    lida: Situacao,
+    espera: Option<(Esperado, Instant)>,
+    agora: Instant,
+) -> (Situacao, Option<(Esperado, Instant)>) {
+    let Some((esperado, ate)) = espera.filter(|(_, ate)| agora < *ate) else { return (lida, None) };
+    match esperado {
+        Esperado::Tocando(t) if lida.tocando == t => (lida, None),
+        Esperado::Tocando(tocando) => (Situacao { tocando, ..lida }, Some((esperado, ate))),
+        Esperado::Posicao(p, quando) => {
+            let anda = if lida.tocando { agora.saturating_duration_since(quando).as_secs_f64() } else { 0.0 };
+            if (lida.posicao_s - (p + anda)).abs() < PULO_CONFIRMADO_S {
+                return (lida, None);
+            }
+            let posicao_s = if lida.duracao_s > 0.0 { (p + anda).min(lida.duracao_s) } else { p + anda };
+            (Situacao { posicao_s, ..lida }, Some((esperado, ate)))
+        }
+    }
+}
+
+/// O que fazer com a faixa do tocador do serviço.
+#[derive(Debug, PartialEq)]
+enum DoExterno {
+    Segue,
+    Acabou,
+    EmOutroLugar,
+    /// Não tocou (o motivo): vai pelo Match.
+    Falhou(String),
+}
+
+/// O que o estado do tocador do serviço quer dizer para a faixa `id`.
+fn do_externo(estado: &EstadoDoTocador, id: &str) -> DoExterno {
+    let motivo = |padrao: &str| estado.erro.clone().unwrap_or_else(|| padrao.to_string());
+    match estado.situacao {
+        SituacaoDoTocador::Pronto | SituacaoDoTocador::Abrindo => {}
+        SituacaoDoTocador::Pareando => return DoExterno::Falhou("falta parear".into()),
+        SituacaoDoTocador::Desligado => return DoExterno::Falhou(motivo("foi desligado")),
+        SituacaoDoTocador::Baixando => return DoExterno::Falhou("está sendo atualizado".into()),
+        SituacaoDoTocador::Falhou => return DoExterno::Falhou(motivo("parou")),
+    }
+    match estado.tocando.as_ref().filter(|t| t.faixa == id) {
+        None => DoExterno::Falhou("parou".into()),
+        Some(t) => match t.situacao {
+            SituacaoDaFaixa::Acabou => DoExterno::Acabou,
+            SituacaoDaFaixa::EmOutroLugar => DoExterno::EmOutroLugar,
+            SituacaoDaFaixa::Falhou => {
+                DoExterno::Falhou(t.erro.clone().unwrap_or_else(|| "não tocou esta faixa".into()))
+            }
+            SituacaoDaFaixa::Carregando | SituacaoDaFaixa::Tocando | SituacaoDaFaixa::Pausada => DoExterno::Segue,
+        },
+    }
+}
+
+/// A faixa que toca no tocador do serviço, no formato da situação do tocador daqui (nunca é aberta).
+fn origem_externa(caminho: &Path) -> tocador::Origem {
+    tocador::Origem::Endereco(tocador::Endereco::novo(format!("tocador-do-servico:{}", caminho.display())))
+}
+
 pub struct Local {
     tocador: Tocador,
     preanalista: crate::preanalista::Preanalista,
@@ -327,6 +445,8 @@ pub struct Local {
     pub remoto: crate::remoto::Remoto,
     /// A música de agora é de um provedor e o endereço dela ainda não chegou (a chave).
     esperando_endereco: Option<PathBuf>,
+    /// A música de agora toca no tocador do próprio serviço.
+    externo: Option<Externo>,
     /// Um aviso para a pessoa (uma faixa de provedor que não tocou): o app mostra e limpa.
     pub aviso: Option<String>,
     /// Arquivos que não abriram, seguidos: com a fila toda ruim, para em vez de rodar sem fim.
@@ -406,6 +526,7 @@ impl Local {
             seguinte_pedida: None,
             remoto,
             esperando_endereco: None,
+            externo: None,
             aviso: None,
             falhas_seguidas: 0,
             volume_igualado: true,
@@ -477,7 +598,7 @@ impl Local {
         self.pedir(Pedido::Atualizar);
     }
 
-    pub fn criar_playlist(&self, nome: String, musicas: Vec<PathBuf>, abrir: bool) {
+    pub fn criar_playlist(&self, nome: String, musicas: Vec<Musica>, abrir: bool) {
         self.pedir(Pedido::CriarPlaylist { nome, musicas, abrir });
     }
 
@@ -485,7 +606,31 @@ impl Local {
         self.pedir(Pedido::ApagarPlaylist(id));
     }
 
-    pub fn adicionar_a_playlist(&self, id: i64, musicas: Vec<PathBuf>) {
+    /// Curte ou salva um item de serviço (vai para a Biblioteca do serviço).
+    pub fn salvar(&self, item: &provedores::Item) {
+        let agora = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        self.pedir(Pedido::Salvar(crate::paginas::salvo_de(item, agora)));
+    }
+
+    pub fn tirar_salvo(&self, item: &provedores::Item) {
+        let (servico, tipo, id) = crate::paginas::chave_do_salvo(item);
+        self.pedir(Pedido::TirarSalvo(servico, tipo, id));
+    }
+
+    pub fn fixar(&self, item: &provedores::Item, fixado: bool) {
+        let (servico, tipo, id) = crate::paginas::chave_do_salvo(item);
+        self.pedir(Pedido::Fixar(servico, tipo, id, fixado));
+    }
+
+    /// O salvo do item, se ele está salvo (na lista publicada; o pedido de agora aparece no quadro seguinte).
+    pub fn salvo(&self, item: &provedores::Item) -> Option<&biblioteca::Salvo> {
+        let (servico, tipo, id) = crate::paginas::chave_do_salvo(item);
+        self.lista.salvos.iter().map(|(s, _)| s).find(|s| s.servico == servico && s.tipo == tipo && s.id == id)
+    }
+
+    pub fn adicionar_a_playlist(&self, id: i64, musicas: Vec<Musica>) {
         self.pedir(Pedido::AdicionarAPlaylist(id, musicas));
     }
 
@@ -538,6 +683,9 @@ impl Local {
 
     /// De onde o tocador toca esta música: o arquivo, ou o endereço que o provedor deu (`None` enquanto não deu).
     fn origem_de(&self, m: &Musica) -> Option<tocador::Origem> {
+        if self.externo.as_ref().is_some_and(|e| e.caminho == m.caminho) {
+            return Some(origem_externa(&m.caminho));
+        }
         if m.e_remota() {
             self.remoto.endereco(m).and_then(Result::ok).map(tocador::Origem::Endereco)
         } else {
@@ -550,15 +698,19 @@ impl Local {
         use crate::preanalista::{Alvo, AlvoRemoto};
         let mut prioridade = Vec::new();
         if let Some(i) = self.fila.atual() {
-            prioridade.extend(self.fila.itens().iter().skip(i).take(3).map(|m| match &m.remota {
+            prioridade.extend(self.fila.itens().iter().skip(i).take(3).enumerate().map(|(n, m)| match &m.remota {
                 None => Alvo::arquivo(m.caminho.clone()),
-                Some(r) => Alvo {
-                    caminho: m.caminho.clone(),
-                    remota: Some(AlvoRemoto {
-                        isrc: r.isrc.clone(),
-                        endereco: self.remoto.endereco(m).and_then(Result::ok),
-                    }),
-                },
+                Some(r) => {
+                    // No tocador do serviço, nenhuma gravação daqui é a que soa.
+                    let (par, endereco) = match &self.externo {
+                        Some(e) if e.caminho == m.caminho => (None, None),
+                        _ => self.remoto.alvo_da_analise(m, n == 0),
+                    };
+                    Alvo {
+                        caminho: m.caminho.clone(),
+                        remota: Some(AlvoRemoto { isrc: r.isrc.clone(), par, endereco }),
+                    }
+                }
             }));
         }
         self.preanalista.priorizar(prioridade);
@@ -573,6 +725,29 @@ impl Local {
             return;
         };
         self.esperando_endereco = None;
+        if let Some(r) = musica.remota.clone()
+            && self.remoto.quem_toca_esta(&musica) == QuemToca::Sozinho
+        {
+            // Outro serviço que tocava sozinho (ou este, com outra faixa) é parado ou trocado por esta ordem.
+            if self.externo.as_ref().is_some_and(|e| e.servico != r.servico) {
+                self.parar_externo();
+            }
+            self.tocador.mandar(Comando::Parar);
+            let ordem = self.remoto.controlar(&r.servico, Acao::Tocar { faixa: r.id });
+            // Na tela já toca (dá para pausar antes de o som começar).
+            self.externo = Some(Externo {
+                caminho: musica.caminho.clone(),
+                servico: r.servico,
+                ordem,
+                avisou_outro_lugar: false,
+                espera: Some((Esperado::Tocando(true), Instant::now() + TOCAR_VALE)),
+            });
+            self.situacao = Situacao { tocando: true, ..self.situacao_externa(None) };
+            self.carregar_capa(&musica);
+            (self.publicado, self.seguinte_pedida) = (None, None);
+            return;
+        }
+        self.parar_externo();
         if musica.e_remota() {
             match self.remoto.endereco(&musica) {
                 Some(Ok(_)) => {}
@@ -661,9 +836,22 @@ impl Local {
     }
 
     pub fn alternar(&mut self) {
-        if self.ativo() {
-            self.tocador.mandar(if self.situacao.tocando { Comando::Pausar } else { Comando::Continuar });
+        if !self.ativo() {
+            return;
         }
+        if let Some(e) = self.externo.as_mut() {
+            let acao = if self.situacao.tocando { Acao::Pausar } else { Acao::Continuar };
+            let voltando = acao == Acao::Continuar;
+            e.ordem = self.remoto.controlar(&e.servico, acao);
+            // (De outro aparelho, a faixa volta do começo do carregamento.)
+            let vale = if voltando && e.avisou_outro_lugar { TOCAR_VALE } else { PEDIDO_VALE };
+            e.espera = Some((Esperado::Tocando(voltando), Instant::now() + vale));
+            // Na hora na tela; a próxima leitura confirma.
+            self.situacao.tocando = voltando;
+            self.publicado = None;
+            return;
+        }
+        self.tocador.mandar(if self.situacao.tocando { Comando::Pausar } else { Comando::Continuar });
     }
 
     /// "Próxima" apertada pela pessoa: passa adiante mesmo com "repetir a música".
@@ -690,7 +878,16 @@ impl Local {
 
     pub fn ir(&mut self, segundos: f64) {
         if self.ativo() && segundos.is_finite() {
-            self.tocador.mandar(Comando::Ir(segundos.max(0.0)));
+            let segundos = segundos.max(0.0);
+            match self.externo.as_mut() {
+                Some(e) => {
+                    e.ordem = self.remoto.controlar(&e.servico, Acao::Ir { segundos });
+                    let agora = Instant::now();
+                    e.espera = Some((Esperado::Posicao(segundos, agora), agora + PEDIDO_VALE));
+                    self.situacao.posicao_s = segundos;
+                }
+                None => self.tocador.mandar(Comando::Ir(segundos)),
+            }
             self.publicado = None;
         }
     }
@@ -708,7 +905,101 @@ impl Local {
         }
     }
 
+    /// Procura outra gravação para uma faixa que toca pelo Match; se é a de agora, ela recomeça com a nova.
+    pub fn outro_par(&mut self, m: &Musica) {
+        self.remoto.outro_par(m);
+        if self.fila.musica_atual().is_some_and(|a| a.caminho == m.caminho) {
+            self.tocar_atual();
+        }
+    }
+
+    /// O programa que faz o som da música de agora, quando não é o Player (para o visual ouvir só ele).
+    pub fn processo_externo(&self) -> Option<String> {
+        let e = self.externo.as_ref()?;
+        self.remoto.tocador(&e.servico)?.estado.processo
+    }
+
+    /// Para o que toca no tocador do serviço.
+    fn parar_externo(&mut self) {
+        if let Some(e) = self.externo.take() {
+            self.remoto.controlar(&e.servico, Acao::Parar);
+        }
+    }
+
+    /// A situação da música de agora no tocador do serviço (`None`: a ordem de tocar ainda não chegou lá).
+    fn situacao_externa(&self, lido: Option<&Lido>) -> Situacao {
+        let Some(e) = &self.externo else { return self.situacao.clone() };
+        let da_faixa = lido.and_then(|l| l.estado.tocando.as_ref().map(|t| (l, t)));
+        let carregando = da_faixa.is_none_or(|(_, t)| t.situacao == SituacaoDaFaixa::Carregando && t.duracao_s <= 0.0);
+        Situacao {
+            origem: (!carregando).then(|| origem_externa(&e.caminho)),
+            tocando: da_faixa.is_some_and(|(_, t)| t.situacao == SituacaoDaFaixa::Tocando),
+            posicao_s: da_faixa.map_or(0.0, |(l, t)| l.posicao_s(t, Instant::now())),
+            duracao_s: da_faixa.map_or(0.0, |(_, t)| t.duracao_s),
+            seguinte: None,
+            erro: None,
+            ..self.situacao.clone()
+        }
+    }
+
+    /// Acompanha a música que toca no tocador do serviço: a posição, o fim e a falha (que vai para o Match).
+    fn acompanhar_externo(&mut self) {
+        let Some(e) = &self.externo else { return };
+        let Some(m) = self.fila.musica_atual().cloned().filter(|m| m.caminho == e.caminho) else {
+            self.parar_externo();
+            return;
+        };
+        // Até a ordem chegar lá, vale o que já está na tela.
+        let Some(lido) = self.remoto.tocador_depois(&e.servico, e.ordem) else {
+            return;
+        };
+        let id = m.remota.as_ref().map(|r| r.id.clone()).unwrap_or_default();
+        match do_externo(&lido.estado, &id) {
+            DoExterno::Segue => {
+                let carregando =
+                    lido.estado.tocando.as_ref().is_some_and(|t| t.situacao == SituacaoDaFaixa::Carregando);
+                let espera = self.externo.as_ref().and_then(|e| e.espera);
+                let (situacao, espera) = com_o_pedido(self.situacao_externa(Some(&lido)), espera, Instant::now());
+                if let Some(e) = self.externo.as_mut() {
+                    // Pausada antes de começar: "não tocando" ainda não confirma nada.
+                    e.espera = if carregando { e.espera } else { espera };
+                    e.avisou_outro_lugar &= !situacao.tocando;
+                }
+                self.situacao = situacao;
+            }
+            DoExterno::EmOutroLugar => {
+                // Enquanto a pessoa traz a faixa de volta, a leitura de antes ainda diz que ela está lá.
+                let espera = self.externo.as_ref().and_then(|e| e.espera);
+                let voltando = matches!(espera, Some((Esperado::Tocando(true), ate)) if Instant::now() < ate)
+                    && self.externo.as_ref().is_some_and(|e| e.avisou_outro_lugar);
+                let lida = self.situacao_externa(Some(&lido));
+                self.situacao = Situacao { tocando: voltando, ..lida };
+                if let Some(e) = self.externo.as_mut().filter(|e| !e.avisou_outro_lugar) {
+                    e.espera = None;
+                    e.avisou_outro_lugar = true;
+                    let fonte = m.remota.as_ref().map(|r| r.fonte.clone()).unwrap_or_default();
+                    self.aviso = Some(format!("O {fonte} passou a tocar em outro aparelho"));
+                }
+            }
+            DoExterno::Acabou => match self.fila.indice_seguinte(true) {
+                Some(i) => self.ir_para_na_fila(i),
+                None => self.parar(),
+            },
+            DoExterno::Falhou(motivo) => {
+                let nome = m.remota.as_ref().map(|r| r.fonte.clone()).unwrap_or_default();
+                log::warn!("\"{}\" não tocou no tocador do {nome}: {motivo}", m.titulo);
+                self.remoto.mandar_pelo_match(&m);
+                // Sem outro serviço, quem avisa é a falha da própria faixa.
+                if matches!(self.remoto.quem_toca_esta(&m), QuemToca::Outro(_)) {
+                    self.aviso = Some(format!("O player do {nome} não tocou ({motivo}): tocando por outro serviço"));
+                }
+                self.tocar_atual();
+            }
+        }
+    }
+
     pub fn parar(&mut self) {
+        self.parar_externo();
         self.tocador.mandar(Comando::Parar);
         self.fila.limpar();
         self.esperando_endereco = None;
@@ -728,12 +1019,21 @@ impl Local {
         // A seguinte é de um provedor e o endereço ainda não veio: pede agora (ela entra quando chegar).
         if let Some((_, m)) = &seguinte
             && m.e_remota()
+            && self.remoto.quem_toca_esta(m) != QuemToca::Sozinho
             && self.remoto.endereco(m).is_none()
         {
             self.remoto.resolver(m);
             return;
         }
-        let quer = seguinte.as_ref().and_then(|(i, m)| self.origem_de(m).map(|o| (*i, o)));
+        // Com a de agora no tocador do serviço, o daqui não tem o que emendar (o endereço da seguinte já fica pronto).
+        if self.externo.is_some() {
+            return;
+        }
+        // A que toca no tocador do serviço não é preparada aqui: quando esta acabar, a fila anda até ela.
+        let quer = seguinte
+            .as_ref()
+            .filter(|(_, m)| !m.e_remota() || self.remoto.quem_toca_esta(m) != QuemToca::Sozinho)
+            .and_then(|(i, m)| self.origem_de(m).map(|o| (*i, o)));
         if quer == self.seguinte_pedida {
             return;
         }
@@ -778,7 +1078,9 @@ impl Local {
         if let Some(chave) = self.esperando_endereco.clone() {
             match self.fila.musica_atual().cloned() {
                 Some(m) if m.caminho == chave => {
-                    if self.remoto.endereco(&m).is_some() {
+                    // (Quem toca podia estar abrindo: o pedido é refeito, ou a faixa vai para o tocador do serviço.)
+                    self.remoto.resolver(&m);
+                    if self.remoto.endereco(&m).is_some() || self.remoto.quem_toca_esta(&m) == QuemToca::Sozinho {
                         self.tocar_atual();
                     }
                 }
@@ -790,7 +1092,17 @@ impl Local {
             self.versao_vista = versao;
             self.lista = ler(&self.lista_viva);
         }
-        self.situacao = self.tocador.situacao();
+        let do_tocador = self.tocador.situacao();
+        if self.externo.is_some() {
+            // O tocador daqui está parado: os contadores dele não falam desta música.
+            (self.avancou, self.terminadas) = (do_tocador.avancou, do_tocador.terminadas);
+            self.situacao = Situacao { avancou: self.avancou, terminadas: self.terminadas, ..self.situacao.clone() };
+            self.acompanhar_externo();
+        }
+        // (A música pode ter acabado de sair do tocador do serviço.)
+        if self.externo.is_none() {
+            self.situacao = self.tocador.situacao();
+        }
         if self.situacao.tocando {
             self.falhas_seguidas = 0;
         }
@@ -927,5 +1239,157 @@ impl Drop for Local {
     fn drop(&mut self) {
         // Uma varredura longa não segura o fechamento do app.
         self.parar.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod testes {
+    use super::*;
+    use provedores::Tocando;
+
+    #[test]
+    fn o_estado_do_tocador_diz_o_que_fazer_com_a_faixa() {
+        let com = |situacao, faixa: &str, da_faixa| EstadoDoTocador {
+            situacao,
+            tocando: Some(Tocando { faixa: faixa.into(), situacao: da_faixa, ..Default::default() }),
+            ..Default::default()
+        };
+        use SituacaoDaFaixa as F;
+        use SituacaoDoTocador as T;
+        for f in [F::Carregando, F::Tocando, F::Pausada] {
+            assert_eq!(do_externo(&com(T::Pronto, "a", f), "a"), DoExterno::Segue);
+        }
+        assert_eq!(do_externo(&com(T::Abrindo, "a", F::Carregando), "a"), DoExterno::Segue, "abrindo, a faixa espera");
+        assert_eq!(do_externo(&com(T::Pronto, "a", F::Acabou), "a"), DoExterno::Acabou);
+        assert_eq!(do_externo(&com(T::Pronto, "a", F::EmOutroLugar), "a"), DoExterno::EmOutroLugar);
+        assert!(matches!(do_externo(&com(T::Pronto, "a", F::Falhou), "a"), DoExterno::Falhou(_)));
+        assert!(matches!(do_externo(&com(T::Pronto, "b", F::Tocando), "a"), DoExterno::Falhou(_)), "outra faixa");
+        for t in [T::Desligado, T::Baixando, T::Pareando, T::Falhou] {
+            assert!(matches!(do_externo(&com(t, "a", F::Tocando), "a"), DoExterno::Falhou(_)), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn o_que_a_pessoa_mandou_fica_ate_confirmar() {
+        let agora = Instant::now();
+        let lida = |tocando, posicao_s| Situacao { tocando, posicao_s, duracao_s: 200.0, ..Default::default() };
+        let pausar = Some((Esperado::Tocando(false), agora + PEDIDO_VALE));
+        let (s, e) = com_o_pedido(lida(true, 10.0), pausar, agora);
+        assert!(!s.tocando && e == pausar, "a leitura de antes não volta o botão");
+        assert_eq!(com_o_pedido(lida(false, 10.0), pausar, agora).1, None, "confirmou");
+        let (s, e) = com_o_pedido(lida(true, 10.0), pausar, agora + PEDIDO_VALE);
+        assert!(s.tocando && e.is_none(), "não obedeceu: a verdade volta");
+        let pular = Some((Esperado::Posicao(100.0, agora), agora + PEDIDO_VALE));
+        let depois = agora + Duration::from_secs(1);
+        let (s, e) = com_o_pedido(lida(true, 11.0), pular, depois);
+        assert!((s.posicao_s - 101.0).abs() < 0.01 && e == pular);
+        assert_eq!(com_o_pedido(lida(true, 100.8), pular, depois).1, None);
+        let fim = Some((Esperado::Posicao(199.9, agora), agora + PEDIDO_VALE));
+        assert_eq!(com_o_pedido(lida(true, 10.0), fim, depois).0.posicao_s, 200.0);
+    }
+
+    /// Um player local mudo, com o provedor-exemplo que toca sozinho já ligado.
+    fn com_o_sozinho(teste: &str) -> Option<(Local, PathBuf)> {
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent()?.parent().map(|p| p.join("provedor-exemplo.exe")))
+            .filter(|e| e.is_file());
+        let Some(exe) = exe else {
+            eprintln!("{teste}: sem o provedor-exemplo compilado (rode cargo test --workspace)");
+            return None;
+        };
+        let raiz = std::env::temp_dir().join(format!("tccplayer-local-{teste}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let p = raiz.join("provedores").join("exemplo");
+        std::fs::create_dir_all(&p).expect("pasta");
+        std::fs::copy(&exe, p.join("provedor-exemplo.exe")).expect("copiar o exemplo");
+        // (Como o de verdade: só obedece um pouco depois de responder.)
+        let manifesto = "nome = \"Exemplo\"\nservico = \"exemplo\"\nexecutavel = \"provedor-exemplo.exe\"\nargumentos = [\"--sozinho\", \"--atrasa\"]";
+        std::fs::write(p.join("provedor.toml"), manifesto).expect("manifesto");
+        let mut l = Local::iniciar(Some(raiz.clone()), None, true, false, Repetir::Nada, false, &[]);
+        assert!(esperar(&mut l, |l| l.remoto.tocador("exemplo").is_some()));
+        l.remoto.ligar_tocador("exemplo", None);
+        let pronto =
+            |l: &Local| l.remoto.tocador("exemplo").is_some_and(|t| t.estado.situacao == SituacaoDoTocador::Pronto);
+        assert!(esperar(&mut l, pronto));
+        Some((l, raiz))
+    }
+
+    fn esperar(l: &mut Local, f: impl Fn(&Local) -> bool) -> bool {
+        let ate = Instant::now() + Duration::from_secs(8);
+        while Instant::now() < ate {
+            l.quadro();
+            if f(l) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
+
+    fn musica(id: &str) -> Musica {
+        let f = provedores::Faixa {
+            servico: "exemplo".into(),
+            id: id.into(),
+            titulo: format!("Faixa {id}"),
+            ..Default::default()
+        };
+        crate::remoto::musica_de(&f, "Exemplo")
+    }
+
+    #[test]
+    fn a_fila_anda_com_o_tocador_do_servico() {
+        let Some((mut l, raiz)) = com_o_sozinho("fila") else { return };
+        l.tocar_lista(vec![musica("1"), musica("1b")], 0);
+        assert!(l.situacao.tocando, "na tela já toca");
+        assert!(esperar(&mut l, |l| l.situacao.tocando && l.situacao.posicao_s > 0.3), "{:?}", l.situacao);
+        assert_eq!(l.situacao.duracao_s, 4.0);
+        assert!(l.estado_de_midia().is_some_and(|e| e.tocando && e.posicao.is_some()));
+        l.alternar();
+        assert!(!l.situacao.tocando, "na hora");
+        for _ in 0..80 {
+            l.quadro();
+            assert!(!l.situacao.tocando, "o botão não volta atrás");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        l.alternar();
+        for _ in 0..60 {
+            l.quadro();
+            assert!(l.situacao.tocando);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        l.ir(3.4);
+        assert!((l.situacao.posicao_s - 3.4).abs() < 0.01);
+        assert!(esperar(&mut l, |l| l.fila.atual() == Some(1) && l.situacao.tocando), "a próxima entra");
+        assert!(l.situacao.posicao_s < 2.0, "{}", l.situacao.posicao_s);
+        l.parar();
+        assert!(esperar(&mut l, |l| l.remoto.tocador("exemplo").is_some_and(|t| t.estado.tocando.is_none())));
+        assert!(!l.ativo() && !l.situacao.tocando);
+        drop(l);
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn a_que_o_tocador_do_servico_nao_toca_e_a_tomada_por_outro_aparelho() {
+        let Some((mut l, raiz)) = com_o_sozinho("falha") else { return };
+        // Sem outro serviço para o Match, ela é pulada com o aviso.
+        l.tocar_lista(vec![musica("3"), musica("2")], 0);
+        assert!(esperar(&mut l, |l| l.fila.atual() == Some(1) && l.situacao.tocando), "{:?}", l.aviso);
+        assert!(l.aviso.take().is_some_and(|a| a.contains("Faixa 3")));
+        // Outro aparelho toma a vez: pausa, avisa uma vez, e a faixa continua na fila.
+        assert!(esperar(&mut l, |l| l.aviso.is_some()));
+        assert!(l.aviso.take().is_some_and(|a| a.contains("outro aparelho")));
+        assert!(!l.situacao.tocando && l.fila.atual() == Some(1));
+        for _ in 0..30 {
+            l.quadro();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(l.aviso, None);
+        // Desligado no meio: a faixa não fica presa.
+        l.remoto.desligar_tocador("exemplo");
+        assert!(esperar(&mut l, |l| !l.ativo()));
+        drop(l);
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 }

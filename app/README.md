@@ -74,8 +74,52 @@ mais recente das outras e nunca espera por elas.
 - **Letra em tela cheia** (`Y`, o botão de expandir no módulo Letra ou a barra de comandos): o visual ocupa a
   janela inteira, escurecido, e a letra rola grande por cima, a linha de agora enchendo palavra por palavra, com
   a tradução embaixo, a fonte e o acerto de sincronia no rodapé. O topo arrasta a janela; Esc fecha.
+- **Configurações › Serviços**: a conta e por onde as músicas de cada serviço tocam, e o Soloist do Spotify (chave, ligar, parear,
+  desligar).
 - **Configurações › Letras**: a ordem das fontes (setas), ligar e desligar cada uma (uma fica sempre ligada),
   preferir palavra por palavra, traduzir (e o idioma) e letras latinas.
+- **Espaços e navegação** (F2): a folha das páginas tem, no topo, voltar e avançar (também `Alt ←`/`Alt →` e os
+  botões laterais do mouse) e os espaços: **Tudo**, **Neste computador** e um por serviço ligado, com a logo e a cor
+  que o provedor manda. No espaço de um serviço a folha se tinge com a cor dele, numa transição curta, e abre em
+  "Para você" (as prateleiras do serviço: no YouTube Music, lançamentos, clipes novos, artistas em alta e paradas).
+  Cada espaço lembra as páginas dele; `Ctrl Tab` vai para o próximo e `Ctrl 1` a `Ctrl 9` abrem o da posição (1 é
+  Tudo, 2 o computador, depois os serviços). O espaço aberto fica guardado. `C` curte a faixa de serviço que toca, e
+  "Fixar na lateral o que está aberto" (na barra de comandos) fixa o álbum, a playlist, o artista ou a faixa da página.
+- **Spotify** (F6): o espaço do Spotify vem com o app. Sem entrar, ele mostra o cartão "Entre na sua conta
+  do Spotify": o botão abre o navegador, quem entra é você, e a senha não passa pelo Player. Depois disso o Player entra
+  sozinho (a credencial fica cifrada pelo Windows) e a Loja › Provedores mostra "Conectado como … · Premium" com Sair. Se
+  outro programa usa a porta do login (o Spotifast aberto), o aviso diz qual. Para você, Busca, álbuns, artistas,
+  playlists e a Biblioteca da conta (com as Músicas Curtidas) vêm da sua conta, na página Biblioteca e na lateral da
+  Estante, junto com o que você salvou no Player. As músicas tocam pelo
+  YouTube Music (a mesma música, escolhida por título, artista e duração; a página da faixa diz qual e tem "Procurar outra
+  gravação") ou, se você ligar o **Soloist** em Configurações › Serviços, com o som do próprio Spotify: é o player oficial dele, baixado
+  do Spotify, e pede Premium, uma chave pessoal sua e parear uma vez pelo app do Spotify. Se o Soloist não tocar, a música vai para o
+  YouTube Music com um aviso. O Spotify toca num lugar por vez: tocar aqui para o outro aparelho ([F6](../docs/f6-spotify.md)).
+- **Páginas dos serviços**: "Para você" mostra as prateleiras em cartões com capa (as capas baixam em segundo plano e
+  ficam guardadas na pasta de dados, em `capas`); clicar numa faixa toca a fileira a partir dela, clicar num álbum,
+  playlist ou artista abre a página dele, que entra deslizando. Álbum e playlist: capa, título, o artista como link,
+  Tocar, Aleatório, curtir e a lista das faixas (a seguir e fila no hover, coração em cada uma). Artista: populares
+  (com "Ver mais") e os álbuns. Enquanto o serviço não responde, a página mostra um esqueleto; erro vira frase com
+  "Tentar de novo". **Biblioteca do serviço**: o que foi curtido e salvo dele, com filtro por tipo e fixar (o alfinete
+  aparece sobre a capa). No topo da folha, as abas do espaço: **Para você**, **Busca** e **Biblioteca**.
+- **Layout Estante** (F2; Configurações › Aparência › Layout, a aba Layouts da Loja ou `Ctrl L`): a **lateral** com os
+  espaços (a marca de cada um; o aberto com o anel na cor dele), as páginas do espaço (Para você, Busca, Biblioteca) e
+  o que foi salvo nele, os fixados primeiro (no computador, as playlists só de músicas locais); Loja, Configurações,
+  personalizar e trocar o layout no pé. No meio, a **página**, com voltar, avançar e o título. À direita, o trilho
+  **Tocando**: o **visual ao vivo** no alto, com o nome do visual e a faixa, e os módulos do painel embaixo. Clicar no
+  visual (ou `X`) faz ele crescer até a janela inteira, com o título grande; `Esc` ou o botão encolher voltam para a
+  mesma página. Em janela média a lateral vira uma barra de ícones e o Tocando abre ao lado da página (`P` ou o botão
+  do dock); em janela estreita o visual vira uma faixa acima do dock e as páginas vão para a navegação de baixo. O
+  Palco (o layout de sempre) continua o padrão.
+- **Busca** (F2): o campo (o mesmo texto da Biblioteca) e o que os serviços acharam: o melhor resultado em destaque,
+  as faixas, e prateleiras de álbuns, artistas e playlists; chips filtram por tipo (faixas em lista, o resto em
+  grade). No espaço de um serviço, só ele; em Tudo, cada serviço no seu bloco e quantas músicas do computador batem.
+  Cada serviço aparece assim que responde; resultado de um texto antigo fica apagado até o novo chegar.
+- **Página da faixa**: o título de uma faixa (nas listas e no melhor resultado) abre a página dela: capa, artistas e
+  álbum como links, Tocar (Pausar, se é ela que toca), A seguir, Na fila e curtir. Abas **Letra** (a letra da
+  faixa que toca, com a tela cheia; com o módulo Letra à vista no painel, ela fica lá), **Mapa** (a pré-análise:
+  energia por trecho calma, agitada ou intensa, drops, a posição de agora, BPM, tom e duração) e **Parecidas** (só
+  com provedor que tenha rádio).
 - **O que o Modo Escuta ouve** (Ajustes): "Todo o PC" (o padrão) ou um app só, escolhido entre os que estão
   com som aberto. Com um app escolhido, o visual ouve só ele (captura por processo do Windows, com os processos
   que o app abre) e o "tocando agora" segue só ele: um anúncio no navegador não mexe em nada de quem escolheu o
@@ -99,7 +143,8 @@ mais recente das outras e nunca espera por elas.
   nova). Cada playlist vira uma categoria, na ordem em que as músicas entraram; dentro dela, o X da linha tira a
   música. Apagar pede confirmação ("Apagar?"). Ficam no `biblioteca.db` (tabelas `playlists` e
   `playlist_itens`), guardando o caminho dos arquivos.
-- **Fila** (aba da Biblioteca, `Q`, ou o botão no dock): o que já tocou (esmaecido), a de agora e o que vem
+- **Fila** (aba da Biblioteca, `Q`, ou o botão no dock; abre no espaço em que você está, e num serviço a Biblioteca
+  mostra só Fila e Histórico): o que já tocou (esmaecido), a de agora e o que vem
   depois. Clicar pula para a música; com o mouse em cima, subir, descer e tirar. "Limpar a seguir" deixa só a de
   agora. Tirar uma música, limpar a fila, tirar uma música de playlist, tirar uma pasta ou apagar uma playlist
   mostram um aviso com **Desfazer** (6 segundos; `Ctrl Z` também vale). **Aleatório** (`S`) embaralha o resto
@@ -185,12 +230,12 @@ mais recente das outras e nunca espera por elas.
     cliques passam para o que está embaixo. O × da Ilha aberta a fecha. Respeita o modo seguro e o "Efeitos de
     animação" do Windows.
 - **Nos serviços** (F1): com provedores instalados em `<pasta de dados>/provedores/<nome>/` (o `provedor.toml` e o
-  programa), a busca da Biblioteca também pergunta a eles. O bloco "Nos serviços" mostra as faixas que chegam, com o
-  nome do serviço; clicar toca (os resultados viram a fila), e dá para pôr a seguir ou no fim da fila, ao lado das
-  músicas do computador. A faixa toca pela rede, com a pré-análise (visual, BPM, drops) feita do mesmo endereço, e a
+  programa), a busca também pergunta a eles. Na Biblioteca, "Buscar \"…\" nos serviços" leva à página Busca com o
+  mesmo texto; lá, clicar numa faixa toca (os resultados viram a fila), e dá para pôr a seguir ou no fim da fila, ao
+  lado das músicas do computador. A faixa toca pela rede, com a pré-análise (visual, BPM, drops) feita do mesmo endereço, e a
   seguinte entra sem intervalo. Um provedor que trava é reaberto sozinho.
-- **YouTube Music** (F3): vem pronto com o app, sem conta. A busca da Biblioteca traz as faixas dele em "Nos
-  serviços", e elas tocam inteiras, com capa, visual, BPM, tom e drops da pré-análise. Na Loja, aba Provedores, ele
+- **YouTube Music** (F3): vem pronto com o app, sem conta. A busca traz faixas, álbuns, artistas e playlists dele
+  (cada tipo pedido ao mesmo tempo, com prazo de 8 s cada), e as faixas tocam inteiras, com capa, visual, BPM, tom e drops da pré-análise. Na Loja, aba Provedores, ele
   aparece como "Vem com o app" (dá para desligar).
 - **Configurações** (`Ctrl ,` ou o botão de controles na barra lateral): uma página com seções (Geral, Aparência,
   Visual, Som, Ilha, Atalhos, Sobre). Larga, as seções ficam numa coluna à esquerda; média, viram fichas no topo;
@@ -287,7 +332,8 @@ tradução ligada, as linhas da letra para a Unison; só com o módulo Letra lig
 Espaço tocar/pausar · Ctrl ←/→ faixa anterior/próxima · Ctrl ↑/↓ volume · M mudo · F tela cheia · P painel ·
 Ctrl K comandos · Ctrl , ajustes · V próximo visual · 1/2/3 escolher o visual · T próximo tema · I imersivo ·
 E editar o layout · N janela mini · D Ilha · H Início · B Biblioteca · L Loja · S aleatório · R repetir · Q fila ·
-Y letra em tela cheia · Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
+Y letra em tela cheia · Alt ←/→ voltar e avançar · Ctrl Tab próximo espaço · Ctrl 1–9 abrir o espaço da posição ·
+Ctrl L trocar o layout · X expandir o visual (Estante) · C curtir a faixa que toca · Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
 `layout.editar`…), o mesmo que os botões e a barra de comandos usam. A lista inteira está em
 `crates/nucleo/src/comando.rs`.
 

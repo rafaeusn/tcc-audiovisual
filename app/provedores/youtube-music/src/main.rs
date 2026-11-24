@@ -13,18 +13,33 @@
 mod conversao;
 mod visionos;
 
-use conversao::{album_item, faixa};
+use conversao::{album_item, artista_item, faixa, playlist_item};
 use provedores::{
-    Apresentacao, Capacidade, CorpoDaResposta, CorpoDoPedido, Fonte, Item, Prateleira, Servico, VERSAO_DO_PROTOCOLO,
-    servir,
+    Apresentacao, Capacidade, CorpoDaResposta, CorpoDoPedido, Fonte, Identidade, Item, Prateleira, Servico,
+    VERSAO_DO_PROTOCOLO, servir,
 };
 use rustypipe::client::RustyPipe;
 use std::future::Future;
+
+/// Quanto cada uma das buscas de uma pesquisa pode demorar (o Player espera 20 s pela resposta inteira).
+const PRAZO_DE_CADA_BUSCA: std::time::Duration = std::time::Duration::from_secs(8);
 
 struct YoutubeMusic {
     rt: tokio::runtime::Runtime,
     rp: RustyPipe,
     direto: visionos::Direto,
+}
+
+/// Um item da busca principal (os perfis de usuário ficam de fora).
+fn item_da_busca(i: &rustypipe::model::MusicItem) -> Option<Item> {
+    use rustypipe::model::MusicItem;
+    match i {
+        MusicItem::Track(t) => Some(Item::Faixa(faixa(t))),
+        MusicItem::Album(a) => Some(Item::Album(album_item(a))),
+        MusicItem::Artist(a) => Some(Item::Artista(artista_item(a))),
+        MusicItem::Playlist(p) => Some(Item::Playlist(playlist_item(p))),
+        MusicItem::User(_) => None,
+    }
 }
 
 fn erro(e: impl std::fmt::Display) -> CorpoDaResposta {
@@ -51,30 +66,81 @@ impl YoutubeMusic {
         self.rt.block_on(f)
     }
 
+    /// A busca de todos os tipos: a principal (que traz o melhor resultado primeiro) e uma por tipo, ao mesmo tempo.
+    /// A que falha, ou passa de [`PRAZO_DE_CADA_BUSCA`], só fica de fora (uma lenta não segura as outras nem estoura
+    /// o prazo do Player); erro só se todas falharem.
     fn buscar(&self, texto: &str, limite: u32) -> CorpoDaResposta {
-        match self.esperar(self.rp.query().music_search_tracks(texto)) {
-            Ok(r) => CorpoDaResposta::Itens {
-                itens: r.items.items.iter().take(limite as usize).map(|t| Item::Faixa(faixa(t))).collect(),
-            },
-            Err(e) => erro(e),
+        use tokio::time::timeout;
+        let q = self.rp.query();
+        let (principal, faixas, albuns, artistas, playlists) = self.esperar(async {
+            tokio::join!(
+                timeout(PRAZO_DE_CADA_BUSCA, q.music_search_main(texto)),
+                timeout(PRAZO_DE_CADA_BUSCA, q.music_search_tracks(texto)),
+                timeout(PRAZO_DE_CADA_BUSCA, q.music_search_albums(texto)),
+                timeout(PRAZO_DE_CADA_BUSCA, q.music_search_artists(texto)),
+                timeout(PRAZO_DE_CADA_BUSCA, q.music_search_playlists(texto, false)),
+            )
+        });
+        let mut falhas = Vec::new();
+        let mut lista = |r: Result<Result<Vec<Item>, rustypipe::error::Error>, tokio::time::error::Elapsed>| match r {
+            Ok(Ok(itens)) => itens,
+            Ok(Err(e)) => {
+                falhas.push(e.to_string());
+                Vec::new()
+            }
+            Err(_) => {
+                falhas.push("demorou demais".into());
+                Vec::new()
+            }
+        };
+        let principal = lista(principal.map(|r| r.map(|r| r.items.items.iter().filter_map(item_da_busca).collect())));
+        let por_tipo = vec![
+            lista(faixas.map(|r| r.map(|r| r.items.items.iter().map(|t| Item::Faixa(faixa(t))).collect()))),
+            lista(albuns.map(|r| r.map(|r| r.items.items.iter().map(|a| Item::Album(album_item(a))).collect()))),
+            lista(artistas.map(|r| r.map(|r| r.items.items.iter().map(|a| Item::Artista(artista_item(a))).collect()))),
+            lista(
+                playlists.map(|r| r.map(|r| r.items.items.iter().map(|p| Item::Playlist(playlist_item(p))).collect())),
+            ),
+        ];
+        if falhas.len() == 5 {
+            return erro(falhas.join("; "));
         }
+        CorpoDaResposta::Itens { itens: conversao::juntar_busca(principal, por_tipo, limite as usize) }
     }
 
+    /// O início: lançamentos, clipes novos e as paradas (faixas, artistas e playlists). Cada fonte é pedida à
+    /// parte; a que falha ou vem vazia só fica de fora (as paradas, por exemplo, às vezes vêm vazias).
     fn inicio(&self) -> CorpoDaResposta {
+        let fileira = |titulo: &str, itens: Vec<Item>| Prateleira { titulo: titulo.into(), itens };
+        let mut prateleiras = Vec::new();
+        let mut falhas = Vec::new();
+        match self.esperar(self.rp.query().music_new_albums()) {
+            Ok(a) => prateleiras.push(fileira("Lançamentos", a.iter().map(|x| Item::Album(album_item(x))).collect())),
+            Err(e) => falhas.push(e.to_string()),
+        }
+        match self.esperar(self.rp.query().music_new_videos()) {
+            Ok(v) => prateleiras.push(fileira("Clipes novos", v.iter().map(|t| Item::Faixa(faixa(t))).collect())),
+            Err(e) => falhas.push(e.to_string()),
+        }
         match self.esperar(self.rp.query().music_charts(None)) {
             Ok(c) => {
-                let fileira = |titulo: &str, faixas: &[rustypipe::model::TrackItem]| Prateleira {
-                    titulo: titulo.into(),
-                    itens: faixas.iter().map(|t| Item::Faixa(faixa(t))).collect(),
-                };
-                let prateleiras = [fileira("Mais tocadas", &c.top_tracks), fileira("Em alta", &c.trending_tracks)]
-                    .into_iter()
-                    .filter(|p| !p.itens.is_empty())
-                    .collect();
-                CorpoDaResposta::Prateleiras { prateleiras }
+                let faixas = |v: &[rustypipe::model::TrackItem]| v.iter().map(|t| Item::Faixa(faixa(t))).collect();
+                prateleiras.push(fileira("Mais tocadas", faixas(&c.top_tracks)));
+                prateleiras.push(fileira("Em alta", faixas(&c.trending_tracks)));
+                prateleiras.push(fileira(
+                    "Artistas em alta",
+                    c.artists.iter().map(|a| Item::Artista(artista_item(a))).collect(),
+                ));
+                prateleiras
+                    .push(fileira("Paradas", c.playlists.iter().map(|p| Item::Playlist(playlist_item(p))).collect()));
             }
-            Err(e) => erro(e),
+            Err(e) => falhas.push(e.to_string()),
         }
+        prateleiras.retain(|p| !p.itens.is_empty());
+        if prateleiras.is_empty() && !falhas.is_empty() {
+            return erro(falhas.join("; "));
+        }
+        CorpoDaResposta::Prateleiras { prateleiras }
     }
 
     fn album(&self, id: &str) -> CorpoDaResposta {
@@ -88,6 +154,7 @@ impl YoutubeMusic {
                         let mut f = faixa(t);
                         // Dentro do álbum, as faixas vêm sem o álbum e às vezes sem capa: herdam as dele.
                         f.album.get_or_insert_with(|| a.name.clone());
+                        f.album_id.get_or_insert_with(|| id.to_string());
                         if f.capa.is_none() {
                             f.capa.clone_from(&capa);
                         }
@@ -148,6 +215,11 @@ impl Servico for YoutubeMusic {
                 Capacidade::Playlists,
                 Capacidade::Audio,
             ],
+            identidade: Some(Identidade {
+                cor: Some(conversao::COR.into()),
+                logo: Some(include_str!("logo.svg").into()),
+            }),
+            conta: None,
         }
     }
 
@@ -171,11 +243,21 @@ fn testar(yt: &mut YoutubeMusic, texto: &str) {
         return;
     };
     for i in &itens {
-        if let Some(f) = i.faixa() {
-            println!("{}  {} — {}  ({:?} s)", f.id, f.titulo, f.artistas_juntos(), f.duracao_s);
+        match i {
+            Item::Faixa(f) => {
+                println!("faixa    {}  {} — {}  ({:?} s)", f.id, f.titulo, f.artistas_juntos(), f.duracao_s)
+            }
+            Item::Album(a) => println!("álbum    {}  {} — {}", a.id, a.titulo, a.artistas.join(", ")),
+            Item::Artista(a) => println!("artista  {}  {}", a.id, a.nome),
+            Item::Playlist(p) => println!("playlist {}  {}", p.id, p.titulo),
         }
     }
-    let Some(primeira) = itens.first().and_then(Item::faixa) else { return };
+    let faixas: Vec<_> = itens.iter().filter_map(Item::faixa).collect();
+    let com_album = faixas.iter().filter(|f| f.album_id.is_some()).count();
+    let com_artista = faixas.iter().filter(|f| f.id_do_artista(0).is_some()).count();
+    println!("ids: {com_album} de {} com álbum, {com_artista} com artista", faixas.len());
+    // A primeira faixa (o melhor resultado, o primeiro item, pode ser um artista ou um álbum).
+    let Some(primeira) = itens.iter().find_map(Item::faixa) else { return };
     match yt.resolver(&primeira.id) {
         CorpoDaResposta::Fonte(Fonte::Endereco { url, duracao_s, cabecalhos, .. }) => {
             for (nome, valor) in &cabecalhos {
@@ -200,7 +282,7 @@ fn main() {
         testar(&mut yt, args.get(i + 1).map_or("daft punk", String::as_str));
         return;
     }
-    if let Err(e) = servir(std::io::stdin().lock(), std::io::stdout().lock(), &mut yt) {
+    if let Err(e) = servir(std::io::stdin().lock(), std::io::stdout(), &mut yt) {
         eprintln!("youtube-music: {e}");
     }
 }

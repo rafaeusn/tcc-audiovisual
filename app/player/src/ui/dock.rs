@@ -101,8 +101,8 @@ impl Player {
                     .child(self.dock_botao(
                         "dock-fila",
                         "icones/queue.svg",
-                        self.pagina == nucleo::Pagina::Biblioteca
-                            && self.aba_biblioteca == crate::app::AbaBiblioteca::Fila,
+                        self.pagina() == nucleo::Pagina::Biblioteca
+                            && self.aba_biblioteca() == crate::app::AbaBiblioteca::Fila,
                         Comando::AbrirFila,
                         cx,
                     ))

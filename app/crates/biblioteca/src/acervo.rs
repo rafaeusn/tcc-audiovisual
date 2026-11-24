@@ -2,9 +2,10 @@
 //!
 //! Cada pasta é uma categoria (como uma playlist). A mesma música pode estar em duas pastas (uma dentro da
 //! outra, ou uma cópia do arquivo): ela aparece em cada pasta, mas só uma vez em "Todas". As playlists guardam
-//! o caminho dos arquivos, na ordem escolhida.
+//! o caminho dos arquivos, na ordem escolhida. Uma playlist também guarda faixas de serviço (YouTube Music...): a
+//! chave delas (`servico:id`) vai no lugar do caminho, e o que mostrar delas fica em `faixas_remotas`.
 
-use crate::{Filtro, Grupo, Musica, Origem, Playlist, normalizar};
+use crate::{Filtro, Grupo, Musica, Origem, Playlist, Remota, Salvo, TipoSalvo, normalizar};
 use nucleo::{Erro, Resultado};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
@@ -29,6 +30,13 @@ fn chave_de_igual(m: &Musica, caminho: &str) -> String {
     if segundos <= 0 || nome.is_empty() { format!("arquivo:{caminho}") } else { format!("{nome}|{segundos}") }
 }
 
+/// Um salvo lido do banco (`None` quando o tipo é desconhecido).
+fn salvo_da_linha(l: &rusqlite::Row) -> rusqlite::Result<Option<Salvo>> {
+    let tipo: String = l.get(1)?;
+    let Some(tipo) = TipoSalvo::da_chave(&tipo) else { return Ok(None) };
+    Ok(Some(Salvo { servico: l.get(0)?, tipo, id: l.get(2)?, dados: l.get(3)?, quando: l.get(4)?, fixado: l.get(5)? }))
+}
+
 /// Uma palavra da busca pronta para o LIKE: `%`, `_` e a barra valem como texto comum.
 fn padrao(palavra: &str) -> String {
     let mut s = String::with_capacity(palavra.len() + 2);
@@ -43,8 +51,12 @@ fn padrao(palavra: &str) -> String {
     s
 }
 
-/// Colunas lidas para montar uma [`Musica`], na ordem de [`musica_da_linha`].
-const COLUNAS: &str = "caminho, titulo, artista, album, numero, duracao_s, ganho_db, pico";
+/// Colunas lidas para montar uma [`Musica`], na ordem de [`musica_da_linha`]. As cinco últimas só existem nas
+/// faixas de serviço (nas do acervo vêm vazias, por [`SEM_REMOTA`]).
+const COLUNAS: &str =
+    "caminho, titulo, artista, album, numero, duracao_s, ganho_db, pico, servico, remoto_id, isrc, capa, fonte";
+/// As colunas de faixa de serviço, vazias, para as músicas do acervo.
+const SEM_REMOTA: &str = "NULL AS servico, NULL AS remoto_id, NULL AS isrc, NULL AS capa, NULL AS fonte";
 
 fn musica_da_linha(l: &rusqlite::Row) -> rusqlite::Result<Musica> {
     Ok(Musica {
@@ -56,7 +68,16 @@ fn musica_da_linha(l: &rusqlite::Row) -> rusqlite::Result<Musica> {
         duracao_s: l.get(5)?,
         ganho_db: l.get(6)?,
         pico: l.get(7)?,
-        remota: None,
+        remota: match l.get::<_, Option<String>>(8)? {
+            Some(servico) => Some(Remota {
+                servico,
+                id: l.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                isrc: l.get(10)?,
+                capa: l.get(11)?,
+                fonte: l.get::<_, Option<String>>(12)?.unwrap_or_default(),
+            }),
+            None => None,
+        },
     })
 }
 
@@ -83,23 +104,32 @@ impl Consulta {
             // Em "Todas", uma linha por música: `MIN(caminho)` escolhe qual arquivo representa as cópias, e o
             // SQLite traz as outras colunas dessa mesma linha.
             Origem::Todas => (
-                "(SELECT MIN(caminho) AS caminho, titulo, artista, album, numero, duracao_s, ganho_db, pico, busca
-                  FROM faixas GROUP BY igual)"
-                    .to_string(),
+                format!(
+                    "(SELECT MIN(caminho) AS caminho, titulo, artista, album, numero, duracao_s, ganho_db, pico, busca,
+                             {SEM_REMOTA}
+                      FROM faixas GROUP BY igual)"
+                ),
                 ordem_normal,
             ),
             Origem::Pasta(p) => {
                 let n = proximo(&mut valores, Value::Text(texto(p)));
-                (format!("(SELECT * FROM faixas WHERE pasta = {n})"), ordem_normal)
+                (format!("(SELECT *, {SEM_REMOTA} FROM faixas WHERE pasta = {n})"), ordem_normal)
             }
             Origem::Playlist(id) => {
                 let n = proximo(&mut valores, Value::Integer(*id));
                 (
+                    // As do acervo e as dos serviços, juntas, na ordem da playlist.
                     format!(
                         "(SELECT f.caminho, f.titulo, f.artista, f.album, f.numero, f.duracao_s, f.ganho_db, f.pico,
-                                 f.busca, i.posicao
+                                 f.busca, i.posicao, {SEM_REMOTA}
                           FROM playlist_itens i
                           JOIN (SELECT * FROM faixas GROUP BY caminho) f ON f.caminho = i.caminho
+                          WHERE i.playlist = {n}
+                          UNION ALL
+                          SELECT r.caminho, r.titulo, r.artista, r.album, 0 AS numero, r.duracao_s, NULL AS ganho_db,
+                                 NULL AS pico, r.busca, i.posicao, r.servico, r.remoto_id, r.isrc, r.capa, r.fonte
+                          FROM playlist_itens i
+                          JOIN faixas_remotas r ON r.caminho = i.caminho
                           WHERE i.playlist = {n})"
                     ),
                     "ORDER BY posicao",
@@ -186,6 +216,28 @@ impl Acervo {
                  posicao  INTEGER NOT NULL,
                  caminho  TEXT NOT NULL,
                  PRIMARY KEY (playlist, posicao)
+             );
+             CREATE TABLE IF NOT EXISTS faixas_remotas (
+                 caminho   TEXT PRIMARY KEY,
+                 titulo    TEXT NOT NULL,
+                 artista   TEXT NOT NULL,
+                 album     TEXT NOT NULL,
+                 duracao_s REAL NOT NULL,
+                 servico   TEXT NOT NULL,
+                 remoto_id TEXT NOT NULL,
+                 isrc      TEXT,
+                 capa      TEXT,
+                 fonte     TEXT NOT NULL,
+                 busca     TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS salvos (
+                 servico TEXT NOT NULL,
+                 tipo    TEXT NOT NULL,
+                 id      TEXT NOT NULL,
+                 dados   TEXT NOT NULL,
+                 quando  INTEGER NOT NULL,
+                 fixado  INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (servico, tipo, id)
              );",
         )
         .map_err(erro)?;
@@ -322,6 +374,80 @@ impl Acervo {
         linhas.collect::<Result<Vec<_>, _>>().map_err(erro)
     }
 
+    // ------------------------------------------------------------------ salvos
+
+    /// Curte ou salva. O que já estava salvo só troca os dados (fica com a data e o fixado de antes).
+    pub fn salvar(&self, s: &Salvo) -> Resultado<()> {
+        self.con
+            .execute(
+                "INSERT INTO salvos (servico, tipo, id, dados, quando, fixado) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (servico, tipo, id) DO UPDATE SET dados = excluded.dados",
+                params![s.servico, s.tipo.chave(), s.id, s.dados, s.quando, s.fixado],
+            )
+            .map_err(erro)?;
+        Ok(())
+    }
+
+    /// Tira dos salvos e devolve o que saiu (para o "Desfazer").
+    pub fn tirar_salvo(&self, servico: &str, tipo: TipoSalvo, id: &str) -> Resultado<Option<Salvo>> {
+        let estava = self
+            .con
+            .query_row(
+                "SELECT servico, tipo, id, dados, quando, fixado FROM salvos
+                 WHERE servico = ?1 AND tipo = ?2 AND id = ?3",
+                params![servico, tipo.chave(), id],
+                salvo_da_linha,
+            )
+            .map(Some)
+            .or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(e) })
+            .map_err(erro)?
+            .flatten();
+        self.con
+            .execute(
+                "DELETE FROM salvos WHERE servico = ?1 AND tipo = ?2 AND id = ?3",
+                params![servico, tipo.chave(), id],
+            )
+            .map_err(erro)?;
+        Ok(estava)
+    }
+
+    pub fn esta_salvo(&self, servico: &str, tipo: TipoSalvo, id: &str) -> Resultado<bool> {
+        self.con
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM salvos WHERE servico = ?1 AND tipo = ?2 AND id = ?3)",
+                params![servico, tipo.chave(), id],
+                |l| l.get(0),
+            )
+            .map_err(erro)
+    }
+
+    /// Os salvos (de um serviço, de um tipo, ou todos): os fixados primeiro, depois do mais novo ao mais antigo.
+    pub fn salvos(&self, servico: Option<&str>, tipo: Option<TipoSalvo>) -> Resultado<Vec<Salvo>> {
+        let mut consulta = self
+            .con
+            .prepare(
+                "SELECT servico, tipo, id, dados, quando, fixado FROM salvos
+                 WHERE (?1 IS NULL OR servico = ?1) AND (?2 IS NULL OR tipo = ?2)
+                 ORDER BY fixado DESC, quando DESC, rowid DESC",
+            )
+            .map_err(erro)?;
+        let linhas = consulta.query_map(params![servico, tipo.map(TipoSalvo::chave)], salvo_da_linha).map_err(erro)?;
+        // Uma linha com um tipo que este app não conhece (de uma versão mais nova) fica de fora.
+        Ok(linhas.filter_map(Result::ok).flatten().collect())
+    }
+
+    /// Fixa ou solta um salvo. Devolve `false` se ele não está salvo (nada muda).
+    pub fn fixar(&self, servico: &str, tipo: TipoSalvo, id: &str, fixado: bool) -> Resultado<bool> {
+        let mudou = self
+            .con
+            .execute(
+                "UPDATE salvos SET fixado = ?4 WHERE servico = ?1 AND tipo = ?2 AND id = ?3",
+                params![servico, tipo.chave(), id, fixado],
+            )
+            .map_err(erro)?;
+        Ok(mudou > 0)
+    }
+
     // ------------------------------------------------------------------ playlists
 
     /// As playlists, em ordem de criação, com quantas músicas cada uma tem.
@@ -329,17 +455,60 @@ impl Acervo {
         let mut consulta = self
             .con
             .prepare(
-                // Só conta o que ainda está no acervo (a pasta da música pode ter sido retirada).
-                "SELECT p.id, p.nome, COUNT(f.caminho) FROM playlists p
-                 LEFT JOIN playlist_itens i ON i.playlist = p.id
-                 LEFT JOIN (SELECT DISTINCT caminho FROM faixas) f ON f.caminho = i.caminho
-                 GROUP BY p.id ORDER BY p.id",
+                // Só conta o que dá para tocar: o que ainda está no acervo (a pasta da música pode ter sido
+                // retirada) e as faixas de serviço guardadas.
+                "SELECT p.id, p.nome,
+                        (SELECT COUNT(*) FROM playlist_itens i WHERE i.playlist = p.id
+                           AND (i.caminho IN (SELECT caminho FROM faixas)
+                                OR i.caminho IN (SELECT caminho FROM faixas_remotas))),
+                        (SELECT COUNT(*) FROM playlist_itens i WHERE i.playlist = p.id
+                           AND i.caminho IN (SELECT caminho FROM faixas_remotas))
+                 FROM playlists p ORDER BY p.id",
             )
             .map_err(erro)?;
         let linhas = consulta
-            .query_map([], |l| Ok(Playlist { id: l.get(0)?, nome: l.get(1)?, quantas: l.get(2)? }))
+            .query_map([], |l| Ok(Playlist { id: l.get(0)?, nome: l.get(1)?, quantas: l.get(2)?, remotas: l.get(3)? }))
             .map_err(erro)?;
         linhas.collect::<Result<Vec<_>, _>>().map_err(erro)
+    }
+
+    /// Guarda (ou atualiza) o que mostrar das faixas de serviço, para elas entrarem em playlists. As músicas do
+    /// computador são ignoradas. Devolve quantas foram guardadas.
+    pub fn guardar_remotas(&mut self, musicas: &[Musica]) -> Resultado<usize> {
+        let tx = self.con.transaction().map_err(erro)?;
+        let mut guardadas = 0;
+        {
+            let mut inserir = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO faixas_remotas
+                         (caminho, titulo, artista, album, duracao_s, servico, remoto_id, isrc, capa, fonte, busca)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                )
+                .map_err(erro)?;
+            for m in musicas {
+                let Some(r) = &m.remota else { continue };
+                let busca = normalizar(&format!("{} {} {}", m.titulo, m.artista, m.album));
+                let duracao = if m.duracao_s.is_finite() { m.duracao_s.max(0.0) } else { 0.0 };
+                inserir
+                    .execute(params![
+                        texto(&m.caminho),
+                        m.titulo,
+                        m.artista,
+                        m.album,
+                        duracao,
+                        r.servico,
+                        r.id,
+                        r.isrc,
+                        r.capa,
+                        r.fonte,
+                        busca
+                    ])
+                    .map_err(erro)?;
+                guardadas += 1;
+            }
+        }
+        tx.commit().map_err(erro)?;
+        Ok(guardadas)
     }
 
     /// Cria uma playlist vazia e devolve o número dela.
@@ -599,7 +768,7 @@ mod testes {
         assert_eq!(titulos(&a, &lista), ["Segunda", "Canção 100%", "Primeira"]);
         a.tirar_da_playlist(id, Path::new("C:/Musicas/a.mp3")).expect("tirar");
         let playlists = a.playlists().expect("playlists");
-        assert_eq!(playlists, [Playlist { id, nome: "Para correr".into(), quantas: 2 }]);
+        assert_eq!(playlists, [Playlist { id, nome: "Para correr".into(), quantas: 2, remotas: 0 }]);
         assert_eq!(titulos(&a, &Filtro { consulta: "prim".into(), ..lista.clone() }), ["Primeira"]);
         let (nome, caminhos) = a.apagar_playlist(id).expect("apagar");
         assert_eq!(nome, "Para correr");
@@ -660,5 +829,93 @@ mod testes {
         assert!(arquivo.with_extension("db.corrompido").exists());
         drop(a);
         let _ = std::fs::remove_dir_all(pasta);
+    }
+
+    #[test]
+    fn salvar_tirar_e_fixar() {
+        let a = Acervo::em_memoria().expect("acervo");
+        let s = |servico: &str, tipo, id: &str, quando| Salvo {
+            servico: servico.into(),
+            tipo,
+            id: id.into(),
+            dados: format!("{{\"id\":\"{id}\"}}"),
+            quando,
+            fixado: false,
+        };
+        a.salvar(&s("youtube-music", TipoSalvo::Faixa, "f1", 10)).expect("salvar");
+        a.salvar(&s("youtube-music", TipoSalvo::Album, "a1", 20)).expect("salvar");
+        a.salvar(&s("computador", TipoSalvo::Faixa, "C:/m.mp3", 30)).expect("salvar");
+        assert!(a.esta_salvo("youtube-music", TipoSalvo::Faixa, "f1").expect("ler"));
+        let ids = |v: Vec<Salvo>| v.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        assert_eq!(ids(a.salvos(None, None).expect("ler")), ["C:/m.mp3", "a1", "f1"], "mais novo primeiro");
+        assert_eq!(ids(a.salvos(Some("youtube-music"), Some(TipoSalvo::Faixa)).expect("ler")), ["f1"]);
+        assert!(a.fixar("youtube-music", TipoSalvo::Faixa, "f1", true).expect("fixar"));
+        assert_eq!(ids(a.salvos(None, None).expect("ler")), ["f1", "C:/m.mp3", "a1"], "fixado primeiro");
+        // Salvar de novo troca os dados e mantém quando e fixado.
+        let mut de_novo = s("youtube-music", TipoSalvo::Faixa, "f1", 99);
+        de_novo.dados = "{\"novo\":true}".into();
+        a.salvar(&de_novo).expect("salvar");
+        let f1 = a.salvos(Some("youtube-music"), Some(TipoSalvo::Faixa)).expect("ler").remove(0);
+        assert_eq!((f1.quando, f1.fixado, f1.dados.as_str()), (10, true, "{\"novo\":true}"));
+        assert!(!a.fixar("youtube-music", TipoSalvo::Artista, "nada", true).expect("fixar"), "não salvo: nada");
+        let saiu = a.tirar_salvo("youtube-music", TipoSalvo::Faixa, "f1").expect("tirar").expect("estava");
+        assert!(saiu.fixado);
+        assert!(!a.esta_salvo("youtube-music", TipoSalvo::Faixa, "f1").expect("ler"));
+        assert_eq!(a.tirar_salvo("youtube-music", TipoSalvo::Faixa, "f1").expect("tirar"), None);
+        assert_eq!(TipoSalvo::da_chave(TipoSalvo::Playlist.chave()), Some(TipoSalvo::Playlist));
+        assert_eq!(TipoSalvo::da_chave("podcast"), None);
+    }
+
+    #[test]
+    fn playlist_com_faixas_de_provedor() {
+        let mut a = acervo();
+        let remota = |id: &str, titulo: &str| Musica {
+            caminho: PathBuf::from(format!("youtube-music:{id}")),
+            titulo: titulo.into(),
+            artista: "Daft Punk".into(),
+            duracao_s: 320.0,
+            remota: Some(crate::Remota {
+                servico: "youtube-music".into(),
+                id: id.into(),
+                isrc: None,
+                capa: Some("https://capa".into()),
+                fonte: "YouTube Music".into(),
+            }),
+            ..Default::default()
+        };
+        let id = a.criar_playlist("Mista").expect("criar");
+        let guardadas = a
+            .guardar_remotas(&[remota("r1", "Around the World"), musica("C:/x.mp3", "Local", "A", "", 1)])
+            .expect("guardar");
+        assert_eq!(guardadas, 1, "a local não entra nas remotas");
+        a.adicionar_a_playlist(id, &[PathBuf::from("youtube-music:r1"), PathBuf::from("C:/Musicas/a.mp3")])
+            .expect("adicionar");
+        a.adicionar_a_playlist(id, &[PathBuf::from("youtube-music:r1")]).expect("de novo não duplica");
+        let lista = Filtro { origem: Origem::Playlist(id), ..Default::default() };
+        let m = a.buscar(&lista, 100).expect("buscar");
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].titulo, "Around the World");
+        assert_eq!(m[0].caminho, PathBuf::from("youtube-music:r1"));
+        assert_eq!(m[0].remota.as_ref().map(|r| r.id.as_str()), Some("r1"));
+        assert_eq!(m[0].remota.as_ref().and_then(|r| r.capa.as_deref()), Some("https://capa"));
+        assert_eq!(m[0].remota.as_ref().map(|r| r.fonte.as_str()), Some("YouTube Music"));
+        assert!(m[1].remota.is_none());
+        let p = a.playlists().expect("playlists").into_iter().find(|p| p.id == id).expect("tem");
+        assert_eq!((p.quantas, p.remotas), (2, 1));
+        let achou = a.buscar(&Filtro { consulta: "around".into(), ..lista.clone() }, 100).expect("buscar");
+        assert_eq!(achou.len(), 1, "a busca acha a remota");
+        let so_remota = a.criar_playlist("Só serviço").expect("criar");
+        a.guardar_remotas(&[remota("r2", "One More Time")]).expect("guardar");
+        a.adicionar_a_playlist(so_remota, &[PathBuf::from("youtube-music:r2"), PathBuf::from("youtube-music:r1")])
+            .expect("adicionar");
+        let titulos: Vec<String> = a
+            .buscar(&Filtro { origem: Origem::Playlist(so_remota), ..Default::default() }, 100)
+            .expect("buscar")
+            .into_iter()
+            .map(|m| m.titulo)
+            .collect();
+        assert_eq!(titulos, ["One More Time", "Around the World"], "na ordem em que entraram");
+        // As remotas não aparecem em "Todas" (lá só os arquivos das pastas).
+        assert!(a.buscar(&Filtro::default(), 100).expect("buscar").iter().all(|m| m.remota.is_none()));
     }
 }

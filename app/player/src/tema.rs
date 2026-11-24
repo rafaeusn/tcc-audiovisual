@@ -156,7 +156,7 @@ fn linear(v: f32) -> f32 {
     if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
 }
 
-fn luminancia(p: [f32; 3]) -> f32 {
+pub(crate) fn luminancia(p: [f32; 3]) -> f32 {
     0.2126 * linear(p[0]) + 0.7152 * linear(p[1]) + 0.0722 * linear(p[2])
 }
 
@@ -198,8 +198,7 @@ pub fn tripla(c: Hsla) -> [f32; 3] {
 }
 
 /// Razão de contraste WCAG entre duas cores opacas.
-#[cfg(test)]
-fn contraste(a: [f32; 3], b: [f32; 3]) -> f32 {
+pub(crate) fn contraste(a: [f32; 3], b: [f32; 3]) -> f32 {
     let (la, lb) = (luminancia(a), luminancia(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }

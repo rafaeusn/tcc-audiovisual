@@ -213,7 +213,29 @@ impl Player {
                 },
             )));
         }
+        let estante = aj.layout == nucleo::Layout::Estante;
+        let mut layouts = self.seletor("seletor-layout", largura_seletor, 2, usize::from(estante));
+        for (i, l) in [nucleo::Layout::Palco, nucleo::Layout::Estante].into_iter().enumerate() {
+            layouts = layouts.child(self.opcao(("layout", i), l.nome(), aj.layout == l).on_click(cx.listener(
+                move |this, _: &ClickEvent, _, cx| {
+                    this.trocar_layout(l);
+                    cx.notify();
+                },
+            )));
+        }
         let aparencia = bloco_ajuste(&c, false)
+            .child(linha_ajuste(
+                &c,
+                "icones/layout.svg",
+                "Layout",
+                if estante {
+                    "Estante: os espaços ao lado, a página no meio e o visual no trilho Tocando (Ctrl L)."
+                } else {
+                    "Palco: o visual no centro e as páginas por cima dele (Ctrl L)."
+                }
+                .into(),
+            ))
+            .child(div().pl(px(recuo)).child(layouts))
             .child(linha_ajuste(
                 &c,
                 "icones/tone.svg",

@@ -8,6 +8,7 @@ description = "O Player: interface em GPUI, Modo Escuta e os visuais."
 build = "build.rs"
 
 [dependencies]
+serde_json = "1"
 nucleo.workspace = true
 audio.workspace = true
 analise.workspace = true
@@ -29,6 +30,7 @@ image.workspace = true
 smallvec.workspace = true
 raw-window-handle.workspace = true
 log.workspace = true
+serde.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_SystemInformation", "Win32_System_Threading", "Wdk_System_SystemServices"] }

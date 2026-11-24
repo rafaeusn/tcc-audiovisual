@@ -81,16 +81,36 @@ impl Camada {
 
     /// Pinta o fundo e o visual dentro de `retangulo` (pixels físicos) com cantos de raio `raio`.
     pub fn desenhar(&mut self, fundo: [f32; 3], retangulo: (f32, f32, f32, f32), raio: f32, quadro: &Quadro) {
+        self.desenhar_esticado(fundo, retangulo, None, raio, quadro);
+    }
+
+    /// Como [`desenhar`](Self::desenhar), mas desenha o visual no tamanho `interno` e o estica no retângulo (para um
+    /// retângulo que anima de tamanho sem recriar nada a cada quadro).
+    pub fn desenhar_esticado(
+        &mut self,
+        fundo: [f32; 3],
+        retangulo: (f32, f32, f32, f32),
+        interno: Option<(f32, f32)>,
+        raio: f32,
+        quadro: &Quadro,
+    ) {
         let fundo = wgpu::Color { r: fundo[0] as f64, g: fundo[1] as f64, b: fundo[2] as f64, a: 1.0 };
-        self.desenhar_com(fundo, retangulo, raio, quadro);
+        self.desenhar_com(fundo, retangulo, interno, raio, quadro);
     }
 
     /// Pinta só o visual dentro de `retangulo`, com o resto transparente (camada criada por `new_transparente`).
     pub fn desenhar_recorte(&mut self, retangulo: (f32, f32, f32, f32), raio: f32, quadro: &Quadro) {
-        self.desenhar_com(wgpu::Color::TRANSPARENT, retangulo, raio, quadro);
+        self.desenhar_com(wgpu::Color::TRANSPARENT, retangulo, None, raio, quadro);
     }
 
-    fn desenhar_com(&mut self, fundo: wgpu::Color, retangulo: (f32, f32, f32, f32), raio: f32, quadro: &Quadro) {
+    fn desenhar_com(
+        &mut self,
+        fundo: wgpu::Color,
+        retangulo: (f32, f32, f32, f32),
+        interno: Option<(f32, f32)>,
+        raio: f32,
+        quadro: &Quadro,
+    ) {
         if self.perdida() {
             return;
         }
@@ -104,8 +124,14 @@ impl Camada {
             _ => return,
         };
         let vista = textura.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let destino =
-            Destino { vista: &vista, tamanho: (self.config.width, self.config.height), fundo, retangulo, raio };
+        let destino = Destino {
+            vista: &vista,
+            tamanho: (self.config.width, self.config.height),
+            fundo,
+            retangulo,
+            raio,
+            interno,
+        };
         self.motor.desenhar(&self.device, &self.queue, &destino, quadro);
         self.queue.present(textura);
     }

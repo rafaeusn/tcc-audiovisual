@@ -16,6 +16,12 @@ pub struct Faixa {
     pub artistas: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub album: Option<String>,
+    /// O id do álbum no serviço (para a página do álbum), quando o provedor sabe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album_id: Option<String>,
+    /// O id de cada artista, na mesma ordem de `artistas` (`""` quando não tem).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artistas_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duracao_s: Option<f64>,
     /// Endereço da capa.
@@ -36,6 +42,11 @@ impl Faixa {
         self.artistas.join(", ")
     }
 
+    /// O id do artista `i` (o mesmo índice de `artistas`), quando o provedor mandou.
+    pub fn id_do_artista(&self, i: usize) -> Option<&str> {
+        id_do_artista(&self.artistas, &self.artistas_ids, i)
+    }
+
     /// O ISRC só com letras e números, em maiúsculas (cada serviço escreve de um jeito).
     pub fn isrc_limpo(&self) -> Option<String> {
         let limpo: String =
@@ -51,10 +62,26 @@ pub struct Album {
     pub id: String,
     pub titulo: String,
     pub artistas: Vec<String>,
+    /// O id de cada artista, na mesma ordem de `artistas` (`""` quando não tem).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artistas_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ano: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capa: Option<String>,
+}
+
+impl Album {
+    /// O id do artista `i` (o mesmo índice de `artistas`), quando o provedor mandou.
+    pub fn id_do_artista(&self, i: usize) -> Option<&str> {
+        id_do_artista(&self.artistas, &self.artistas_ids, i)
+    }
+}
+
+/// Só vale o id que tem um nome no mesmo lugar: listas de tamanhos diferentes não trocam um artista por outro.
+fn id_do_artista<'a>(nomes: &[String], ids: &'a [String], i: usize) -> Option<&'a str> {
+    nomes.get(i)?;
+    ids.get(i).map(String::as_str).filter(|id| !id.is_empty())
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -134,6 +161,8 @@ pub enum Capacidade {
     /// Entrega o áudio (por endereço ou tocando sozinho).
     Audio,
     Conta,
+    /// Toca sozinho, num programa do próprio serviço que a pessoa liga (o Soloist do Spotify): ver `Tocador`.
+    TocaSozinho,
     Podcast,
     Video,
     Canvas,
@@ -176,5 +205,21 @@ mod testes {
     fn capacidades_em_kebab_case() {
         let c: Vec<Capacidade> = serde_json::from_str(r#"["busca","editar-playlists","audio"]"#).expect("lista");
         assert_eq!(c, vec![Capacidade::Busca, Capacidade::EditarPlaylists, Capacidade::Audio]);
+    }
+
+    #[test]
+    fn ids_de_album_e_artista_opcionais() {
+        let f: Faixa =
+            serde_json::from_str(r#"{"servico":"s","id":"1","titulo":"T","artistas":["A","B"]}"#).expect("lê");
+        assert_eq!(f.album_id, None);
+        assert_eq!(f.id_do_artista(0), None);
+        let f = Faixa { artistas_ids: vec!["a1".into(), String::new()], ..f };
+        assert_eq!(f.id_do_artista(0), Some("a1"));
+        assert_eq!(f.id_do_artista(1), None, "id vazio");
+        assert_eq!(f.id_do_artista(5), None, "fora da lista");
+        let json = serde_json::to_string(&Faixa { artistas_ids: Vec::new(), ..f.clone() }).expect("escreve");
+        assert!(!json.contains("artistas_ids"), "vazio não vai no JSON");
+        let a = Album { artistas: vec!["A".into()], artistas_ids: vec!["x".into(), "y".into()], ..Default::default() };
+        assert_eq!(a.id_do_artista(1), None, "mais ids que nomes: o id sem nome não vale");
     }
 }

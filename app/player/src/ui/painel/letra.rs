@@ -6,7 +6,7 @@ impl Player {
     /// Letra: a linha de agora, a anterior e as duas próximas. Rola sozinha com a música, numa mola; a linha de
     /// agora enche como num karaokê (palavra por palavra quando a letra traz os tempos delas) e as outras apagam
     /// com a distância.
-    pub(super) fn corpo_letra(&self, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn corpo_letra(&self, cx: &mut Context<Self>) -> Div {
         const VISIVEIS: f32 = 4.0;
         let c = self.cores();
         // Altura de cada linha da letra: cabem duas linhas de texto e, com a tradução ou as letras latinas, a de

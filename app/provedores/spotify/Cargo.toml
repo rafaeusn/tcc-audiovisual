@@ -1,0 +1,32 @@
+[package]
+name = "provedor-spotify"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Provedor do Spotify para o Player (F6): login pelo navegador, os dados pela sessão do librespot e o Soloist (o player oficial do Spotify), pelo protocolo de provedores."
+
+[[bin]]
+name = "provedor-spotify"
+path = "src/main.rs"
+
+[dependencies]
+provedores.workspace = true
+servicos.workspace = true
+serde_json = "1"
+# O mesmo reqwest que o librespot-oauth já usa: os pedidos internos do Spotify.
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
+# A sessão do Spotify, como o Spotifast (librespot é MIT).
+librespot-core = { version = "0.8", default-features = false, features = ["native-tls"] }
+librespot-oauth = { version = "0.8", default-features = false, features = ["native-tls"] }
+# O Soloist: a API local dele é um WebSocket, e o programa vem num zip.
+tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[lints]
+workspace = true

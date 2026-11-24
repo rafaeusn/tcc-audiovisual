@@ -8,12 +8,19 @@
 //! 160 ms para voltar), marcador de aba desliza em 200 ms, dígitos do BPM rolam em 240 ms. O que muda o tempo
 //! todo (número da energia) não anima.
 
+/// Quantos cartões uma grade longa mostra por vez.
+pub(crate) const CARTOES_POR_VEZ: usize = 60;
+
 mod biblioteca;
+mod busca;
 mod busca_letra;
 mod campo;
 mod casca;
 pub mod configuracoes;
 mod dock;
+mod espacos;
+mod estante;
+mod faixa;
 mod fila;
 mod heroi;
 pub mod ilha;
@@ -21,10 +28,12 @@ mod letra_cheia;
 mod loja;
 mod modulo;
 mod musicas;
+mod paginas;
 mod painel;
 mod paleta;
 mod playlist;
 mod reproducao;
+mod servicos;
 
 use crate::app::Player;
 use crate::arranjo::Ret;

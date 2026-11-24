@@ -1,7 +1,7 @@
 # AGENTS.md: contexto para qualquer agente de IA
 
 Leia isto antes de mexer no projeto. Vale para Cursor, Claude Code, Codex ou um chat novo. Atualizado em
-22/11/2026. **Responda sempre em português do Brasil.**
+23/11/2026. **Responda sempre em português do Brasil.**
 
 Detalhes de cada função do app: [`app/README.md`](app/README.md). História do projeto e decisões de produto:
 [`CONTEXTO-TCC.md`](CONTEXTO-TCC.md). Plano original da v1 (fases 0–6): [`docs/plano-v1.md`](docs/plano-v1.md).
@@ -65,7 +65,7 @@ Dentro de `app/`:
 ```bash
 cargo run -p player                      # abre o app (debug)
 cargo build --release -p player          # release (D:/Rust/target/release/player.exe)
-cargo test --workspace                   # 289 testes em 22/11/2026 (fora o `visual --test desenho`), todos passando
+cargo test --workspace                   # 483 testes em 23/11/2026 (fora o `visual --test desenho`), todos passando
 cargo clippy --workspace --all-targets   # tem que sair sem aviso
 cargo fmt --all
 cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
@@ -119,6 +119,7 @@ cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 | `preanalise` | Pré-análise (porte de `preview/preanalysis.js`, em `pista.rs`): batidas por programação dinâmica, tempo forte, clareza do pulso, trechos por novidade, energia calibrada, drops e subida; tom (`tom.rs`); LUFS; o modo arquivo do diretor (`condutor.rs`); `cache::Cache` em `analises.db` (vale enquanto tamanho, data e `VERSAO` batem) |
 | `biblioteca` | Varre pastas, lê etiquetas e ReplayGain (`lofty`) e guarda no acervo SQLite (`faixas` com chave `(caminho, pasta)`, `playlists`, `playlist_itens`); consultas por `Filtro` (origem, busca, álbum, artista) |
 | `player` | O app em GPUI 0.2.2: estado em `app.rs`, telas em `ui/*.rs` |
+| `provedores/spotify` | O provedor do Spotify (F6, um programa à parte, embutido; o Soloist em `soloist/`): login pelo navegador com o Client ID público do librespot (`spotify.rs`), a conta e o refresh token cifrado (`conta.rs`), quem usa a porta 8898 (`porta.rs`); os dados pelo Pathfinder com a sessão (`pathfinder.rs`, `codigos.rs`), a conversão pura (`conversao.rs`) e as páginas (`dados.rs`). Compila só com `vergen` 9.0.6 no `Cargo.lock` |
 | `provedores/youtube-music` | O provedor do YouTube Music (um programa à parte, GPL-3.0-only por causa do `rustypipe`): metadados pelo `rustypipe`, áudio pelo cliente visionOS (`visionos.rs`). Embutido: o Player o acha ao lado do `player.exe` (`remoto::EMBUTIDOS`) |
 
 ### Princípio das threads
@@ -158,11 +159,14 @@ thread.** Pedidos seguem por canal (`mpsc`).
   (`Recado::Atraso`) e a tradução por música e idioma (`Recado::Traduzir`, `EstadoDaTraducao`). O texto embaixo de
   cada linha (tradução, letras latinas) sai de `Player::extra_da_linha`; a letra em tela cheia é `ui/letra_cheia.rs`
   (`Player::letra_cheia`, comando `LetraTelaCheia`, tecla Y), que pede ao arranjo o visual na janela inteira.
-- `arranjo.rs`: layout responsivo (largo, gaveta, empilhado, mini).
+- `arranjo.rs`: layout responsivo (largo, gaveta, empilhado, mini), no Palco e na Estante (`Pedido.estante`,
+  `Pedido.expansao`; `Arranjo.lateral` e `Arranjo.tocando`).
 - `ui/`: `casca` (topo e trilho), `heroi`, `painel` (módulos e Ajustes), `reproducao` (crossfade, volume
   igualado e equalizador nos Ajustes), `dock`, `paleta` (Ctrl K), `busca_letra`, `campo` (campo de texto),
-  `biblioteca`, `musicas` (categorias, visões, ações da linha), `fila`, `playlist` (janela), `loja`, `modulo`
-  (ficha), `mod.rs` (botões, dicas e ajudantes).
+  `biblioteca`, `musicas` (categorias, visões, ações da linha, `campo_de_busca`), `fila`, `playlist` (janela), `loja`,
+  `modulo` (ficha), `espacos` (topo da folha: espaços e abas), `paginas` (Para você, álbum, playlist, artista,
+  Biblioteca do serviço), `busca` (página Busca), `faixa` (página da faixa), `estante` (lateral, barra de ícones da gaveta, o quadro do
+  visual no trilho Tocando e a navegação de baixo da Estante), `mod.rs` (botões, dicas e ajudantes).
 - `recursos/`: fontes, ícones SVG e os manifestos dos módulos (`recursos/modulos/*.toml`).
 
 ### Convenções
@@ -282,6 +286,153 @@ janelas por cima.
 150/170, tom com Camelot, tempo do compasso aceso, "Intensa" (vermelho) no instante de cada drop e o visual
 explodindo nele; a troca para o Spotify (Modo Escuta) seguiu sozinha. O ganho automático do ao vivo só foi
 medido no diagnóstico com arquivos (não com o Spotify ouvido por um tempo longo).
+
+**F2, parte 1 (23/11/2026)**, desenho em
+[`docs/superpowers/specs/2026-11-23-f2-espacos-e-paginas-design.md`](docs/superpowers/specs/2026-11-23-f2-espacos-e-paginas-design.md)
+(espaços por serviço com a identidade de cada um, páginas unificadas, layouts Palco e Estante; o visual mora no trilho
+"Tocando" da Estante e cresce até o Palco): a `Apresentacao` ganhou `identidade` (cor `#RRGGBB` e logo SVG de até
+32 KB) e as faixas e álbuns, `album_id` e `artistas_ids` (opcionais, protocolo v1); o YouTube Music manda os dele
+(ao vivo: 5 de 5 faixas com os ids); `remoto.rs` grava a logo em `<dados>/provedores-dados/<serviço>/logo.svg`, guarda
+a cor em `InfoDoProvedor` e pede as páginas (`PedidoDePagina`, `PaginaRemota`, cache de 10 min, "Tentar de novo").
+Conferido na cópia: a logo gravada. Ainda sem tela (partes 3 a 5); a API das páginas tem um `expect(dead_code)` que
+deve sair quando as telas a usarem.
+**Parte 2 (23/11/2026)**: o acervo guarda o que a pessoa curte e salva de qualquer serviço (`salvos`: `TipoSalvo`,
+`Salvo`, `salvar`, `tirar_salvo`, `esta_salvo`, `salvos`, `fixar`; os fixados vêm primeiro; `dados` é o item em JSON,
+nunca áudio) e as playlists do Player aceitam faixas de serviço (`faixas_remotas` com a chave `servico:id`,
+`guardar_remotas`; a consulta da playlist junta as do acervo e as do serviço; `Playlist.remotas`). O Player manda
+`Musica` ao criar playlist e pôr músicas nela (`Local::por_na_playlist`). Sem tela de curtir e fixar ainda (partes 3 e 4).
+**Parte 3 (23/11/2026)**: `navegacao.rs` (`Espaco`, `Rota`, `Navegacao` com uma pilha por espaço, até 50 para trás) e
+`espacos.rs` (a paleta do espaço tirada da cor do serviço, com contraste conferido nos 4 temas; a cor tirada do nome
+para provedor sem cor); o `Player` trocou o campo `pagina` por `nav` e o método `pagina()` (a `Pagina` de hoje sai da
+rota aberta); `app/navegar.rs` abre rotas, troca de espaço (grava `ajustes.espaco`, anima a cor em 250 ms) e volta a
+Tudo quando o provedor do espaço sai (`conferir_espaco`). A folha do Palco ganhou o topo (`ui/espacos.rs`: voltar,
+avançar e a fileira de espaços com a logo SVG do provedor por `img`) e a cor do espaço (folha, filete e degradê).
+Comandos `Voltar`/`Avancar` (`Alt ←/→`, botões do mouse) e `ProximoEspaco` (`Ctrl Tab`). O início do YouTube Music
+junta lançamentos, clipes novos e as paradas (só as paradas vinham vazias). "Para você" ainda é texto (a parte 4 faz o
+desenho). Conferido na cópia: logo, cor vermelha, as 4 prateleiras, Tudo neutro, voltar e avançar, Esc e o espaço
+gravado. Não conferido: os botões do mouse e `Alt ←/→` (as mensagens de teste não levam o Alt). Depois da revisão: a
+paleta anda uma vez por quadro (`atualizar_paleta`, a troca dura mesmo 250 ms), escolher um espaço com a folha fechada
+abre a primeira página dele, navegar não vale na janela mini nem com a barra de comandos ou a janela de playlist abertas
+e desfaz o modo edição e a gaveta, a página vencida fica na tela enquanto renova (e um erro ao renovar não a apaga), e
+um provedor que não abriu tira o espaço só nesta abertura (o lembrado continua). Essas correções não foram vistas na
+cópia, só nos testes.
+**Parte 4a (23/11/2026)**: `capas.rs` (capas da internet baixadas por 2 threads e guardadas em `<dados>/capas`, a tela
+desenha o arquivo com `img`), `paginas.rs` (o cartão de cada `Item`, a rota e o pedido de cada item, o link do
+artista só com id e capacidade, `Item` ↔ `Salvo`), `app/salvos.rs` (curtir com clique otimista, tocar faixas de
+provedor) e `ui/paginas.rs` ("Para você" em prateleiras de cartões com esqueleto; álbum, playlist e artista; a
+Biblioteca do serviço com filtro e fixar). A thread da biblioteca atende salvar, tirar e fixar e publica `salvos` na
+`Lista`. Conferido na cópia com o YouTube Music: as prateleiras com capa (118 capas guardadas), abrir um álbum, tocar,
+curtir (coração cheio e o álbum na Biblioteca do serviço), a página do artista e fixar (gravado no banco). Ficou para a
+4b: a busca com todos os tipos, a página da faixa, a Fila e o Histórico como páginas. Depois da revisão: "Aleatório" liga
+o aleatório antes de tocar (antes perdia as faixas de antes da sorteada), a prateleira rola só de lado (a rodinha desce
+a página) com setas nas pontas que não deixam o clique passar, a capa mostra a silhueta enquanto carrega ou se não
+decodifica, só se guarda o que parece imagem e cabe em 8 MB, as capas prontas ficam na memória e a que falhou tenta de
+novo depois de 1 minuto, os salvos chegam já lidos da thread da biblioteca, e cada página guarda a própria rolagem.
+Ficou: lista longa de playlist sem `uniform_list`, curtir e descurtir antes da confirmação pisca o coração, o link do
+artista no cabeçalho cobre o subtítulo inteiro, a foto do artista aberto por um link, tirar uma faixa da Biblioteca do
+serviço (o cartão não tem coração) e curtir e fixar como comandos.
+**Parte 4b (23/11/2026)**: o provedor do YouTube Music busca todos os tipos (principal + faixas, álbuns, artistas e
+playlists ao mesmo tempo, 8 s de prazo cada; `conversao::juntar_busca` põe o melhor resultado primeiro, sem repetir, e
+prefere a versão da busca por tipo, mais completa); `remoto::Busca` guarda `itens` e `respondidos`; `paginas.rs` agrupa
+(`agrupar_busca`, `FiltroDaBusca`, `servico_buscando`, `rota_do_album`, `abas_da_faixa`). A folha ganhou as abas do
+espaço (`navegacao::abas_do_espaco`: Para você, Busca, Biblioteca; o computador não tem); `ui/busca.rs` (melhor
+resultado, faixas, prateleiras, chips; em Tudo um bloco por serviço) e `ui/faixa.rs` (Letra da faixa que toca, Mapa
+da pré-análise em memória, Parecidas só com `Radio`). `Rota::Fila` e `Rota::Historico` (a aba da Biblioteca sai da
+rota, `Player::aba_biblioteca()`; num serviço, a Biblioteca mostra só Fila e Histórico); o bloco "Nos serviços" virou o
+atalho para a Busca. O teclado só vai ao campo de busca com ele na tela (`navegacao::tem_campo_de_busca`), e
+`Alt ←/→` vale com o campo ativo. Conferido na cópia com o YouTube Music: busca "daft punk" (artista em destaque,
+faixas, álbuns), chip Álbuns, página da faixa, tocar e o Mapa (107 BPM, Lá menor 8A, a posição andando), a Fila pelo
+dock no espaço do serviço e voltar, o Histórico, a Busca em Tudo e, depois da revisão, o campo que não perde a
+largura, o empilhado em folha estreita e Backspace numa página de álbum sem mexer na busca. Não conferido: a aba Letra
+com uma letra (o módulo não estava ligado na cópia), dois serviços respondendo ao mesmo tempo e `Alt ←/→` (as
+mensagens de teste não levam o Alt). Ficou: `Busca.faixas` só serve a um teste, o agrupamento roda a cada quadro, o
+"Tocar" da página da faixa troca a fila inteira, voltar depois de "Buscar nos serviços" (que passa para Tudo) não volta
+ao computador, e ids de linha que colidem com mais de 10 artistas ou 100 faixas por serviço.
+**Parte 5, o layout Estante (23/11/2026)**: `ajustes.layout` (`Palco`, o padrão, ou `Estante`), `Comando::TrocarLayout`
+(`Ctrl L`) e `Comando::ExpandirVisual` (`X`); Configurações › Aparência › Layout e o cartão Estante na aba Layouts da
+Loja. `arranjo::estante`: largo = lateral (248) + folha (o herói) + trilho Tocando (340: o visual 4:3 no alto, os
+módulos embaixo), dock sob a folha e o trilho; gaveta = a barra de ícones e o Tocando ao lado da página (ela encolhe:
+por cima, a folha esconderia o visual, que é desenhado por baixo da interface); empilhado = a faixa do visual (72 px)
+acima do dock, que sai em janela baixa. `ui/estante.rs` (lateral com espaços, páginas e salvos, os fixados primeiro;
+barra de ícones; o quadro do visual; a navegação de baixo). Na Estante sempre há página (`Navegacao::garantir_pagina`;
+voltar ao Palco devolve a folha fechada, `soltar_preenchidas`; voltar e avançar pulam a folha fechada,
+`voltar_sem_vazias`); H e o × levam à primeira página, Esc volta uma página. Expandir: `Pedido.expansao` leva o
+retângulo do visual até a janela (as regiões esmaecem) e, no fim, o arranjo é o da tela cheia (título grande, encolher,
+arrastar a janela pelo visual); enquanto anima, o motor desenha no tamanho da janela e estica
+(`Destino.interno`, `visual::tamanho_dos_alvos`), sem recriar os alvos a cada quadro. A skin imersiva não vale na
+Estante; o erro do visual aparece no quadro, não sobre a página. Conferido na cópia com o YouTube Music: 1280 px
+(lateral com o espaço vermelho, prateleiras, o Tocando com o visual e os módulos, tocar), expandir com X (visual na
+janela inteira, título grande, botão encolher) e Esc, 1000 px (barra de ícones; o X com a gaveta fechada abre o
+Tocando e expande dele; ao encolher ele fica aberto) e 600 px (espaços no topo da folha, a faixa do visual, as abas
+embaixo). Não conferido: a animação sentida na tela (só fotos paradas), o `Ctrl L` (as mensagens de teste não levam o
+Ctrl; o layout foi trocado nos ajustes), clicar nos salvos da lateral e o erro do visual. Ficou: o visual estica
+(deforma) durante os 0,3 s da expansão, o modo edição no empilhado da Estante (sem painel), a lista da lateral monta as
+faixas a cada quadro, e o topo da folha monta a fileira de espaços mesmo escondida.
+**Parte 6, acabamento e documentos (23/11/2026)**: `Comando::AbrirEspaco(n)` (`Ctrl 1` a `Ctrl 9`; fora de `TODOS`),
+`Comando::CurtirFaixa` (`C`: a faixa de serviço que toca, a versão mais completa da página aberta ou da busca, senão
+`paginas::faixa_da_musica`) e `Comando::FixarPagina` (o item da rota aberta, `paginas::item_da_rota`; salva antes, se
+preciso). `Busca.faixas` saiu (as telas leem `itens`). O resumo da fase está em
+[`docs/f2-paginas.md`](docs/f2-paginas.md). Os três comandos não foram vistos na cópia (só os testes da lógica).
+**Com isso a F2 está completa.**
+
+**F6, o provedor do Spotify**, desenho aprovado em
+[`docs/superpowers/specs/2026-11-23-f6-spotify-design.md`](docs/superpowers/specs/2026-11-23-f6-spotify-design.md): o
+Spotify toca pelo Soloist (o player oficial) ou pelo Match do YouTube Music. Tocar pelo librespot saiu na revisão de 23/11/2026
+(decifra as faixas protegidas fora do player do Spotify, o que a regra 2 não deixa): ele fica só no login e nos dados. **Parte 1 (23/11/2026)**,
+o login: o protocolo ganhou `entrar`, `sair`, `conta` e a `conta` na apresentação (capacidade `Conta`); o Player pergunta
+`conta` a cada 2 s enquanto ela está `entrando` (`remoto.rs`, `InfoDoProvedor.conta`, `Remoto::entrar/sair`); o cartão de
+entrar fica em Para você, Busca e Biblioteca do espaço (`contas.rs`, `ui/paginas.rs::cartao_da_conta`) e a Loja mostra a
+conta com Sair. Duas armadilhas do librespot: (1) o `librespot-oauth` escreve na saída padrão antes de escutar na porta, e
+com a saída presa (`stdout().lock()`) ele trava para sempre e o navegador volta para uma porta fechada (o `main` passa
+`stdout()` sem lock); (2) com conta que não é Premium, o librespot **fecha o programa** (`exit(1)`): a marca `conectando`
+ao lado da credencial evita o laço de reabrir e cair (e a credencial sai, para dar para entrar com outra conta). O plano
+(`type`) chega depois de entrar. Depois da revisão: `sair` cancela a tentativa no meio (a geração é conferida antes de
+guardar, conectar e apagar; `na_sessao` deixa uma entrar por vez), solta a porta e encerra a sessão; "Cancelar" enquanto o
+navegador está aberto (`Conta.navegador`); o Player percebe um provedor que fecha ou emudece no meio do login e diz o
+motivo (`depois_de_perguntar`); as páginas do serviço são esquecidas quando a conta muda; a Loja mostra o erro. Conferido na cópia, na
+conta do Rafael: entrar pelo navegador, `conta.dpapi` guardada, reabrir e entrar sozinho, "Conectado como rafa ·
+Premium". Também conferido: Sair e a porta ocupada (por um programa de
+teste, no cartão e na Loja). Não conferido ao vivo: "Cancelar" com o navegador aberto (só o teste com a porta real, sem
+navegador), e uma conta gratuita. Ficou: o `librespot-oauth` aceita a primeira conexão na porta (uma
+ociosa do navegador prende o login; o certo é escrever a própria escuta), recusar no navegador mostra um erro em inglês, e
+`situacao` desconhecida invalida a apresentação.
+
+**F6, parte 2 (23/11/2026)**, os dados: tudo pelo Pathfinder (`api-partner.spotify.com/pathfinder/v2/query`) com o portador
+do Login5 e o client token da sessão, **sem Client ID** (a sonda provou as 11 leituras na conta do Rafael; a reserva do
+Client ID do desenho não entrou). Cada operação tem um código (`codigos.rs`); código trocado responde 412, e o novo é
+relido do texto do site em segundo plano (o embutido antes; uma procura em vão a cada 10 min por operação). Um pedido
+inteiro tem 16 s (`dados.rs`); sessão caída reentra em segundo plano (`Login::reconectar`, no máximo uma a cada 30 s, sem a
+marca `conectando` em conta Premium). Lista pela metade é erro, nunca vazia; até 2000 faixas, 200 lançamentos, 1000 itens
+da biblioteca. Protocolo: `biblioteca`. No Player: `PedidoDePagina::Biblioteca`, `paginas::juntar_biblioteca` (a conta e os
+salvos, na página e na lateral), `janela_de_linhas` (a lista de detalhe monta só o que aparece), `avisar_se_nao_toca`
+(serviço sem `Audio`), e um erro de página ou de busca faz perguntar a conta de novo. Conferido na cópia com a conta do
+Rafael: Para você em português, busca, artista, álbum, Biblioteca, a lateral e as Curtidas (721 de 722) roladas até o fim.
+Não conferido ao vivo: sessão que cai e volta, código trocado, login revogado, playlist com mais de 100 faixas que não
+seja as Curtidas. Ficou: o ISRC das faixas (o Pathfinder não manda; parte 4), a lista que falha inteira na fila quando o
+serviço cai (parte 4), o corte em 2000 sem aviso. Para reler os códigos à mão: o pacote
+`web-player.<versão>.js` de open.spotify.com traz `"operação","query","<64 hex>"`; a busca e a discografia ficam nos
+pedaços `xpui-routes-search` e `xpui-routes-artist`.
+
+**F6, partes 3 e 4 (23/11/2026)**, tocar, em [`docs/f6-spotify.md`](docs/f6-spotify.md). `pares::quem_toca` diz quem toca cada
+faixa: o próprio provedor, o tocador do serviço (`Sozinho`: o Soloist), outro serviço (o Match), alguém abrindo (a faixa espera) ou
+ninguém. **Match**: `Tarefa::Casar` na thread do serviço que tem áudio; `<dados>/pares.json`; `FonteLida` guarda de que gravação é o
+endereço (a pré-análise usa essa chave, e nunca a da faixa do Spotify). O casador ganhou pisos (título 0,5; artista 0,3) e desconto de
+outra versão: antes, outra música do mesmo artista com a mesma duração passava. **Soloist** (`provedores/spotify/src/soloist/`:
+`leitura.rs` pura, `instalar.rs`, `programa.rs`, `motor.rs`): fica aberto e recebe `play` pela API local; nada do áudio passa pelo
+Player. No Player, `externo.rs` (a thread que pergunta e manda) e `local.rs` (`Externo`, `acompanhar_externo`, `com_o_pedido`: o que
+a pessoa mandou fica na tela até a leitura confirmar). `servir` responde as páginas lentas de outra thread
+(`Servico::em_segundo_plano`), então ele recebe a saída **sem** `lock()`. Armadilhas: o Spotify emenda outra faixa no fim (o motor
+pausa 250 ms antes); uma faixa abandonada pode começar depois (`Aberta::calar` a pausa por 20 s); `desligar` no meio do download
+precisa de `parar`. Configurações › Serviços (`ui/servicos.rs`): "Colar a chave copiada" lê a área de transferência e manda direto ao
+provedor. Conferido na cópia com a conta do Rafael, muda: as Curtidas e um artista tocando pelo Match com pré-análise (remixes,
+*slowed* e *sped up* casados certo), "Procurar outra gravação", a página da faixa e a seção Serviços. **O Soloist de verdade, com
+a chave do Rafael (23/11/2026)**: baixou, o Windows não bloqueou, abriu, pareou, voltou sozinho à conta e a escuta achou o processo dele;
+mas o build 1.4.0.7 do Spotify (publicado no mesmo dia) cai com 0xc0000005 ao começar a tocar, sempre em `soloist.exe+0x2120d1`, também
+fora do Player, sem a API local, no modo de uma faixa e em todas as saídas de som (a pasta `D:/Rust/soloist-teste`; relato igual em
+crmne/spotifast#1412). Por isso um Soloist que cai duas vezes sem nunca ter tocado 20 s é dado por quebrado: não é mais aberto, o Match
+toca e outro build é procurado uma vez por dia (`Instalado::caiu`, `funcionou`). Falta ver tocar, pausar, pular, o fim e o visual com um
+build que funcione. Ficou: duas instâncias do Player na mesma pasta, trazer a posição ao cair para o Match, e o Soloist e o
+Spotifast abertos juntos (dois `soloist.exe` para a captura por nome).
 
 **F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
 LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
@@ -428,11 +579,11 @@ O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`
 | --- | --- | --- |
 | F0 | Base aberta: GPL-3, `LICENSE`, `THIRD-PARTY-NOTICES.md`, regras novas, `app/deny.toml`, README e CONTRIBUTING | Feita em 16/11/2026 (o `cargo-deny` não instala neste PC: o erro 4551 bloqueia os build scripts dele; as licenças foram conferidas pelo `cargo metadata`) |
 | F1 | Núcleo de provedores: protocolo, modelos, fila com vários serviços, motor tocando streams, cache de análise por ID/ISRC, casador entre serviços | Feita em 22/11/2026 (crate `provedores`, tocador por endereço, cache por ID/ISRC, `remoto.rs`, busca "Nos serviços", fila mista, aba Provedores na Loja); "Neste computador" como provedor ficou para a F2 |
-| F2 | Páginas unificadas e layouts (Palco, Estante), molas no `anim.rs` | |
+| F2 | Páginas unificadas e layouts (Palco, Estante), molas no `anim.rs` | Feita em 23/11/2026, em 6 partes: identidade e páginas dos provedores; curtir, salvar, fixar e playlists mistas; espaços e navegação; páginas, busca de todos os tipos e página da faixa; o layout Estante; comandos e documentos ([`docs/f2-paginas.md`](docs/f2-paginas.md)). Ficaram a página de podcast e o rádio |
 | F3 | Provedor YouTube Music | Feita em 23/11/2026: `app/provedores/youtube-music`, embutido; metadados pelo `rustypipe` e áudio pelo cliente visionOS, como MixMusic e limusic ([`docs/f3-youtube-music.md`](docs/f3-youtube-music.md)) |
 | F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | Feita em 22/11/2026 (`letras::fontes`, `ttml`, `traducao`; Configurações › Letras; `ui/letra_cheia.rs`); ficaram estilos e bolinha, cartão e a letra no visual ([`docs/f4-letras.md`](docs/f4-letras.md)) |
 | F5 | **A Ilha** (Dynamic Island): janela flutuante no topo, estados repouso/alerta/expandida | Feita em 16/11/2026 (ver seção 7) |
-| F6 | Provedor Spotify (Web Playback SDK em WebView2, Connect, via YouTube Music, librespot opcional) | |
+| F6 | Provedor Spotify: o Soloist ou o Match pelo YouTube Music | Feita em 23/11/2026, em 4 partes: login, dados, Match e Soloist ([`docs/f6-spotify.md`](docs/f6-spotify.md)). O Soloist ligou e pareou, mas o build 1.4.0.7 do Spotify cai ao tocar (seção 7); ficaram Canvas, as letras do Spotify e o ISRC |
 | F7 | Modo Escuta preciso + Shazam (SongRec): reconhecer, pré-analisar e alinhar ao som ao vivo | |
 | F8 | Som e fila: crossfade no compasso, modo DJ, smart shuffle, lixeira, A-B, timer, AutoEq | |
 | F9 | Juntos e controle: salas, controle pelo celular, MCP, overlay OBS, Chromecast | |

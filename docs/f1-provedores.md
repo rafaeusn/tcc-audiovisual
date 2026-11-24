@@ -63,15 +63,23 @@ O primeiro pedido é sempre `ola`. O provedor se apresenta e diz o que sabe faze
 | Pedido | Campos | Resposta |
 | --- | --- | --- |
 | `ola` | `protocolo` | `apresentacao` (`nome`, `servico`, `versao`, `protocolo`, `capacidades`) |
-| `buscar` | `texto`, `limite` | `itens` (`itens`: faixas, álbuns, artistas, playlists) |
+| `buscar` | `texto`, `limite` | `itens` (`itens`: faixas, álbuns, artistas, playlists; o primeiro é o melhor resultado, que o Player mostra em destaque; `limite` vale para cada tipo) |
 | `inicio` | — | `prateleiras` (`prateleiras`: `titulo` e `itens`) |
 | `album`, `artista`, `playlist` | `album`, `artista` ou `playlist` (o id dele) | `itens` (as faixas, ou os álbuns do artista) |
+| `biblioteca` (só com a capacidade `biblioteca`) | — | `itens` (as playlists, os álbuns e os artistas que a conta tem salvos, na ordem do serviço) |
 | `resolver` | `faixa` (o id dela) | `fonte` |
 | `tchau` | — | `ok`, e o provedor sai |
+| `entrar` (só com a capacidade `conta`) | — | `ok` na hora (o navegador abriu; o login continua no provedor) ou `erro` com o motivo |
+| `sair` | — | `ok` (a credencial guardada é apagada) |
+| `tocador` (só com a capacidade `toca-sozinho`) | — | `tocador` (`situacao`: `desligado`, `baixando`, `abrindo`, `pareando`, `pronto` ou `falhou`; `tem_chave`; `nome`, `progresso`, `erro`, `processo` e `tocando` opcionais) |
+| `ligar-tocador` | `chave` (opcional: sem ela, vale a guardada) | `ok` na hora (o resto continua no provedor) ou `erro` |
+| `desligar-tocador` | — | `ok` |
+| `controlar` | `acao`: `tocar` (com `faixa`), `pausar`, `continuar`, `ir` (com `segundos`) ou `parar` | `ok` ou `erro` |
+| `conta` | — | `conta` (`situacao`: `fora`, `entrando` ou `dentro`; `nome`, `premium`, `erro` e `navegador` opcionais; `navegador` em `entrando` diz que o navegador está aberto esperando a pessoa) |
 
 O Player abre o provedor na pasta dele e passa em `TCCPLAYER_PROVEDOR_DADOS` uma pasta só dele
 (`<pasta de dados>/provedores-dados/<serviço>`), para guardar cache ou login. Provedores que vêm com o app (hoje,
-o YouTube Music) ficam ao lado do `player.exe` e entram na lista sem instalar.
+o YouTube Music e o Spotify) ficam ao lado do `player.exe` e entram na lista sem instalar.
 
 Nenhum campo do pedido se chama `id` além do número do pedido (por isso `resolver` usa `faixa`, e não `id`).
 Qualquer pedido pode ser respondido com `{"id":7,"resposta":"erro","mensagem":"..."}`. Um pedido que o provedor
@@ -84,6 +92,18 @@ A **faixa** é igual em todo serviço:
  "album":"Álbum","duracao_s":201.5,"capa":"https://...","video":false}
 ```
 
+**Campos opcionais da F2** (o protocolo continua na versão 1; provedor antigo não manda e tudo funciona):
+
+- Na `apresentacao`, `identidade`: `{"cor":"#FF0000","logo":"<svg ...>...</svg>"}`. A cor da marca, em `#RRGGBB`, e
+  a logo em SVG (texto, até 32 KB, num quadrado). O Player guarda a logo em
+  `<pasta de dados>/provedores-dados/<serviço>/logo.svg` e usa os dois no espaço do serviço. Cor ou logo fora do
+  formato são ignoradas (o espaço usa a inicial do nome e uma cor tirada dele).
+- Na `apresentacao`, `conta` (F6, só com a capacidade `conta`): como a conta está ao abrir, no mesmo formato da
+  resposta `conta`, por exemplo `{"situacao":"entrando"}` enquanto a credencial guardada é renovada. Depois de
+  `entrar`, o Player pergunta `conta` a cada 2 s até ela sair de `entrando`.
+- Na faixa, `album_id` (o id do álbum) e `artistas_ids` (o id de cada artista, na mesma ordem de `artistas`; `""`
+  quando não tem). No álbum, `artistas_ids`. Com eles, o nome do álbum e dos artistas vira link para a página deles.
+
 A **fonte** diz como tocar:
 
 - `{"fonte":"endereco","url":"https://...","cabecalhos":[["User-Agent","..."]],"formato":"m4a","duracao_s":201.5}`:
@@ -91,9 +111,16 @@ A **fonte** diz como tocar:
 - `{"fonte":"toca-sozinho","pid":1234}`: o provedor toca (o player web do Spotify numa WebView2, por exemplo); o
   Player captura o som desse processo para o visual, como no Modo Escuta.
 
+**O tocador do serviço** (F6, capacidade `toca-sozinho`): um provedor sem `audio` pode tocar por um programa do próprio serviço
+(o Soloist do Spotify). `tocando` traz `faixa`, `vez` (sobe a cada `tocar`), `situacao` (`carregando`, `tocando`, `pausada`, `acabou`,
+`em-outro-lugar` ou `falhou`), `posicao_s`, `duracao_s` e `erro`. Com ele pronto, o Player manda `controlar` e acompanha pelo `tocador`;
+se a faixa falha, ela vai para outro serviço (o Match). Um provedor em Rust pode responder as páginas lentas de outra thread
+(`Servico::em_segundo_plano`), para a pausa não esperar por elas.
+
 ## Casar uma faixa entre serviços
 
 Do MixMusic (MIT): nota de 0 a 1. Com o mesmo ISRC, 1. Senão, 45% para o título limpo (sem "Remastered", "Radio
 Edit", "Official Video"...; "Remix", "Ao Vivo", "Acústico" continuam, porque são outra gravação), 35% para o
 artista (o canal "Artista - Topic" do YouTube conta como o artista) e 20% para a duração (até 2 s de diferença
-conta inteiro; 12 s ou mais, nada), mais 0,05 se for música em vez de vídeo. Toca quando a nota passa de 0,6.
+conta inteiro; 12 s ou mais, nada), mais 0,05 se for música em vez de vídeo. Toca quando a nota passa de 0,6. Título ou artista
+muito diferentes perdem 0,4 (a duração sozinha não basta), e outra versão (ao vivo, karaokê, remix...) perde 0,25.

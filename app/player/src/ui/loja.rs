@@ -11,6 +11,7 @@
 use super::painel::interruptor;
 use super::{RAIO_CONTROLE, RAIO_MODULO, com_alfa, icone, texto, titulo};
 use crate::app::{AbaLoja, Player};
+use crate::contas::{botao_da_conta, frase_da_conta};
 use crate::remoto::Situacao;
 use crate::tema::{self, Cores};
 use gpui::{ClickEvent, Context, Div, FontWeight, Hsla, SharedString, Stateful, div, prelude::*, px};
@@ -81,6 +82,7 @@ fn nome_da_capacidade(c: Capacidade) -> &'static str {
         Capacidade::Radio => "rádio",
         Capacidade::Letra => "letras",
         Capacidade::Audio => "áudio",
+        Capacidade::TocaSozinho => "Player próprio",
         Capacidade::Conta => "conta",
         Capacidade::Podcast => "podcasts",
         Capacidade::Video => "vídeos",
@@ -128,6 +130,56 @@ fn miniatura(c: &Cores, contorno: Hsla, imersiva: bool, painel: Option<bool>) ->
                 .when(painel == Some(false), |d| d.child(bloco_painel())),
         )
         .child(div().h(px(12.0)).flex_none().rounded(px(6.0)).bg(tema::cor_de(c.dock)))
+}
+
+/// A miniatura da Estante: a lateral, a folha e o trilho com o visual no alto.
+fn miniatura_da_estante(c: &Cores, contorno: Hsla) -> Div {
+    let coluna = |w: f32| div().w(px(w)).h_full().flex_none().rounded(px(5.0)).border_1().border_color(c.linha_2);
+    div()
+        .w_full()
+        .h(px(104.0))
+        .flex_none()
+        .rounded(px(RAIO_MODULO))
+        .border_1()
+        .border_color(contorno)
+        .bg(c.parede)
+        .p(px(8.0))
+        .flex()
+        .gap(px(5.0))
+        .child(coluna(34.0))
+        .child(
+            div()
+                .flex_1()
+                .h_full()
+                .flex()
+                .flex_col()
+                .gap(px(5.0))
+                .child(div().flex_1().rounded(px(5.0)).border_1().border_color(c.linha_2))
+                .child(div().h(px(12.0)).flex_none().rounded(px(6.0)).bg(tema::cor_de(c.dock))),
+        )
+        .child(
+            div()
+                .w(px(44.0))
+                .h_full()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap(px(5.0))
+                .child(
+                    div()
+                        .h(px(30.0))
+                        .flex_none()
+                        .rounded(px(5.0))
+                        .bg(gpui::black())
+                        .border_1()
+                        .border_color(c.linha)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(px(10.0)).rounded(px(999.0)).bg(c.ativa)),
+                )
+                .child(coluna(44.0).flex_1()),
+        )
 }
 
 impl Player {
@@ -274,7 +326,7 @@ impl Player {
     }
 
     /// Botão em pílula da Loja (cheio, para a ação principal; com contorno, para as outras).
-    fn pilula_da_loja(&self, id: (&'static str, usize), rotulo: &'static str, cheio: bool) -> Stateful<Div> {
+    pub(super) fn pilula_da_loja(&self, id: (&'static str, usize), rotulo: &'static str, cheio: bool) -> Stateful<Div> {
         let c = self.cores();
         let b = texto(14.0)
             .id(id)
@@ -353,6 +405,14 @@ impl Player {
             if !p.capacidades.is_empty() {
                 detalhes.push(p.capacidades.iter().map(|c| nome_da_capacidade(*c)).collect::<Vec<_>>().join(", "));
             }
+            // A conta, para os provedores que entram numa: quem está conectado, ou o convite.
+            let conta = p.conta.as_ref().filter(|_| p.situacao == Situacao::Pronto);
+            if let Some(conta) = conta {
+                detalhes.push(frase_da_conta(conta));
+            }
+            let botao_conta = conta.and_then(botao_da_conta);
+            let convite = botao_conta == Some("Entrar");
+            let s_conta = p.servico.clone();
             let cor_da_situacao = if matches!(p.situacao, Situacao::Falhou(_)) { c.texto } else { c.texto_2 };
             let posicao = self.anim.seguir(("prov-interruptor", i as u32), f32::from(u8::from(ligado)), 0.2);
             let (s_ligar, s_remover) = (p.servico.clone(), p.servico.clone());
@@ -391,10 +451,23 @@ impl Player {
                             .child(
                                 texto(14.0)
                                     .text_color(cor_da_situacao)
-                                    .line_clamp(2)
+                                    // Um erro de login precisa caber inteiro (diz qual programa fechar).
+                                    .line_clamp(if p.conta.as_ref().is_some_and(|c| c.erro.is_some()) { 5 } else { 2 })
                                     .child(SharedString::from(detalhes.join(" · "))),
                             ),
                     )
+                    .when_some(botao_conta, |d, rotulo| {
+                        d.child(self.pilula_da_loja(("prov-conta", i), rotulo, convite).on_click(cx.listener(
+                            move |this, _: &ClickEvent, _, cx| {
+                                if convite {
+                                    this.local.remoto.entrar(&s_conta);
+                                } else {
+                                    this.local.remoto.sair(&s_conta);
+                                }
+                                cx.notify();
+                            },
+                        )))
+                    })
                     .when(p.embutido, |d| d.child(texto(12.0).flex_none().text_color(c.texto_3).child("Vem com o app")))
                     .when(!p.embutido, |d| {
                         d.child(self.pilula_da_loja(("prov-remover", i), "Remover", false).on_click(cx.listener(
@@ -528,8 +601,9 @@ impl Player {
             AbaLoja::Layouts => {
                 let ct = tema::cores(self.ajustes.tema);
                 let aj = &self.ajustes;
+                let palco = aj.layout == nucleo::Layout::Palco;
                 for (i, (nome, descricao, aberto, esquerda)) in LAYOUTS.into_iter().enumerate() {
-                    let em_uso = aj.painel_aberto == aberto && (!aberto || aj.painel_a_esquerda == esquerda);
+                    let em_uso = palco && aj.painel_aberto == aberto && (!aberto || aj.painel_a_esquerda == esquerda);
                     grade = grade.child(
                         self.cartao(
                             ("loja-layout", i),
@@ -541,11 +615,26 @@ impl Player {
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             // "Foco" só fecha o painel: o lado escolhido antes continua guardado.
                             let lado = if aberto { esquerda } else { this.ajustes.painel_a_esquerda };
+                            this.trocar_layout(nucleo::Layout::Palco);
                             this.aplicar_layout(aberto, lado);
                             cx.notify();
                         })),
                     );
                 }
+                // A Estante: a lateral, a página e o trilho Tocando com o visual.
+                grade = grade.child(
+                    self.cartao(
+                        ("loja-layout", LAYOUTS.len()),
+                        miniatura_da_estante(&ct, c.linha_2),
+                        "Estante",
+                        "Espaços ao lado, página no meio, visual no trilho",
+                        !palco,
+                    )
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.trocar_layout(nucleo::Layout::Estante);
+                        cx.notify();
+                    })),
+                );
             }
             AbaLoja::Pacotes => {
                 let aj = &self.ajustes;

@@ -171,7 +171,7 @@ impl Player {
         let lado = if largo { 32.0 } else { 16.0 };
         let largura = a.heroi.w - 2.0 * lado;
 
-        match self.aba_biblioteca {
+        match self.aba_biblioteca() {
             crate::app::AbaBiblioteca::Musicas => return self.ver_musicas(cx),
             crate::app::AbaBiblioteca::Fila => return self.ver_fila(cx),
             crate::app::AbaBiblioteca::Historico => {}

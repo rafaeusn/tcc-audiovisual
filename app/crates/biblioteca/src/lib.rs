@@ -101,7 +101,52 @@ pub struct Grupo {
 pub struct Playlist {
     pub id: i64,
     pub nome: String,
+    /// As músicas que dá para tocar: as do acervo e as dos serviços.
     pub quantas: u32,
+    /// Quantas são faixas de serviço (com nenhuma, a playlist é só do computador).
+    pub remotas: u32,
+}
+
+/// O que se salva de um serviço (ou do computador).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TipoSalvo {
+    Faixa,
+    Album,
+    Artista,
+    Playlist,
+}
+
+impl TipoSalvo {
+    pub const TODOS: [TipoSalvo; 4] = [TipoSalvo::Faixa, TipoSalvo::Album, TipoSalvo::Artista, TipoSalvo::Playlist];
+
+    /// Como o tipo fica no banco.
+    pub fn chave(self) -> &'static str {
+        match self {
+            Self::Faixa => "faixa",
+            Self::Album => "album",
+            Self::Artista => "artista",
+            Self::Playlist => "playlist",
+        }
+    }
+
+    pub fn da_chave(s: &str) -> Option<Self> {
+        Self::TODOS.into_iter().find(|t| t.chave() == s)
+    }
+}
+
+/// Uma coisa que a pessoa curtiu ou salvou: faixa, álbum, artista ou playlist de um serviço. A faixa do computador
+/// usa o serviço `computador` e o caminho como id. `dados` é o item como o Player o escreveu (JSON), para abrir sem
+/// rede; o acervo não lê o que tem dentro. Nunca guarda áudio.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Salvo {
+    pub servico: String,
+    pub tipo: TipoSalvo,
+    pub id: String,
+    pub dados: String,
+    /// Quando foi salvo (segundos Unix).
+    pub quando: i64,
+    /// Fixado: vem primeiro na lista.
+    pub fixado: bool,
 }
 
 /// Forma de comparar e buscar (a mesma das letras, no `nucleo`).
