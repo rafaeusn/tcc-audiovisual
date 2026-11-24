@@ -46,28 +46,44 @@ pub enum QuemToca {
     Ninguem,
 }
 
-/// `tocador`: como está o tocador do próprio serviço (desligado, se ele não tem um).
-pub fn quem_toca(provedores: &[InfoDoProvedor], servico: &str, tocador: SituacaoDoTocador) -> QuemToca {
+/// Como as faixas de um serviço podem tocar hoje: os jeitos que caíram nesta abertura já ficam de fora.
+///
+/// `tocador`: como está o tocador do próprio serviço (desligado, se ele não tem um). `caidos`: os jeitos de tocar que
+/// falharam nesta abertura — o Soloist cair não impede o áudio do próprio serviço, e vice-versa.
+pub fn quem_toca(
+    provedores: &[InfoDoProvedor],
+    servico: &str,
+    tocador: SituacaoDoTocador,
+    caidos: &std::collections::HashSet<super::cadeia::Jeito>,
+) -> QuemToca {
+    use super::cadeia::Jeito;
     let ele = provedores.iter().find(|p| p.servico == servico);
+    let proprio_de_pe = !caidos.contains(&Jeito::Proprio);
+    let pronto_com_audio = ele.is_some_and(|p| tem(p, &[Capacidade::Audio])) && proprio_de_pe;
     if let Some(p) = ele
-        && (p.situacao == Situacao::Abrindo || toca(p, &[Capacidade::Audio]))
+        && (p.situacao == Situacao::Abrindo || pronto_com_audio)
     {
         return if p.situacao == Situacao::Abrindo { QuemToca::Abrindo } else { QuemToca::Ele };
     }
     // Abrindo também: a faixa espera os poucos segundos dele.
-    if ele.is_some_and(|p| toca(p, &[Capacidade::TocaSozinho]))
+    if !caidos.contains(&Jeito::Tocador)
+        && ele.is_some_and(|p| tem(p, &[Capacidade::TocaSozinho]))
         && matches!(tocador, SituacaoDoTocador::Pronto | SituacaoDoTocador::Abrindo)
     {
         return QuemToca::Sozinho;
     }
+    if caidos.contains(&Jeito::Match) {
+        return QuemToca::Ninguem;
+    }
     let mut outros = provedores.iter().filter(|p| p.servico != servico);
-    if let Some(p) = outros.clone().find(|p| toca(p, &[Capacidade::Busca, Capacidade::Audio])) {
+    if let Some(p) = outros.clone().find(|p| tem(p, &[Capacidade::Busca, Capacidade::Audio])) {
         return QuemToca::Outro(p.servico.clone());
     }
     if outros.any(|p| p.situacao == Situacao::Abrindo) { QuemToca::Abrindo } else { QuemToca::Ninguem }
 }
 
-fn toca(p: &InfoDoProvedor, com: &[Capacidade]) -> bool {
+/// O provedor está pronto e sabe fazer tudo o que `com` pede.
+pub(crate) fn tem(p: &InfoDoProvedor, com: &[Capacidade]) -> bool {
     p.situacao == Situacao::Pronto && com.iter().all(|c| p.capacidades.contains(c))
 }
 
@@ -161,13 +177,23 @@ mod testes {
         }
     }
 
+    /// Nenhum jeito caído (o caso comum).
+    fn vazio() -> std::collections::HashSet<crate::cadeia::Jeito> {
+        std::collections::HashSet::new()
+    }
+
+    /// O conjunto com os jeitos que caíram.
+    fn caidos(jeitos: &[crate::cadeia::Jeito]) -> std::collections::HashSet<crate::cadeia::Jeito> {
+        jeitos.iter().copied().collect()
+    }
+
     const TUDO: [Capacidade; 2] = [Capacidade::Busca, Capacidade::Audio];
 
     #[test]
     fn quem_toca_cada_servico() {
         let yt = info("yt", Situacao::Pronto, &TUDO);
         let spotify = info("spotify", Situacao::Pronto, &[Capacidade::Busca]);
-        let com = |p: &[InfoDoProvedor], s: &str| quem_toca(p, s, SituacaoDoTocador::Desligado);
+        let com = |p: &[InfoDoProvedor], s: &str| quem_toca(p, s, SituacaoDoTocador::Desligado, &vazio());
         let todos = [spotify.clone(), yt.clone()];
         assert_eq!(com(&todos, "yt"), QuemToca::Ele);
         assert_eq!(com(&todos, "spotify"), QuemToca::Outro("yt".into()));
@@ -195,7 +221,7 @@ mod testes {
         let spotify = info("spotify", Situacao::Pronto, &[Capacidade::Busca, Capacidade::TocaSozinho]);
         let yt = info("yt", Situacao::Pronto, &TUDO);
         let todos = [spotify, yt];
-        let com = |t| quem_toca(&todos, "spotify", t);
+        let com = |t| quem_toca(&todos, "spotify", t, &vazio());
         assert_eq!(com(SituacaoDoTocador::Pronto), QuemToca::Sozinho);
         assert_eq!(com(SituacaoDoTocador::Abrindo), QuemToca::Sozinho);
         for t in [
@@ -206,7 +232,36 @@ mod testes {
         ] {
             assert_eq!(com(t), QuemToca::Outro("yt".into()), "{t:?}");
         }
-        assert_eq!(quem_toca(&todos, "yt", SituacaoDoTocador::Pronto), QuemToca::Ele);
+        assert_eq!(quem_toca(&todos, "yt", SituacaoDoTocador::Pronto, &vazio()), QuemToca::Ele);
+    }
+
+    /// O ponto central da cadeia: um jeito que cai não leva os outros junto. O Soloist falhar não impede o áudio do
+    /// próprio serviço, e o áudio do serviço falhar não impede o Soloist.
+    #[test]
+    fn um_jeito_que_cai_nao_derruba_os_outros() {
+        use crate::cadeia::Jeito;
+        let spotify =
+            info("spotify", Situacao::Pronto, &[Capacidade::Busca, Capacidade::Audio, Capacidade::TocaSozinho]);
+        let yt = info("yt", Situacao::Pronto, &TUDO);
+        let todos = [spotify, yt];
+        // O Soloist caiu: o áudio do próprio serviço continua (é o jeito principal).
+        assert_eq!(quem_toca(&todos, "spotify", SituacaoDoTocador::Falhou, &caidos(&[Jeito::Tocador])), QuemToca::Ele);
+        // O áudio do próprio serviço caiu: o Soloist assume.
+        assert_eq!(
+            quem_toca(&todos, "spotify", SituacaoDoTocador::Pronto, &caidos(&[Jeito::Proprio])),
+            QuemToca::Sozinho
+        );
+        // Os dois caíram: o Match.
+        assert_eq!(
+            quem_toca(&todos, "spotify", SituacaoDoTocador::Pronto, &caidos(&[Jeito::Proprio, Jeito::Tocador])),
+            QuemToca::Outro("yt".into())
+        );
+        // E ninguém mais de pé: ninguém toca.
+        let so_spotify = info("spotify", Situacao::Pronto, &[Capacidade::Busca, Capacidade::TocaSozinho]);
+        assert_eq!(
+            quem_toca(&[so_spotify], "spotify", SituacaoDoTocador::Pronto, &caidos(&[Jeito::Proprio, Jeito::Tocador])),
+            QuemToca::Ninguem
+        );
     }
 
     fn faixa(id: &str, titulo: &str, artista: &str, duracao: f64, video: bool) -> Item {

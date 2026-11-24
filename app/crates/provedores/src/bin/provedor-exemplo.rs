@@ -70,7 +70,7 @@ impl Servico for Exemplo {
         match pedido {
             CorpoDoPedido::Buscar { .. } if tem("--revoga") => {
                 self.conta = Some(Conta { erro: Some("o login foi revogado".into()), ..Conta::default() });
-                CorpoDaResposta::Erro { mensagem: "o login foi revogado".into() }
+                CorpoDaResposta::erro("o login foi revogado")
             }
             CorpoDoPedido::Buscar { texto, limite } => {
                 match texto.as_str() {
@@ -100,7 +100,7 @@ impl Servico for Exemplo {
             },
             CorpoDoPedido::Resolver { faixa: id } => {
                 let Some(f) = self.catalogo.iter().find(|f| f.id == id) else {
-                    return CorpoDaResposta::Erro { mensagem: format!("faixa desconhecida: {id}") };
+                    return CorpoDaResposta::erro(format!("faixa desconhecida: {id}"));
                 };
                 match &self.url {
                     Some(base) => CorpoDaResposta::Fonte(Fonte::Endereco {
@@ -109,12 +109,12 @@ impl Servico for Exemplo {
                         formato: Some("wav".into()),
                         duracao_s: f.duracao_s,
                     }),
-                    None => CorpoDaResposta::Erro { mensagem: "este exemplo não tem áudio".into() },
+                    None => CorpoDaResposta::erro("este exemplo não tem áudio"),
                 }
             }
             CorpoDoPedido::Biblioteca if tem("--revoga") => {
                 self.conta = Some(Conta { erro: Some("o login foi revogado".into()), ..Conta::default() });
-                CorpoDaResposta::Erro { mensagem: "o login foi revogado".into() }
+                CorpoDaResposta::erro("o login foi revogado")
             }
             CorpoDoPedido::Biblioteca if self.conta.is_some() => CorpoDaResposta::Itens {
                 itens: vec![Item::Playlist(Playlist {
@@ -140,7 +140,7 @@ impl Servico for Exemplo {
                 CorpoDaResposta::Tocador(Box::new(agora))
             }
             CorpoDoPedido::LigarTocador { chave: Some(c) } if tem("--sozinho") && c.0 == "nenhuma" => {
-                CorpoDaResposta::Erro { mensagem: "cole a chave".into() }
+                CorpoDaResposta::erro("cole a chave")
             }
             CorpoDoPedido::LigarTocador { chave } if tem("--sozinho") => {
                 let errada = chave.is_some_and(|c| c.0 == "errada");
@@ -162,7 +162,7 @@ impl Servico for Exemplo {
                 }
                 CorpoDaResposta::Ok
             }
-            outro => CorpoDaResposta::Erro { mensagem: format!("o exemplo não sabe responder {outro:?}") },
+            outro => CorpoDaResposta::erro(format!("o exemplo não sabe responder {outro:?}")),
         }
     }
 }

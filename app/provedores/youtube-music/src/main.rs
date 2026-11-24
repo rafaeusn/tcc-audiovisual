@@ -43,7 +43,7 @@ fn item_da_busca(i: &rustypipe::model::MusicItem) -> Option<Item> {
 }
 
 fn erro(e: impl std::fmt::Display) -> CorpoDaResposta {
-    CorpoDaResposta::Erro { mensagem: e.to_string() }
+    CorpoDaResposta::erro(e.to_string())
 }
 
 impl YoutubeMusic {

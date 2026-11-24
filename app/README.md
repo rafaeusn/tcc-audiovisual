@@ -74,8 +74,8 @@ mais recente das outras e nunca espera por elas.
 - **Letra em tela cheia** (`Y`, o botão de expandir no módulo Letra ou a barra de comandos): o visual ocupa a
   janela inteira, escurecido, e a letra rola grande por cima, a linha de agora enchendo palavra por palavra, com
   a tradução embaixo, a fonte e o acerto de sincronia no rodapé. O topo arrasta a janela; Esc fecha.
-- **Configurações › Serviços**: a conta e por onde as músicas de cada serviço tocam, e o Soloist do Spotify (chave, ligar, parear,
-  desligar).
+- **Configurações › Serviços**: a conta, por onde as músicas de cada serviço tocam agora, o motivo se o áudio do Spotify
+  parou nesta abertura, e o Soloist do Spotify (chave, ligar, parear, desligar).
 - **Configurações › Letras**: a ordem das fontes (setas), ligar e desligar cada uma (uma fica sempre ligada),
   preferir palavra por palavra, traduzir (e o idioma) e letras latinas.
 - **Espaços e navegação** (F2): a folha das páginas tem, no topo, voltar e avançar (também `Alt ←`/`Alt →` e os
@@ -90,11 +90,13 @@ mais recente das outras e nunca espera por elas.
   sozinho (a credencial fica cifrada pelo Windows) e a Loja › Provedores mostra "Conectado como … · Premium" com Sair. Se
   outro programa usa a porta do login (o Spotifast aberto), o aviso diz qual. Para você, Busca, álbuns, artistas,
   playlists e a Biblioteca da conta (com as Músicas Curtidas) vêm da sua conta, na página Biblioteca e na lateral da
-  Estante, junto com o que você salvou no Player. As músicas tocam pelo
-  YouTube Music (a mesma música, escolhida por título, artista e duração; a página da faixa diz qual e tem "Procurar outra
-  gravação") ou, se você ligar o **Soloist** em Configurações › Serviços, com o som do próprio Spotify: é o player oficial dele, baixado
-  do Spotify, e pede Premium, uma chave pessoal sua e parear uma vez pelo app do Spotify. Se o Soloist não tocar, a música vai para o
-  YouTube Music com um aviso. O Spotify toca num lugar por vez: tocar aqui para o outro aparelho ([F6](../docs/f6-spotify.md)).
+  Estante, junto com o que você salvou no Player. As músicas tocam **com o som do próprio Spotify**, dentro do Player: a
+  pré-análise, a troca sem intervalo, o crossfade e o equalizador valem como nas músicas do YouTube Music. Se o Spotify
+  recusar o áudio desta conta (por exemplo, uma conta sem Premium), o Player avisa uma vez e segue sozinho: primeiro tenta
+  o **Soloist** de Configurações › Serviços (o player oficial, baixado do Spotify, que pede Premium, uma chave pessoal sua e
+  parear uma vez) e, sem ele, o YouTube Music (a mesma música, escolhida por título, artista e duração). Configurações ›
+  Serviços diz por onde as músicas tocam agora e o motivo se o áudio do Spotify tiver parado. O Spotify toca num lugar por
+  vez: tocar aqui para o outro aparelho ([F6](../docs/f6-spotify.md)).
 - **Páginas dos serviços**: "Para você" mostra as prateleiras em cartões com capa (as capas baixam em segundo plano e
   ficam guardadas na pasta de dados, em `capas`); clicar numa faixa toca a fileira a partir dela, clicar num álbum,
   playlist ou artista abre a página dele, que entra deslizando. Álbum e playlist: capa, título, o artista como link,

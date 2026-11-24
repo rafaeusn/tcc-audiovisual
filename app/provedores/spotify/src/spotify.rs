@@ -14,7 +14,7 @@ use crate::pathfinder::{Acesso, Pathfinder};
 use librespot_core::authentication::Credentials;
 use librespot_core::error::ErrorKind;
 use librespot_core::{Session, SessionConfig};
-use librespot_oauth::{OAuthClient, OAuthClientBuilder, OAuthError};
+use provedor_spotify::oauth;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -22,24 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// O Client ID público do librespot (o do aplicativo de computador do Spotify). Não é segredo: está no librespot.
-pub const CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
-/// A porta do retorno, a única que esse Client ID aceita (a mesma do Spotifast).
-pub const PORTA: u16 = 8898;
-const RETORNO: &str = "http://127.0.0.1:8898/login";
+/// A porta do retorno do login do áudio (a mesma do `oauth`; aqui só o nome curto).
+pub const PORTA: u16 = oauth::PORTA_DO_AUDIO;
 const NOSSO_PROGRAMA: &str = "provedor-spotify.exe";
-/// O que as partes 1 a 5 usam (pedir agora evita um segundo login): tocar, a conta, as playlists, a coleção, quem
-/// a pessoa segue e o estado do Connect.
-const ESCOPOS: [&str; 8] = [
-    "streaming",
-    "user-read-private",
-    "playlist-read-private",
-    "playlist-read-collaborative",
-    "user-library-read",
-    "user-follow-read",
-    "user-read-playback-state",
-    "user-modify-playback-state",
-];
 /// Quanto esperar a pessoa aprovar no navegador.
 pub const PRAZO_DO_NAVEGADOR: Duration = Duration::from_secs(5 * 60);
 /// Quanto a sessão pode demorar para entrar.
@@ -50,11 +35,6 @@ const PRAZO_DO_ACESSO: Duration = Duration::from_secs(8);
 const PEDIDOS_POR_VEZ: usize = 4;
 /// Quanto esperar o plano (o atributo `type`, que chega logo depois de entrar) e o nome do perfil.
 const PRAZO_DO_PERFIL: Duration = Duration::from_secs(5);
-/// A página que o navegador mostra depois da aprovação.
-const PAGINA_DE_PRONTO: &str = "<!doctype html><html lang=\"pt-BR\"><meta charset=\"utf-8\"><title>Player</title>\
-<body style=\"font-family:system-ui,sans-serif;background:#060606;color:#f2f2f2;display:grid;place-items:center;\
-height:100vh;margin:0\"><div style=\"text-align:center\"><h1 style=\"font-weight:600\">Pronto</h1>\
-<p>A conta do Spotify entrou no Player. Pode fechar esta aba.</p></div></body></html>";
 
 /// A frase para a porta do retorno ocupada, com o programa que a usa quando dá para saber.
 pub fn mensagem_da_porta(dono: Option<&str>) -> String {
@@ -66,61 +46,130 @@ pub fn mensagem_da_porta(dono: Option<&str>) -> String {
     format!("A porta {PORTA}, que o login do Spotify usa, está com {quem}. Feche-o e tente de novo.")
 }
 
-/// O erro de renovar: `invalid_grant` (o OAuth para credencial revogada ou de outro app) apaga; o resto é passageiro.
-pub fn falha_da_renovacao(motivo: &str) -> Falha {
-    if motivo.contains("invalid_grant") {
-        Falha::Recusada("O Spotify não aceita mais o login guardado. Entre de novo.".into())
-    } else {
-        Falha::Passageira(format!("Sem resposta do Spotify ({motivo}). Tente de novo."))
-    }
-}
+/// Quem quer saber quando a sessão entra (o áudio liga o servidor local por aqui).
+type Ouvinte = Box<dyn Fn(Session) + Send>;
 
 pub struct Real {
-    rt: tokio::runtime::Runtime,
+    rt: Arc<tokio::runtime::Runtime>,
     /// A pasta temporária do librespot (pedaços de áudio, ainda cifrados, na parte 3): limpa a cada abertura.
     tmp: PathBuf,
     sessao: Mutex<Option<Session>>,
+    /// Os ouvintes, chamados com a sessão de agora.
+    ouvintes: Mutex<Vec<Ouvinte>>,
     /// O navegador está sendo esperado (a porta é nossa): só assim [`Autorizador::cancelar`] mexe nela, para não
     /// bater na porta de outro programa.
     esperando: AtomicBool,
+    /// O cliente HTTP do OAuth (bloqueante: o login roda numa thread própria).
+    http: reqwest::blocking::Client,
 }
 
 impl Real {
     pub fn novo(pasta: &Path) -> Result<Self, String> {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
+        let rt = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())?,
+        );
         let tmp = pasta.join("librespot-tmp");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).map_err(|e| format!("a pasta {} não foi criada: {e}", tmp.display()))?;
-        Ok(Self { rt, tmp, sessao: Mutex::new(None), esperando: AtomicBool::new(false) })
+        Ok(Self {
+            rt,
+            tmp,
+            sessao: Mutex::new(None),
+            ouvintes: Mutex::new(Vec::new()),
+            esperando: AtomicBool::new(false),
+            http: reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .map_err(|e| e.to_string())?,
+        })
     }
 
-    /// A sessão de agora (os dados e, na parte 3, o áudio são pedidos por ela).
+    /// O runtime do provedor (o áudio usa o mesmo: uma sessão do librespot pertence ao runtime que a criou).
+    pub fn runtime(&self) -> Arc<tokio::runtime::Runtime> {
+        Arc::clone(&self.rt)
+    }
+
+    /// A sessão de agora (os dados e o áudio são pedidos por ela).
     pub fn sessao(&self) -> Option<Session> {
         self.sessao.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    fn cliente() -> Result<OAuthClient, String> {
-        let mut construtor =
-            OAuthClientBuilder::new(CLIENT_ID, RETORNO, ESCOPOS.to_vec()).with_custom_message(PAGINA_DE_PRONTO);
-        // Os testes escutam na porta de verdade, mas não abrem o navegador de quem os roda.
-        if !cfg!(test) {
-            construtor = construtor.open_in_browser();
+    /// O nome da conta (o id do usuário) para pôr no `Credentials`. O Spotify exige isto junto do token para dar a chave de
+    /// áudio; o `with_access_token` sozinho deixa vazio e o áudio é recusado.
+    ///
+    /// Vem do perfil da conta, lido do servidor **antes** de abrir a sessão de áudio (o perfil responde com o token OAuth,
+    /// e não depende do áudio). Fica guardado para as próximas aberturas.
+    fn conta_do_token(&self, access: &str) -> Option<String> {
+        if let Some(nome) = self.usuario_guardado() {
+            return Some(nome);
         }
-        construtor.build().map_err(|e| e.to_string())
+        let perfil = self.rt.block_on(async {
+            let config = SessionConfig { device_id: self.device_id(), tmp_dir: self.tmp.clone(), ..Default::default() };
+            let sessao = Session::new(config, None);
+            let credenciais = Credentials::with_access_token(access);
+            tokio::time::timeout(PRAZO_DA_SESSAO, sessao.connect(credenciais, false)).await.ok()?.ok()?;
+            Some(sessao.username())
+        })?;
+        let _ = std::fs::write(self.tmp.with_file_name("conta.txt"), &perfil);
+        Some(perfil)
+    }
+
+    /// O nome da conta guardado da abertura anterior.
+    fn usuario_guardado(&self) -> Option<String> {
+        let nome = std::fs::read_to_string(self.tmp.with_file_name("conta.txt")).ok()?;
+        let nome = nome.trim().to_string();
+        (!nome.is_empty()).then_some(nome)
+    }
+
+    /// O id deste aparelho, estável entre as aberturas. Fica ao lado da credencial; sorteado na primeira abertura.
+    pub fn device_id(&self) -> String {
+        let arquivo = self.tmp.with_file_name("aparelho.txt");
+        if let Ok(id) = std::fs::read_to_string(&arquivo) {
+            let id = id.trim();
+            if id.len() >= 16 && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                return id.to_string();
+            }
+        }
+        let id = novo_device_id();
+        if let Err(e) = std::fs::write(&arquivo, &id) {
+            eprintln!("spotify: o id do aparelho não foi guardado: {e}");
+        }
+        id
+    }
+
+    /// Avizinha um ouvinte: ele é chamado com a sessão toda vez que ela entra (o áudio liga o servidor local por aqui).
+    pub fn ao_entrar(&self, ouvinte: impl Fn(Session) + Send + 'static) {
+        let mut ouvintes = self.ouvintes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        ouvintes.push(Box::new(ouvinte));
+        drop(ouvintes);
+        // Se a sessão já está de pé, ele é chamado já.
+        if let Some(s) = self.sessao() {
+            let ouvintes = self.ouvintes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(o) = ouvintes.last() {
+                o(s);
+            }
+        }
+    }
+
+    fn avisar_ao_entrar(&self, sessao: &Session) {
+        let ouvintes = self.ouvintes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        for o in ouvintes.iter() {
+            o(sessao.clone());
+        }
     }
 }
 
 /// As consultas do Pathfinder com a sessão de agora.
-pub struct PelaSessao {
+pub struct PelasConsultas {
     real: Arc<Real>,
     pathfinder: Arc<Pathfinder>,
 }
 
-impl PelaSessao {
+impl PelasConsultas {
     pub fn novo(real: Arc<Real>, pathfinder: Pathfinder) -> Self {
         Self { real, pathfinder: Arc::new(pathfinder) }
     }
@@ -151,7 +200,7 @@ fn falha_do_acesso(tipo: ErrorKind) -> crate::pathfinder::Falha {
     }
 }
 
-impl Consultas for PelaSessao {
+impl Consultas for PelasConsultas {
     fn consultar(&self, pedidos: &[Pedido], ate: Instant) -> Vec<Result<serde_json::Value, crate::pathfinder::Falha>> {
         use crate::pathfinder::Falha;
         let todas = async {
@@ -191,7 +240,51 @@ impl Consultas for PelaSessao {
     }
 }
 
-/// Acaba com a espera do `librespot-oauth`: um retorno sem código na própria porta.
+impl crate::audio::FonteDaSessao for Real {
+    fn agora(&self) -> Option<Session> {
+        self.sessao()
+    }
+}
+
+/// Um id de aparelho novo no formato que o librespot usa (UUID sem chaves), sorteado sem trazer dependência nova.
+fn novo_device_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let agora = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let mut x = agora as u64 ^ ((std::process::id() as u64) << 32) ^ 0x9E37_79B9_7F4A_7C15;
+    let mut hex = String::with_capacity(32);
+    for _ in 0..32 {
+        // xorshift64*: basta para um id que só precisa não repetir.
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        hex.push(char::from_digit((x % 16) as u32, 16).unwrap_or('0'));
+    }
+    // No formato UUID (8-4-4-4-12), como o do librespot.
+    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+}
+
+/// Abre o navegador de quem está usando o Player.
+///
+/// **Não use `cmd /C start`:** o `&` da URL é separador de comandos para o `cmd`, que entrega ao navegador só o pedaço
+/// antes do primeiro `&` (o Spotify então responde "response_type must be code", porque o parâmetro ficou vazio). O
+/// `rundll32` entrega o endereço inteiro, sem passar pelo interpretador.
+fn abrir_o_navegador(url: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("rundll32")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(url)
+            .creation_flags(0x0800_0000)
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
+/// Acaba com a espera do navegador: um retorno sem código na própria porta.
 fn destravar_a_porta() {
     let endereco = SocketAddr::from(([127, 0, 0, 1], PORTA));
     if let Ok(mut s) = TcpStream::connect_timeout(&endereco, Duration::from_secs(1)) {
@@ -201,34 +294,33 @@ fn destravar_a_porta() {
 
 impl Autorizador for Real {
     fn autorizar(&self) -> Result<Tokens, String> {
-        let cliente = Self::cliente()?;
-        let (avisar, resposta) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = avisar.send(cliente.get_access_token());
-        });
+        // O login do **áudio**: a identidade do app de computador do Spotify, com `show_dialog` e **só** o escopo
+        // `streaming`. É o que o Spotifast pede no grant de playback, e é o que o Spotify aceita para dar a chave do áudio.
+        // O fluxo (PKCE, a porta, o retorno) é o nosso `oauth.rs`, e não o do `librespot-oauth`: ele não deixa escolher o
+        // `show_dialog` nem separar os escopos, e o áudio não vem sem isso.
+        let grant = oauth::Grant::Audio;
+        let pedido = oauth::comecar(grant, oauth::CLIENT_ID_DO_AUDIO);
+        let ouvinte = oauth::escutar(grant)?;
         self.esperando.store(true, Ordering::Release);
-        let resposta = resposta.recv_timeout(PRAZO_DO_NAVEGADOR);
-        self.esperando.store(false, Ordering::Release);
-        match resposta {
-            Ok(Ok(t)) => {
-                Ok(Tokens { access: t.access_token, refresh: Some(t.refresh_token).filter(|r| !r.is_empty()) })
-            }
-            Ok(Err(OAuthError::AuthCodeListenerBind { .. })) => {
-                Err(mensagem_da_porta(crate::porta::dono(PORTA).as_deref()))
-            }
-            Ok(Err(e)) => Err(format!("O Spotify não autorizou ({e}). Tente de novo.")),
-            Err(_) => {
-                destravar_a_porta();
-                Err("Ninguém aprovou no navegador em 5 minutos. Tente de novo.".into())
-            }
+        if !cfg!(test) {
+            abrir_o_navegador(&pedido.url);
         }
+        let codigo = oauth::esperar_o_codigo(&ouvinte, &pedido.estado, oauth::PRAZO_DO_NAVEGADOR);
+        self.esperando.store(false, Ordering::Release);
+        drop(ouvinte);
+        let codigo = codigo?;
+        let tokens =
+            oauth::trocar_o_codigo(&self.http, grant, oauth::CLIENT_ID_DO_AUDIO, &codigo, &pedido.verificador)?;
+        Ok(Tokens { access: tokens.access, refresh: tokens.refresh })
     }
 
     fn renovar(&self, refresh: &str) -> Result<Tokens, Falha> {
-        let cliente = Self::cliente().map_err(Falha::Passageira)?;
-        match cliente.refresh_token(refresh) {
-            Ok(t) => Ok(Tokens { access: t.access_token, refresh: Some(t.refresh_token).filter(|r| !r.is_empty()) }),
-            Err(e) => Err(falha_da_renovacao(&e.to_string())),
+        match oauth::renovar(&self.http, oauth::CLIENT_ID_DO_AUDIO, refresh) {
+            Ok(t) => Ok(Tokens { access: t.access, refresh: t.refresh }),
+            Err(oauth::FalhaDaRenovacao::Recusada) => {
+                Err(Falha::Recusada("O Spotify não aceita mais o login guardado. Entre de novo.".into()))
+            }
+            Err(oauth::FalhaDaRenovacao::Passageira(motivo)) => Err(Falha::Passageira(motivo)),
         }
     }
 
@@ -254,8 +346,14 @@ impl Autorizador for Real {
     }
 
     fn conectar(&self, access: &str) -> Result<DadosDaConta, Falha> {
+        // O `client_id` é o padrão do librespot (o do Keymaster), o mesmo que o Spotifast usa. O `username` vai junto do
+        // token, como no Spotifast (`playback_credentials`): é o formato de `Credentials` que um cliente de verdade usa.
         let config = SessionConfig { tmp_dir: self.tmp.clone(), ..SessionConfig::default() };
-        let credenciais = Credentials::with_access_token(access);
+        let credenciais = Credentials {
+            username: self.conta_do_token(access),
+            auth_type: librespot_protocol::authentication::AuthenticationType::AUTHENTICATION_SPOTIFY_TOKEN,
+            auth_data: access.as_bytes().to_vec(),
+        };
         let sessao = self.rt.block_on(async {
             let sessao = Session::new(config, None);
             match tokio::time::timeout(PRAZO_DA_SESSAO, sessao.connect(credenciais, false)).await {
@@ -282,10 +380,12 @@ impl Autorizador for Real {
             }
             DadosDaConta { nome: nome.unwrap_or(usuario), premium: crate::conta::plano(tipo.as_deref()) }
         });
-        let antiga = self.sessao.lock().unwrap_or_else(std::sync::PoisonError::into_inner).replace(sessao);
+        let antiga = self.sessao.lock().unwrap_or_else(std::sync::PoisonError::into_inner).replace(sessao.clone());
         if let Some(s) = antiga {
             s.shutdown();
         }
+        // Fora da trava: o ouvinte (o áudio) pode pedir a sessão de novo.
+        self.avisar_ao_entrar(&sessao);
         Ok(dados)
     }
 
@@ -393,8 +493,10 @@ mod testes {
 
     #[test]
     fn so_o_invalid_grant_apaga_a_credencial() {
-        let revogado = "Server returned error response: invalid_grant: Refresh token revoked";
-        assert!(matches!(falha_da_renovacao(revogado), Falha::Recusada(_)));
-        assert!(matches!(falha_da_renovacao("Request failed: timed out"), Falha::Passageira(_)));
+        // A regra vive no `oauth::renovar` (a renovação é do nosso fluxo): o `invalid_grant` é recusa, o resto é passageiro.
+        // Aqui só se confere que a frase da recusa é a que a pessoa lê.
+        let recusa = crate::conta::Falha::Recusada("O Spotify não aceita mais o login guardado. Entre de novo.".into());
+        let crate::conta::Falha::Recusada(motivo) = recusa else { unreachable!("devia ser recusa") };
+        assert!(motivo.contains("Entre de novo"));
     }
 }

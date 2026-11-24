@@ -8,7 +8,11 @@ use provedores::{Conta, EstadoDoTocador, SituacaoDoTocador};
 pub fn por_onde_toca(quem: &QuemToca, situacao: &Situacao, nome: impl Fn(&str) -> String) -> String {
     match (situacao, quem) {
         (Situacao::Abrindo, _) | (_, QuemToca::Abrindo) => "Abrindo…".into(),
-        (_, QuemToca::Ele) => "As músicas tocam pelo próprio Player.".into(),
+        (_, QuemToca::Ele) => {
+            "As músicas tocam pelo próprio Player, com o áudio do serviço: pré-análise, troca sem intervalo e \
+             equalizador valem."
+                .into()
+        }
         (_, QuemToca::Sozinho) => "As músicas tocam pelo Soloist, o player oficial do Spotify.".into(),
         (_, QuemToca::Outro(s)) => {
             format!("As músicas tocam pelo {}: a mesma música, às vezes noutra gravação.", nome(s))

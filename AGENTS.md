@@ -41,9 +41,12 @@ WebGL em JS, gabarito do visual e do diretor), `mockup/` (mockup da UI), `protot
    visual com o som e guardar análise do que vem de qualquer serviço vale; cache local do áudio para tocar sem
    intervalo e para a pré-análise também.
 2. **O único limite, que o agente não atravessa:** nada de quebrar DRM nem de transformar o app num baixador de
-   música (salvar em arquivo, ou redistribuir, faixas de catálogo do Spotify, YouTube, Tidal...). O app toca pelo
-   serviço, com a conta do próprio usuário. O Modo Escuta continua funcionando sem provedor nenhum. (Regras 1 e 2
-   reescritas de novo em 21/11/2026; as de 16/11 pediam provedor desligado por padrão e o Client ID do usuário.)
+ música (salvar em arquivo, ou redistribuir, faixas de catálogo do Spotify, YouTube, Tidal...). O app toca pelo
+ serviço, com a conta do próprio usuário. O Modo Escuta continua funcionando sem provedor nenhum. (Regras 1 e 2
+ reescritas de novo em 21/11/2026; as de 16/11 pediam provedor desligado por padrão e o Client ID do usuário.)
+ **Decidido com o Rafael em 24/11/2026:** tocar pelo `librespot` **vale** e não é quebrar DRM — ele pede a chave de
+ áudio ao Spotify como um cliente autenticado, e o áudio decifrado vive **só na memória** (nunca em arquivo, nunca
+ redistribuído). O que o `librespot` grava em disco é o temporário dele, ainda cifrado, apagado a cada abertura.
 3. **Nenhum segredo no código nem no git.** As chaves `LASTFM_API_KEY`, `LASTFM_API_SECRET` e `DISCORD_APP_ID`
    vêm só de variável de ambiente (lidas ao abrir o app ou por `option_env!` na compilação). Nunca pedir nem
    colar chave no chat.
@@ -119,7 +122,7 @@ cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 | `preanalise` | Pré-análise (porte de `preview/preanalysis.js`, em `pista.rs`): batidas por programação dinâmica, tempo forte, clareza do pulso, trechos por novidade, energia calibrada, drops e subida; tom (`tom.rs`); LUFS; o modo arquivo do diretor (`condutor.rs`); `cache::Cache` em `analises.db` (vale enquanto tamanho, data e `VERSAO` batem) |
 | `biblioteca` | Varre pastas, lê etiquetas e ReplayGain (`lofty`) e guarda no acervo SQLite (`faixas` com chave `(caminho, pasta)`, `playlists`, `playlist_itens`); consultas por `Filtro` (origem, busca, álbum, artista) |
 | `player` | O app em GPUI 0.2.2: estado em `app.rs`, telas em `ui/*.rs` |
-| `provedores/spotify` | O provedor do Spotify (F6, um programa à parte, embutido; o Soloist em `soloist/`): login pelo navegador com o Client ID público do librespot (`spotify.rs`), a conta e o refresh token cifrado (`conta.rs`), quem usa a porta 8898 (`porta.rs`); os dados pelo Pathfinder com a sessão (`pathfinder.rs`, `codigos.rs`), a conversão pura (`conversao.rs`) e as páginas (`dados.rs`). Compila só com `vergen` 9.0.6 no `Cargo.lock` |
+| `provedores/spotify` | O provedor do Spotify (F6, um programa à parte, embutido; o Soloist em `soloist/`): login pelo navegador com o Client ID público do librespot (`spotify.rs`), a conta e o refresh token cifrado (`conta.rs`), quem usa a porta 8898 (`porta.rs`); os dados pelo Pathfinder com a sessão (`pathfinder.rs`, `codigos.rs`), a conversão pura (`conversao.rs`) e as páginas (`dados.rs`); e o **áudio** no motor do Player (`audio/`: o librespot pede a chave, decifra em memória, um cache com teto e um HTTP só em `127.0.0.1` com token por abertura entregam os bytes ao `tocador`). Compila só com `vergen` 9.0.6 no `Cargo.lock` |
 | `provedores/youtube-music` | O provedor do YouTube Music (um programa à parte, GPL-3.0-only por causa do `rustypipe`): metadados pelo `rustypipe`, áudio pelo cliente visionOS (`visionos.rs`). Embutido: o Player o acha ao lado do `player.exe` (`remoto::EMBUTIDOS`) |
 
 ### Princípio das threads
@@ -377,8 +380,9 @@ preciso). `Busca.faixas` saiu (as telas leem `itens`). O resumo da fase está em
 
 **F6, o provedor do Spotify**, desenho aprovado em
 [`docs/superpowers/specs/2026-11-23-f6-spotify-design.md`](docs/superpowers/specs/2026-11-23-f6-spotify-design.md): o
-Spotify toca pelo Soloist (o player oficial) ou pelo Match do YouTube Music. Tocar pelo librespot saiu na revisão de 23/11/2026
-(decifra as faixas protegidas fora do player do Spotify, o que a regra 2 não deixa): ele fica só no login e nos dados. **Parte 1 (23/11/2026)**,
+Spotify toca pelo **librespot** (parte 5, 24/11/2026), com o Soloist (o player oficial) e o Match do YouTube Music como
+reservas. (A revisão de 23/11/2026 tinha tirado o librespot por achar que ele quebrava a regra 2; a decisão de 24/11/2026
+com o Rafael desfez isso — ver a seção 2. Ele fica na sessão, nos dados e no áudio.) **Parte 1 (23/11/2026)**,
 o login: o protocolo ganhou `entrar`, `sair`, `conta` e a `conta` na apresentação (capacidade `Conta`); o Player pergunta
 `conta` a cada 2 s enquanto ela está `entrando` (`remoto.rs`, `InfoDoProvedor.conta`, `Remoto::entrar/sair`); o cartão de
 entrar fica em Para você, Busca e Biblioteca do espaço (`contas.rs`, `ui/paginas.rs::cartao_da_conta`) e a Loja mostra a
@@ -433,6 +437,33 @@ crmne/spotifast#1412). Por isso um Soloist que cai duas vezes sem nunca ter toca
 toca e outro build é procurado uma vez por dia (`Instalado::caiu`, `funcionou`). Falta ver tocar, pausar, pular, o fim e o visual com um
 build que funcione. Ficou: duas instâncias do Player na mesma pasta, trazer a posição ao cair para o Match, e o Soloist e o
 Spotifast abertos juntos (dois `soloist.exe` para a captura por nome).
+
+**F6, parte 5 (24/11/2026), o áudio do Spotify pelo librespot**: o Spotify passa a tocar com o som do próprio Spotify **no motor
+do Player** — pré-análise, troca sem intervalo, crossfade e equalizador, como nas faixas do YouTube Music. Decidido com o Rafael
+nesse dia: o librespot **não quebra DRM** (pede a chave ao Spotify como um cliente autenticado), e o áudio decifrado vive só na
+memória; a regra 2 do `AGENTS.md` foi anotada com isso. Onde: `provedores/spotify/src/audio/` — `librespot.rs` (o melhor formato
+que a conta tem, a chave, a decifra em memória, e o erro com causa), `cache.rs` (os pedaços decifrados, teto de 8 MB e 4 faixas,
+um download por pedaço mesmo com dois leitores), `servidor.rs` (HTTP só em `127.0.0.1`, porta sorteada, token por abertura,
+`Range`/`206`), `pedidos.rs` (as contas do `Range` e do caminho, puras) e `mod.rs` (liga o servidor quando a sessão entra,
+desliga quando a conta sai). O `resolver` do provedor agora devolve um endereço local, e o motor do Player não mudou. O protocolo
+ganhou **`causa`** no erro (opcional, retrocompatível) e o núcleo, `Erro::ProvedorComCausa`. **A cadeia de reserva** é
+`player/src/cadeia.rs` (`decidir`, `aviso`, puros e testados): librespot → Soloist → Match, com o aviso uma vez por troca; o
+`Remoto` guarda os jeitos que caíram (`caiu`, `jeito_de`, `caidos`, `caiu_para`), e é **por jeito**: o Soloist cair não
+derruba o áudio do próprio serviço, e vice-versa (`pares::quem_toca` recebe o conjunto dos que caíram). O `local.rs` troca de
+jeito em vez de pular a faixa, e uma faixa que falha no Soloist **não** derruba o jeito (só o programa que caiu derruba).
+Configurações › Serviços diz por que o áudio do Spotify parou, quando parou. Testes: 150
+no provedor (com o servidor HTTP de verdade e a concorrência do cache) e 189 no `player`; `clippy` sem avisos nesses pacotes.
+**Primeiro teste com a conta de verdade (24/11, à noite, numa cópia):** o login entrou, a busca funcionou e o `resolver`
+devolveu o endereço local com `.ogg` (Ogg 320 escolhido, a conta é Premium). **O áudio não tocou:** o Spotify recusou a
+chave (`chave-de-audio`) em todos os formatos. **A causa foi achada na documentação do Spotifast:** contas novas do Spotify
+(as com nome inventado, uma sequência longa de letras e números — a do Rafael é `31axzsjldxrjw3er75tdfai2f5ou`) têm **toda**
+chave recusada pelo librespot, e "nothing in Spotifast or librespot can change that today" (librespot#1649). Um Client ID
+próprio **não** muda isso ("only speeds up library and search requests, not audio keys"). O caminho é o **Soloist**, que a
+mesma documentação recomenda e que já temos (`soloist/`). Tudo o que foi testado e não era a causa está em
+`docs/f6-spotify.md`, para não repetir. **Também achado e corrigido nesse teste:** o `resolver` devolvia um endereço local
+mesmo quando a faixa não abria, e o primeiro pedaço dava `404` sem motivo visível; agora o erro sai daí com a causa certa.
+**Não conferido ao vivo:** o Ogg no `symphonia`, a pré-análise pelo endereço local, a troca de faixa sem intervalo, e uma
+conta antiga (que deveria tocar com o librespot).
 
 **F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
 LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
@@ -583,7 +614,7 @@ O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`
 | F3 | Provedor YouTube Music | Feita em 23/11/2026: `app/provedores/youtube-music`, embutido; metadados pelo `rustypipe` e áudio pelo cliente visionOS, como MixMusic e limusic ([`docs/f3-youtube-music.md`](docs/f3-youtube-music.md)) |
 | F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | Feita em 22/11/2026 (`letras::fontes`, `ttml`, `traducao`; Configurações › Letras; `ui/letra_cheia.rs`); ficaram estilos e bolinha, cartão e a letra no visual ([`docs/f4-letras.md`](docs/f4-letras.md)) |
 | F5 | **A Ilha** (Dynamic Island): janela flutuante no topo, estados repouso/alerta/expandida | Feita em 16/11/2026 (ver seção 7) |
-| F6 | Provedor Spotify: o Soloist ou o Match pelo YouTube Music | Feita em 23/11/2026, em 4 partes: login, dados, Match e Soloist ([`docs/f6-spotify.md`](docs/f6-spotify.md)). O Soloist ligou e pareou, mas o build 1.4.0.7 do Spotify cai ao tocar (seção 7); ficaram Canvas, as letras do Spotify e o ISRC |
+| F6 | Provedor Spotify: o áudio pelo librespot, o Soloist ou o Match pelo YouTube Music | Feita em 23 e 24/11/2026, em 5 partes: login, dados, Match, Soloist e o áudio pelo librespot no motor do Player ([`docs/f6-spotify.md`](docs/f6-spotify.md)). O Soloist ligou e pareou, mas o build 1.4.0.7 do Spotify cai ao tocar (seção 7); ficaram Canvas, as letras do Spotify e o ISRC |
 | F7 | Modo Escuta preciso + Shazam (SongRec): reconhecer, pré-analisar e alinhar ao som ao vivo | |
 | F8 | Som e fila: crossfade no compasso, modo DJ, smart shuffle, lixeira, A-B, timer, AutoEq | |
 | F9 | Juntos e controle: salas, controle pelo celular, MCP, overlay OBS, Chromecast | |

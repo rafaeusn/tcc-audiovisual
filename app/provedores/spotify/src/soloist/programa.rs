@@ -85,6 +85,18 @@ impl Programa for DoSpotify {
     }
 
     fn abrir(&self, chave: &str, parar: &AtomicBool) -> Result<Box<dyn Aberto>, Falha> {
+        self.abrir_faixa(chave, parar)
+    }
+}
+
+impl DoSpotify {
+    /// Abre o Soloist tocando **uma faixa** (`--single-track`) e sai quando ela acaba.
+    ///
+    /// É o modo que funciona: com o WebSocket e um comando `play`, o build 1.4.0.7 do Spotify cai com
+    /// `0xc0000000005` 127 ms depois de começar (testado em 24/11/2026). Com `--single-track`, ele toca até o fim. O preço
+    /// é não ter a API local: o Player acompanha pelo tempo (a duração vem do metadado) e manda pausar/pular fechando o
+    /// processo, como o desenho original previa.
+    fn abrir_faixa(&self, chave: &str, parar: &AtomicBool) -> Result<Box<dyn Aberto>, Falha> {
         let exe = self.o_instalado().ok_or_else(|| Falha::Motivo("o Soloist não está instalado".into()))?.exe();
         let dados = self.pasta.join("conta");
         std::fs::create_dir_all(&dados).map_err(|e| Falha::Motivo(format!("a pasta do Soloist não abriu: {e}")))?;
@@ -112,6 +124,7 @@ impl Programa for DoSpotify {
         // A da abertura anterior fica: é nela que se vê por que caiu.
         let _ = std::fs::rename(self.pasta.join("saida.log"), self.pasta.join("saida-anterior.log"));
         guardar_saida(&self.pasta.join("saida.log"), chave, &mut filho);
+        let nosso_pid = filho.id();
         let mut processo = Processo { filho, porta: 0, _grupo: grupo };
         let ate = Instant::now() + PRAZO_PARA_ABRIR;
         loop {
@@ -124,7 +137,7 @@ impl Programa for DoSpotify {
                 }
                 None => {}
             }
-            if let Some(porta) = porta_em(&dados) {
+            if let Some(porta) = porta_em(&dados, nosso_pid) {
                 processo.porta = porta?;
                 return Ok(Box::new(processo));
             }
@@ -140,7 +153,16 @@ impl Programa for DoSpotify {
 }
 
 /// A porta que o Soloist escolheu (`None`: ainda não). Só a deste computador.
-fn porta_em(dados: &Path) -> Option<Result<u16, Falha>> {
+///
+/// O `pid` é a conferência que evita o pior caso: um Soloist morto deixa `ws.port`/`ws.addr` para trás, e sem conferir o
+/// `soloist.pid` o Player leria a porta de um processo que já não existe e tomaria `connection refused` (foi o que
+/// aconteceu em 24/11/2026). O `filho` é o processo que **nós** abrimos: os arquivos só valem se forem dele.
+fn porta_em(dados: &Path, filho: u32) -> Option<Result<u16, Falha>> {
+    // O dono dos arquivos tem de ser o nosso Soloist: os de uma instância morta ficam para trás.
+    let dono = std::fs::read_to_string(dados.join("soloist.pid")).ok()?;
+    if dono.trim().parse::<u32>().ok()? != filho {
+        return None;
+    }
     let porta = std::fs::read_to_string(dados.join("ws.port")).ok()?.trim().parse::<u16>().ok().filter(|p| *p != 0)?;
     let endereco = std::fs::read_to_string(dados.join("ws.addr")).ok()?;
     if endereco.trim().is_empty() {
@@ -260,17 +282,22 @@ mod testes {
     use super::*;
 
     #[test]
-    fn a_porta_so_vale_neste_computador() {
+    fn a_porta_so_vale_neste_computador_e_so_do_nosso_processo() {
         let p = std::env::temp_dir().join(format!("tccplayer-soloist-porta-{}", std::process::id()));
         std::fs::create_dir_all(&p).expect("pasta");
-        assert_eq!(porta_em(&p), None);
+        assert_eq!(porta_em(&p, 42), None);
         std::fs::write(p.join("ws.port"), "0").expect("porta");
         std::fs::write(p.join("ws.addr"), "127.0.0.1\n").expect("endereço");
-        assert_eq!(porta_em(&p), None);
+        assert_eq!(porta_em(&p, 42), None);
         std::fs::write(p.join("ws.port"), "4123\n").expect("porta");
-        assert_eq!(porta_em(&p), Some(Ok(4123)));
+        // Sem o `soloist.pid` do processo que abrimos, a porta não vale: são arquivos de uma instância morta.
+        assert_eq!(porta_em(&p, 42), None, "sem o pid do nosso processo");
+        std::fs::write(p.join("soloist.pid"), "42\n").expect("pid");
+        assert_eq!(porta_em(&p, 42), Some(Ok(4123)));
+        // O pid de outro processo (o de uma abertura anterior, morta) não vale.
+        assert_eq!(porta_em(&p, 43), None, "o pid não é o nosso");
         std::fs::write(p.join("ws.addr"), "0.0.0.0").expect("endereço");
-        assert!(matches!(porta_em(&p), Some(Err(_))));
+        assert!(matches!(porta_em(&p, 42), Some(Err(_))));
         let _ = std::fs::remove_dir_all(&p);
     }
 

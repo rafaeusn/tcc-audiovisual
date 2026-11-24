@@ -11,12 +11,17 @@ Regra: código **copiado ou adaptado** de outro projeto entra na seção 3, com 
 - A rota do áudio pelo cliente visionOS do YouTube (`visionos.rs`) segue o que fazem o **MixMusic**
   (<https://github.com/fzn0x/mixmusic>, MIT ou GPL-3) e o **limusic** (<https://github.com/SimoHypers/limusic>,
   GPL-3). Nenhum código foi copiado: só os valores do cliente (nome, versão, agente), que são do YouTube.
-- `app/provedores/spotify` usa o **librespot** (`librespot-core` e `librespot-oauth`, MIT,
-  <https://github.com/librespot-org/librespot>) para o login e a sessão do Spotify. O caminho (o Client ID público do
-  librespot e a porta 8898) é o mesmo do **Spotifast** (<https://github.com/crmne/spotifast>, MIT). Os pedidos dos dados seguem o que
+- `app/provedores/spotify` usa o **librespot** (`librespot-core`, `librespot-oauth`, `librespot-audio` e
+  `librespot-metadata`, MIT, <https://github.com/librespot-org/librespot>) para o login, a sessão, os metadados das faixas,
+  o arquivo de áudio e a chave que o decifra. O áudio decifrado vive só na memória do provedor e nunca é gravado nem
+  redistribuído (regra 2 do `AGENTS.md`). O caminho (o Client ID público do librespot e a porta 8898) é o mesmo do
+  **Spotifast** (<https://github.com/crmne/spotifast>, MIT). Os pedidos dos dados seguem o que
   fazem o Spotifast, o **Prism** (<https://github.com/Yigder/Prism>, GPL-3), o **Metrolist** (GPL-3) e o **limusic**
   (<https://github.com/SimoHypers/limusic>, GPL-3; a ideia de reler o código das consultas do site). Nenhum código deles
-  foi copiado.
+  foi copiado. Desde 24/11/2026 o áudio toca pelo próprio motor do Player (`audio/`): o librespot entrega o arquivo
+  cifrado, a chave o decifra **na memória** e um servidor local em `127.0.0.1` (com token sorteado a cada abertura)
+  entrega os bytes ao tocador. Nada de áudio vai para o disco — o temporário do `librespot-audio` guarda só bytes
+  **cifrados** e é apagado a cada abertura (regra 2 do `AGENTS.md`).
 - O **Soloist** (o player do Spotify) não vem com o Player nem está neste repositório: o programa é baixado do servidor do Spotify
   quando a pessoa o liga, com a chave dela, e vale a licença dele. O jeito de o abrir e de falar com a API local segue a
   documentação oficial e o **Spotifast** (MIT), sem código copiado. Para isso o provedor usa `tungstenite` 0.28 (MIT OR Apache-2.0)

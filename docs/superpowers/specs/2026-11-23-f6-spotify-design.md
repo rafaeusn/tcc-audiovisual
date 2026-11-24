@@ -1,9 +1,21 @@
 # F6: o provedor do Spotify
 
+> **Revisto em 24/11/2026 (à tarde).** Tocar pelo librespot **voltou a valer**, a pedido do Rafael: o librespot pede a chave de
+> áudio ao Spotify como um cliente autenticado (não quebra DRM), e o áudio decifrado vive **só na memória**, nunca em arquivo e
+> nunca redistribuído. É o jeito principal; o Soloist e o Match ficam como reserva. A regra 2 do `AGENTS.md` foi anotada com
+> isso. A revisão da noite de 23/11 (abaixo, que tirou o librespot) fica como história da decisão.
+>
 > **Revisto em 23/11/2026, à noite.** Tocar pelo librespot (o jeito A abaixo) **saiu**: ele decifra as faixas protegidas do
 > Spotify fora do player dele, o que a regra 2 do `AGENTS.md` não deixa, e o desenho tinha passado por cima disso. O librespot
 > fica só no login e nos dados. O Spotify toca pelo **Soloist** (o player oficial, com o som do Spotify) ou pelo **Match** (a
-> mesma música no YouTube Music). As seções 2, 4, 5.3 a 5.5, 5.7 e 6 valem com a seção 8 por cima.
+> mesma música no YouTube Music). As seções 2, 4, 5.3 a 5.5, 5.7 e 6 valem com a seção 8 por cima. **No fim, o jeito principal é
+> o librespot (24/11).**
+>
+> **Revisto em 24/11/2026, a pedido do Rafael:** o librespot **voltou** e é o jeito principal. Ele não quebra DRM — pede a
+> chave ao Spotify como um cliente autenticado, e o áudio decifrado vive **só na memória** (nada em arquivo, nada
+> redistribuído), que é o que a regra 2 proíbe. A decisão ficou registrada na seção 2 do `AGENTS.md`. A cadeia é
+> librespot → Soloist → Match, decidida pela **causa** do erro (`provedores::Causa`); como tocar, de fato, está em
+> [`docs/f6-spotify.md`](../../f6-spotify.md).
 
 Desenho de 23/11/2026, conversado com o Rafael. Plano de origem: [`docs/plano-v2.md`](../../plano-v2.md), fase F6.
 Referências lidas para este desenho: o Spotifast (Rust, MIT: `src/auth.rs`, `docs/_reference/how-it-connects.md`,

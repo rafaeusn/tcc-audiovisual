@@ -85,6 +85,11 @@ Nenhum campo do pedido se chama `id` além do número do pedido (por isso `resol
 Qualquer pedido pode ser respondido com `{"id":7,"resposta":"erro","mensagem":"..."}`. Um pedido que o provedor
 não conhece também (assim versões novas do Player falam com provedores antigos).
 
+O erro pode vir com **`causa`** (opcional, F6): `rede`, `limite`, `indisponivel`, `sem-conta`, `sem-premium`,
+`sessao-recusada`, `chave-de-audio` ou `quebrado`. Ela diz ao Player se vale tentar de novo, trocar de jeito de tocar ou
+desistir daquela faixa (a regra está em `player/src/cadeia.rs`). Sem `causa`, vale o tratamento de antes; uma causa que
+o Player não conhece também.
+
 A **faixa** é igual em todo serviço:
 
 ```json

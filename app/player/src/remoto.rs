@@ -22,9 +22,11 @@
 //! aberto: a thread dele é encerrada primeiro (o programa fecha junto), e a cópia ou a mudança de pasta acontecem
 //! em segundo plano. No fim, a lista é lida de novo.
 
+use crate::cadeia::Jeito;
 use crate::externo::{Abertos, Lido, Tocadores};
-use crate::pares::{Par, Pares, QuemToca, consulta, escolher, quem_toca};
+use crate::pares::{Par, Pares, QuemToca, consulta, escolher, quem_toca, tem};
 use biblioteca::{Musica, Remota};
+use nucleo::CausaDoProvedor;
 use provedores::{
     Acao, Capacidade, Conta, CorpoDoPedido, Faixa, Fonte, Identidade, Instalado, Item, Manifesto, Prateleira, Provedor,
     Segredo, SituacaoDaConta, SituacaoDoTocador,
@@ -218,6 +220,8 @@ pub struct Busca {
 struct FonteLida {
     endereco: Result<tocador::Endereco, String>,
     par: Option<Par>,
+    /// Por que não deu, quando o provedor soube classificar (a cadeia de reserva decide a partir dela).
+    causa: Option<CausaDoProvedor>,
 }
 
 #[derive(Default)]
@@ -270,10 +274,7 @@ fn travar<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// O motivo para mostrar: sem o "provedor:" que o tipo do erro põe na frente (o nome do provedor já vai junto).
 pub(crate) fn motivo(e: &nucleo::Erro) -> String {
-    match e {
-        nucleo::Erro::Provedor(m) => m.clone(),
-        outro => outro.to_string(),
-    }
+    e.mensagem()
 }
 
 /// Uma faixa de provedor como [`Musica`].
@@ -317,6 +318,8 @@ pub struct Remoto {
     tocadores: Tocadores,
     /// As faixas que o tocador do serviço não tocou nesta abertura: vão pelo Match.
     pelo_match: HashSet<String>,
+    /// Os jeitos de tocar que caíram nesta abertura, por serviço, com o motivo da primeira queda.
+    caidos: HashMap<String, (HashSet<Jeito>, CausaDoProvedor)>,
     versao: Arc<AtomicU64>,
     versao_vista: u64,
     /// A thread de cada provedor ligado, pelo serviço.
@@ -354,6 +357,7 @@ impl Remoto {
             abertos,
             tocadores,
             pelo_match: HashSet::new(),
+            caidos: HashMap::new(),
             pares: Arc::new(Mutex::new(Pares::abrir(arquivo))),
             pasta,
             instalados: Vec::new(),
@@ -604,21 +608,137 @@ impl Remoto {
             QuemToca::Ninguem => Some(format!("o provedor {} não está instalado ou está desligado", r.fonte)),
         };
         if let Some(motivo) = falhou {
-            travar(&self.estado).fontes.insert(chave, FonteLida { endereco: Err(motivo), par: None });
+            travar(&self.estado).fontes.insert(chave, FonteLida { endereco: Err(motivo), par: None, causa: None });
             self.versao.fetch_add(1, Ordering::Release);
         }
     }
 
     /// Quem toca as faixas de um serviço agora.
     pub fn quem_toca(&self, servico: &str) -> QuemToca {
-        quem_toca(&travar(&self.estado).provedores, servico, self.tocadores.situacao(servico))
+        let cairam = self.caidos.get(servico).map(|(j, _)| j.clone()).unwrap_or_default();
+        quem_toca(&travar(&self.estado).provedores, servico, self.tocadores.situacao(servico), &cairam)
+    }
+
+    /// Um endereço de faixa falhou: a cadeia decide o que fazer, e devolve `true` se esta faixa deve ser tentada de
+    /// novo (o jeito de tocar mudou). Só as causas que derrubam o jeito trocam alguma coisa; o resto segue o caminho de
+    /// sempre (a faixa é pulada com o motivo).
+    pub fn avaliar_falha(&mut self, m: &Musica, motivo: &str) -> bool {
+        let Some(r) = m.remota.clone() else { return false };
+        let Some(causa) = self.endereco_causa(m) else { return false };
+        // O jeito que falhou é o que a faixa usaria agora.
+        let (agora, _) = self.jeito_de(&r.servico);
+        let Some(jeito) = agora else { return false };
+        let decisao = crate::cadeia::decidir(jeito, Some(causa), self.proximo_depois_de(&r.servico, jeito));
+        match decisao {
+            crate::cadeia::Decisao::Trocar(_) => {
+                log::warn!("o áudio de {} caiu ({motivo}); trocando de jeito de tocar", r.servico);
+                self.caiu(&r.servico, jeito, causa);
+                self.esquecer(m);
+                true
+            }
+            crate::cadeia::Decisao::Desistir => {
+                self.caiu(&r.servico, jeito, causa);
+                // Sem próximo jeito, a faixa não toca: o aviso já saiu em `caiu`.
+                false
+            }
+            crate::cadeia::Decisao::SoEstaFaixa | crate::cadeia::Decisao::TentarDeNovo => false,
+        }
+    }
+
+    /// O jeito de tocar agora para as faixas de um serviço, e o próximo se ele cair. `None` quando nenhum está pronto
+    /// (a cadeia responde "desistir", e o Player diz o motivo).
+    pub fn jeito_de(&self, servico: &str) -> (Option<Jeito>, Option<Jeito>) {
+        let quem = self.quem_toca(servico);
+        let agora = match quem {
+            QuemToca::Ele => Some(Jeito::Proprio),
+            QuemToca::Sozinho => Some(Jeito::Tocador),
+            QuemToca::Outro(_) => Some(Jeito::Match),
+            QuemToca::Abrindo | QuemToca::Ninguem => None,
+        };
+        let proximo = agora.and_then(|j| self.proximo_depois_de(servico, j));
+        (agora, proximo)
+    }
+
+    /// Há outro serviço pronto para tocar as faixas deste (busca e áudio).
+    fn tem_match(&self, servico: &str) -> bool {
+        self.provedores.iter().any(|p| {
+            p.servico != servico && p.situacao == Situacao::Pronto && tem(p, &[Capacidade::Busca, Capacidade::Audio])
+        })
+    }
+
+    /// Um jeito de tocar caiu nesta abertura: as faixas do serviço vão para o próximo jeito, e a pessoa é avisada uma
+    /// vez do motivo. A decisão vem de `crate::cadeia::decidir`: o passageiro não derruba o jeito, a faixa indisponível
+    /// só muda aquela faixa, e o resto derruba **este** jeito (`jeito`, e não o que a tela diria agora).
+    pub fn caiu(&mut self, servico: &str, jeito: Jeito, causa: CausaDoProvedor) {
+        // O próximo é o que sobra da cadeia depois deste, sem os que já caíram.
+        let proximo = self.proximo_depois_de(servico, jeito);
+        let decisao = crate::cadeia::decidir(jeito, Some(causa), proximo);
+        let nome = self.nome_do_servico(servico);
+        if let Some(texto) = crate::cadeia::aviso(Some(causa), decisao, &nome) {
+            log::warn!("{servico}: {texto}");
+            travar(&self.estado).avisos.push(texto);
+        }
+        if matches!(decisao, crate::cadeia::Decisao::Trocar(_) | crate::cadeia::Decisao::Desistir) {
+            let entrada = self.caidos.entry(servico.to_string()).or_insert_with(|| (HashSet::new(), causa));
+            entrada.0.insert(jeito);
+            if entrada.0.len() == 1 {
+                entrada.1 = causa;
+            }
+            self.esquecer_enderecos(servico);
+        }
+        self.versao.fetch_add(1, Ordering::Release);
+    }
+
+    /// O jeito que vem depois de `jeito` na cadeia, se ele estiver pronto e não tiver caído.
+    fn proximo_depois_de(&self, servico: &str, jeito: Jeito) -> Option<Jeito> {
+        let caidos = self.caidos.get(servico).map(|(j, _)| j.clone()).unwrap_or_default();
+        let pronto_para_tocar_sozinho =
+            self.provedores.iter().any(|p| p.servico == servico && p.capacidades.contains(&Capacidade::TocaSozinho))
+                && self.tocadores.situacao(servico) == SituacaoDoTocador::Pronto
+                && !caidos.contains(&Jeito::Tocador);
+        match jeito {
+            // Do áudio do próprio serviço: o tocador do serviço (se pronto), senão o Match.
+            Jeito::Proprio => {
+                if pronto_para_tocar_sozinho {
+                    Some(Jeito::Tocador)
+                } else {
+                    self.tem_match(servico).then_some(Jeito::Match)
+                }
+            }
+            Jeito::Tocador => self.tem_match(servico).then_some(Jeito::Match),
+            Jeito::Match => None,
+        }
+    }
+
+    /// Por que caiu um jeito de tocar deste serviço nesta abertura, se algum caiu (a tela mostra o motivo).
+    pub fn caiu_para(&self, servico: &str) -> Option<CausaDoProvedor> {
+        self.caidos.get(servico).map(|(_, causa)| *causa)
+    }
+
+    /// Os jeitos de tocar que caíram nesta abertura (para a tela e os testes).
+    pub fn caidos(&self, servico: &str) -> HashSet<Jeito> {
+        self.caidos.get(servico).map(|(j, _)| j.clone()).unwrap_or_default()
+    }
+
+    /// Esquece os endereços de um serviço (o servidor de áudio pode ter trocado de porta, ou caído).
+    fn esquecer_enderecos(&mut self, servico: &str) {
+        let prefixo = format!("{servico}:");
+        let mut e = travar(&self.estado);
+        e.fontes.retain(|chave, _| !chave.starts_with(&prefixo));
+        drop(e);
+        self.pedidas.retain(|c| !c.starts_with(&prefixo));
     }
 
     /// Quem toca esta faixa agora: a que o tocador do serviço não tocou vai pelo Match.
     pub fn quem_toca_esta(&self, m: &Musica) -> QuemToca {
         let Some(r) = &m.remota else { return QuemToca::Ninguem };
         if self.pelo_match.contains(m.caminho.to_string_lossy().as_ref()) {
-            return quem_toca(&travar(&self.estado).provedores, &r.servico, SituacaoDoTocador::Desligado);
+            return quem_toca(
+                &travar(&self.estado).provedores,
+                &r.servico,
+                SituacaoDoTocador::Desligado,
+                &self.caidos(&r.servico),
+            );
         }
         self.quem_toca(&r.servico)
     }
@@ -669,6 +789,11 @@ impl Remoto {
     /// O endereço de uma faixa, se já chegou (ou por que não deu).
     pub fn endereco(&self, m: &Musica) -> Option<Result<tocador::Endereco, String>> {
         travar(&self.estado).fontes.get(m.caminho.to_string_lossy().as_ref()).map(|f| f.endereco.clone())
+    }
+
+    /// A causa da falha do endereço desta faixa, quando o provedor soube classificar (a cadeia de reserva a usa).
+    pub fn endereco_causa(&self, m: &Musica) -> Option<CausaDoProvedor> {
+        travar(&self.estado).fontes.get(m.caminho.to_string_lossy().as_ref()).and_then(|f| f.causa)
     }
 
     /// De que áudio é a pré-análise desta faixa: a gravação (pelo Match, a do par) e o endereço. `tocando`: é a faixa que
@@ -853,9 +978,9 @@ fn casar(
 ) -> (FonteLida, Option<String>) {
     let tocar = |par: Par| {
         let endereco = p.resolver(&par.id, PRAZO).map_err(|e| motivo(&e)).and_then(endereco_de);
-        FonteLida { par: endereco.is_ok().then_some(par), endereco }
+        FonteLida { par: endereco.is_ok().then_some(par), endereco, causa: None }
     };
-    let sem = |motivo: String| FonteLida { endereco: Err(motivo), par: None };
+    let sem = |motivo: String| FonteLida { endereco: Err(motivo), par: None, causa: None };
     let guardado = travar(pares).de(chave).filter(|g| g.servico == p.apresentacao().servico).cloned();
     let mut recusados = guardado.as_ref().map(|g| g.recusados.clone()).unwrap_or_default();
     let mut fora = recusados.clone();
@@ -1163,7 +1288,7 @@ fn trabalhar(
                     Some(p) => casar(p, &nome, &alvo, &chave, recusar, pares),
                     None => {
                         let endereco = Err(format!("o provedor {nome} não está aberto"));
-                        (FonteLida { endereco, par: None }, None)
+                        (FonteLida { endereco, par: None, causa: None }, None)
                     }
                 };
                 if let Err(e) = &lida.endereco {
@@ -1176,14 +1301,17 @@ fn trabalhar(
                 versao.fetch_add(1, Ordering::Release);
             }
             Tarefa::Resolver { id, chave } => {
-                let resultado = match vivo {
-                    Some(p) => p.resolver(&id, PRAZO).map_err(|e| motivo(&e)).and_then(endereco_de),
-                    None => Err(format!("o provedor {nome} não está aberto")),
+                let (resultado, causa) = match vivo {
+                    Some(p) => match p.resolver(&id, PRAZO) {
+                        Ok(fonte) => (endereco_de(fonte), None),
+                        Err(e) => (Err(motivo(&e)), e.causa_do_provedor()),
+                    },
+                    None => (Err(format!("o provedor {nome} não está aberto")), None),
                 };
                 if let Err(e) = &resultado {
                     log::warn!("{nome} não deu o endereço de {chave}: {e}");
                 }
-                travar(estado).fontes.insert(chave, FonteLida { endereco: resultado, par: None });
+                travar(estado).fontes.insert(chave, FonteLida { endereco: resultado, par: None, causa });
                 versao.fetch_add(1, Ordering::Release);
             }
         }
@@ -1459,7 +1587,7 @@ mod testes {
         // Tocou antes pelo Match: o endereço é do par, e nunca vira a análise da faixa do Spotify.
         let par = Par { servico: "yt".into(), id: "v".into(), ..Default::default() };
         let endereco = Ok(tocador::Endereco::novo("http://127.0.0.1:9/v"));
-        travar(&r.estado).fontes.insert("exemplo:1".into(), FonteLida { endereco, par: Some(par) });
+        travar(&r.estado).fontes.insert("exemplo:1".into(), FonteLida { endereco, par: Some(par), causa: None });
         assert_eq!(r.alvo_da_analise(&m, false), (None, None), "quem soa é o tocador do serviço");
         let (par, endereco) = r.alvo_da_analise(&m, true);
         assert_eq!((par.as_deref(), endereco.is_some()), (Some("yt:v"), true), "a que o daqui ainda toca");

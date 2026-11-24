@@ -9,6 +9,7 @@
 mod anim;
 mod app;
 mod arranjo;
+mod cadeia;
 mod capas;
 mod catalogo;
 mod contas;

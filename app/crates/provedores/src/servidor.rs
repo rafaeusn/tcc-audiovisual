@@ -39,7 +39,7 @@ pub fn servir(entrada: impl BufRead, saida: impl Write + Send, servico: &mut imp
                 }
                 let (id, corpo, sair) = match ler_pedido(&linha) {
                     None => continue,
-                    Some(Err((id, motivo))) => (id, CorpoDaResposta::Erro { mensagem: motivo }, false),
+                    Some(Err((id, motivo))) => (id, CorpoDaResposta::erro(motivo), false),
                     Some(Ok(p)) => match p.corpo {
                         CorpoDoPedido::Ola { .. } => {
                             (p.id, CorpoDaResposta::Apresentacao(servico.apresentacao()), false)
@@ -85,7 +85,7 @@ mod testes {
 
         fn atender(&mut self, pedido: CorpoDoPedido) -> CorpoDaResposta {
             match pedido {
-                CorpoDoPedido::Buscar { texto, .. } => CorpoDaResposta::Erro { mensagem: texto },
+                CorpoDoPedido::Buscar { texto, .. } => CorpoDaResposta::erro(texto),
                 _ => CorpoDaResposta::Ok,
             }
         }
@@ -111,7 +111,7 @@ mod testes {
             match (pedido, self.solta.take()) {
                 (CorpoDoPedido::Inicio, Some(solta)) => Ok(Box::new(move || match solta.recv() {
                     Ok(()) => CorpoDaResposta::Prateleiras { prateleiras: Vec::new() },
-                    Err(_) => CorpoDaResposta::Erro { mensagem: "não soltou".into() },
+                    Err(_) => CorpoDaResposta::erro("não soltou"),
                 })),
                 (outro, _) => Err(outro),
             }
@@ -150,8 +150,8 @@ mod testes {
             String::from_utf8(saida).expect("utf8").lines().filter_map(ler_resposta).collect();
         assert_eq!(respostas.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2, 3, 4], "depois do tchau, nada");
         assert!(matches!(&respostas[0].corpo, CorpoDaResposta::Apresentacao(a) if a.servico == "eco"));
-        assert_eq!(respostas[1].corpo, CorpoDaResposta::Erro { mensagem: "oi".into() });
-        assert!(matches!(&respostas[2].corpo, CorpoDaResposta::Erro { mensagem } if mensagem.contains("voar")));
+        assert_eq!(respostas[1].corpo, CorpoDaResposta::erro("oi"));
+        assert!(matches!(&respostas[2].corpo, CorpoDaResposta::Erro { mensagem, .. } if mensagem.contains("voar")));
         assert_eq!(respostas[3].corpo, CorpoDaResposta::Ok);
     }
 }

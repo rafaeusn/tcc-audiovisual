@@ -25,6 +25,25 @@ pub enum Erro {
     Rede(String),
     #[error("provedor: {0}")]
     Provedor(String),
+    /// Um provedor respondeu com erro e disse de que tipo foi (F6): o Player escolhe se tenta de novo, troca de
+    /// jeito de tocar ou desiste daquela faixa.
+    #[error("provedor: {mensagem}")]
+    ProvedorComCausa { mensagem: String, causa: CausaDoProvedor },
+}
+
+/// Por que o provedor falhou, do jeito que o Player entende. A lista acompanha o protocolo (uma causa nova entra nos
+/// dois lados). `Outra` é o que o Player não conhece: vale como erro comum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CausaDoProvedor {
+    Rede,
+    Limite,
+    Indisponivel,
+    SemConta,
+    SemPremium,
+    SessaoRecusada,
+    ChaveDeAudio,
+    Quebrado,
+    Outra,
 }
 
 pub type Resultado<T> = Result<T, Erro>;
@@ -32,5 +51,22 @@ pub type Resultado<T> = Result<T, Erro>;
 impl Erro {
     pub fn arquivo(caminho: impl Into<PathBuf>, fonte: std::io::Error) -> Self {
         Self::Arquivo { caminho: caminho.into(), fonte }
+    }
+
+    /// A causa de um erro de provedor, quando ele disse; `None` para os outros erros e para um erro sem causa.
+    pub fn causa_do_provedor(&self) -> Option<CausaDoProvedor> {
+        match self {
+            Self::ProvedorComCausa { causa, .. } => Some(*causa),
+            _ => None,
+        }
+    }
+
+    /// O texto do erro sem o "provedor:" / "rede:" que o tipo põe na frente.
+    pub fn mensagem(&self) -> String {
+        match self {
+            Self::Provedor(m) => m.clone(),
+            Self::ProvedorComCausa { mensagem, .. } => mensagem.clone(),
+            outro => outro.to_string(),
+        }
     }
 }

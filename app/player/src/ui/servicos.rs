@@ -10,6 +10,23 @@ use provedores::EstadoDoTocador;
 /// Onde a pessoa cria a chave pessoal dela.
 const PAGINA_DA_CHAVE: &str = "https://developer.spotify.com/dashboard/soloist";
 
+/// Por que o jeito de tocar caiu, em palavras simples (uma vez por abertura).
+fn explicar_queda(causa: nucleo::CausaDoProvedor) -> String {
+    use nucleo::CausaDoProvedor as C;
+    let motivo = match causa {
+        C::ChaveDeAudio => "o Spotify recusou o áudio desta conta",
+        C::SemPremium => "a conta não é Premium",
+        C::SessaoRecusada => "o Spotify recusou a sessão",
+        C::SemConta => "a conta não está conectada",
+        C::Indisponivel => "a faixa não está disponível",
+        C::Quebrado => "o Spotify respondeu de um jeito inesperado",
+        C::Rede => "a conexão falhou",
+        C::Limite => "o Spotify pediu para esperar",
+        C::Outra => "deu um erro",
+    };
+    format!("(O áudio do Spotify parou nesta abertura: {motivo}.)")
+}
+
 impl Player {
     pub(super) fn bloco_servicos(&self, largura: f32, cx: &mut Context<Self>) -> Vec<Div> {
         let c = self.cores();
@@ -18,6 +35,11 @@ impl Player {
         for (n, p) in provedores.iter().enumerate() {
             let quem = self.local.remoto.quem_toca(&p.servico);
             let toca = por_onde_toca(&quem, &p.situacao, |s| self.nome_do_servico(s));
+            // Um jeito de tocar que caiu nesta abertura: a pessoa vê por quê, e que o Player seguiu para o próximo.
+            let toca = match self.local.remoto.caiu_para(&p.servico) {
+                Some(causa) => format!("{toca} {}", explicar_queda(causa)),
+                None => toca,
+            };
             let frase = match &p.conta {
                 Some(conta) => format!("{}. {toca}", frase_da_conta(conta)),
                 None => toca,

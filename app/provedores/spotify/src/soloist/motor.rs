@@ -28,7 +28,11 @@ const DE_PE: Duration = Duration::from_secs(120);
 /// Depois de parar (ou de uma faixa que falhou), quanto tempo calar o que começar atrasado, e de quanto em quanto tempo.
 const CALAR: Duration = Duration::from_secs(20);
 /// Depois de quanto tempo tocando um Soloist novo é dado por bom neste computador.
-const TOCOU_BEM: Duration = Duration::from_secs(20);
+///
+/// Era 20 s, por causa do build quebrado de 23/11 (que caía sempre em `soloist.exe+0x2120d1`). Mas um build bom começa a
+/// tocar em menos de 2 s, e o teste de 24/11 mostrou que o 1.4.0.7 **toca** nesta máquina: esperar 20 s só fazia um build
+/// que funciona ser dado por quebrado se a pessoa pulasse a faixa antes. Agora, **começar** a tocar já basta.
+const TOCOU_BEM: Duration = Duration::from_secs(2);
 /// A API caiu: quanto esperar para ver se foi o programa que fechou, e com que código.
 const ESPERA_DO_CODIGO: Duration = Duration::from_secs(3);
 const ENTRE_PAUSAS: Duration = Duration::from_millis(500);

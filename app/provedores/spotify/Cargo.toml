@@ -1,10 +1,15 @@
-[package]
+﻿[package]
 name = "provedor-spotify"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Provedor do Spotify para o Player (F6): login pelo navegador, os dados pela sessão do librespot e o Soloist (o player oficial do Spotify), pelo protocolo de provedores."
+description = "Provedor do Spotify para o Player (F6): login pelo navegador, os dados pela sessão do librespot, o áudio pelo librespot no motor do Player e o Soloist (o player oficial do Spotify), pelo protocolo de provedores."
+
+[lib]
+# O login (o OAuth com os dois grants) é compartilhado pelo provedor e pelo teste avulso.
+name = "provedor_spotify"
+path = "src/lib.rs"
 
 [[bin]]
 name = "provedor-spotify"
@@ -18,7 +23,15 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
 # A sessão do Spotify, como o Spotifast (librespot é MIT).
 librespot-core = { version = "0.8", default-features = false, features = ["native-tls"] }
-librespot-oauth = { version = "0.8", default-features = false, features = ["native-tls"] }
+# O `AuthenticationType` do `Credentials` (o token de áudio vai com o nome da conta junto).
+librespot-protocol = { version = "0.8", default-features = false }
+# O áudio: os metadados (o FileId e o formato de cada faixa) e o arquivo decifrado em memória (parte 3).
+librespot-audio = { version = "0.8", default-features = false, features = ["native-tls"] }
+librespot-metadata = { version = "0.8", default-features = false, features = ["native-tls"] }
+# O OAuth: o PKCE é escrito por nós (o `librespot-oauth` não deixa escolher o `show_dialog` nem separar os escopos).
+base64 = "0.22"
+sha2 = "0.10"
+log = { workspace = true }
 # O Soloist: a API local dele é um WebSocket, e o programa vem num zip.
 tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
 zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
@@ -30,3 +43,5 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_NetworkMana
 
 [lints]
 workspace = true
+
+

@@ -752,6 +752,13 @@ impl Local {
             match self.remoto.endereco(&musica) {
                 Some(Ok(_)) => {}
                 Some(Err(motivo)) => {
+                    // A falha pode ser do jeito inteiro (o serviço recusou o áudio) ou só desta faixa: a cadeia decide.
+                    if self.remoto.avaliar_falha(&musica, &motivo)
+                        && self.fila.musica_atual().is_some_and(|a| a.caminho == musica.caminho)
+                    {
+                        self.tocar_atual();
+                        return;
+                    }
                     self.nao_tocou(&musica, &motivo);
                     return;
                 }
@@ -988,6 +995,15 @@ impl Local {
             DoExterno::Falhou(motivo) => {
                 let nome = m.remota.as_ref().map(|r| r.fonte.clone()).unwrap_or_default();
                 log::warn!("\"{}\" não tocou no tocador do {nome}: {motivo}", m.titulo);
+                // Caiu o programa (desligado, pareando, falhou), ou só esta faixa? O primeiro derruba o jeito; o
+                // segundo leva só esta faixa para o Match (a cadeia decide).
+                let programa_caiu = self
+                    .remoto
+                    .tocador(&m.remota.as_ref().map(|r| r.servico.clone()).unwrap_or_default())
+                    .is_some_and(|l| l.estado.situacao != SituacaoDoTocador::Pronto);
+                if programa_caiu && let Some(servico) = m.remota.as_ref().map(|r| r.servico.clone()) {
+                    self.remoto.caiu(&servico, crate::cadeia::Jeito::Tocador, nucleo::CausaDoProvedor::Quebrado);
+                }
                 self.remoto.mandar_pelo_match(&m);
                 // Sem outro serviço, quem avisa é a falha da própria faixa.
                 if matches!(self.remoto.quem_toca_esta(&m), QuemToca::Outro(_)) {
