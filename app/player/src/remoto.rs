@@ -25,6 +25,7 @@
 use crate::externo::{Abertos, Lido, Tocadores};
 use crate::pares::{Par, Pares, QuemToca, consulta, escolher, quem_toca};
 use biblioteca::{Musica, Remota};
+use nucleo::CausaDoProvedor;
 use provedores::{
     Acao, Capacidade, Conta, CorpoDoPedido, Faixa, Fonte, Identidade, Instalado, Item, Manifesto, Prateleira, Provedor,
     Segredo, SituacaoDaConta, SituacaoDoTocador,
@@ -43,6 +44,8 @@ const PAUSA_NA_DIGITACAO: Duration = Duration::from_millis(350);
 const RESULTADOS: u32 = 20;
 /// Prazo de uma busca e de uma resolução.
 const PRAZO: Duration = Duration::from_secs(20);
+/// Depois de quanto tempo uma falha passageira da faixa seguinte é tentada de novo.
+const PASSAGEIRA_VALE: Duration = Duration::from_secs(10);
 /// Quanto tempo uma página de serviço vale no cache.
 const VALIDADE_DA_PAGINA: Duration = Duration::from_secs(10 * 60);
 /// Quantas vezes seguidas um provedor que fechou é reaberto.
@@ -218,6 +221,26 @@ pub struct Busca {
 struct FonteLida {
     endereco: Result<tocador::Endereco, String>,
     par: Option<Par>,
+    /// De que tipo foi a falha, quando o provedor disse.
+    causa: Option<CausaDoProvedor>,
+    em: Instant,
+}
+
+impl FonteLida {
+    fn falha(motivo: String, causa: Option<CausaDoProvedor>) -> Self {
+        Self { endereco: Err(motivo), par: None, causa, em: Instant::now() }
+    }
+
+    /// O que o provedor respondeu ao pedido do áudio (`par`: a gravação, pelo Match).
+    fn do_provedor(resposta: nucleo::Resultado<Fonte>, par: Option<Par>) -> Self {
+        match resposta {
+            Ok(fonte) => {
+                let endereco = endereco_de(fonte);
+                Self { par: par.filter(|_| endereco.is_ok()), endereco, causa: None, em: Instant::now() }
+            }
+            Err(e) => Self::falha(motivo(&e), e.causa_do_provedor()),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -270,10 +293,7 @@ fn travar<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// O motivo para mostrar: sem o "provedor:" que o tipo do erro põe na frente (o nome do provedor já vai junto).
 pub(crate) fn motivo(e: &nucleo::Erro) -> String {
-    match e {
-        nucleo::Erro::Provedor(m) => m.clone(),
-        outro => outro.to_string(),
-    }
+    e.mensagem()
 }
 
 /// Uma faixa de provedor como [`Musica`].
@@ -604,7 +624,7 @@ impl Remoto {
             QuemToca::Ninguem => Some(format!("o provedor {} não está instalado ou está desligado", r.fonte)),
         };
         if let Some(motivo) = falhou {
-            travar(&self.estado).fontes.insert(chave, FonteLida { endereco: Err(motivo), par: None });
+            travar(&self.estado).fontes.insert(chave, FonteLida::falha(motivo, None));
             self.versao.fetch_add(1, Ordering::Release);
         }
     }
@@ -655,6 +675,12 @@ impl Remoto {
         self.tocadores.mandar(servico, CorpoDoPedido::LigarTocador { chave: chave.map(Segredo) });
     }
 
+    /// Passa a usar o outro programa que o tocador do serviço ofereceu.
+    pub fn trocar_tocador(&mut self, servico: &str) {
+        self.pelo_match.clear();
+        self.tocadores.mandar(servico, CorpoDoPedido::TrocarTocador);
+    }
+
     pub fn desligar_tocador(&mut self, servico: &str) {
         self.tocadores.mandar(servico, CorpoDoPedido::DesligarTocador);
     }
@@ -669,6 +695,32 @@ impl Remoto {
     /// O endereço de uma faixa, se já chegou (ou por que não deu).
     pub fn endereco(&self, m: &Musica) -> Option<Result<tocador::Endereco, String>> {
         travar(&self.estado).fontes.get(m.caminho.to_string_lossy().as_ref()).map(|f| f.endereco.clone())
+    }
+
+    /// Uma falha passageira de há um tempo (a rede pode ter voltado): o endereço é pedido de novo.
+    pub fn esquecer_passageira(&mut self, m: &Musica) {
+        let chave = m.caminho.to_string_lossy();
+        let velha = travar(&self.estado).fontes.get(chave.as_ref()).is_some_and(|f| {
+            let passa = matches!(f.causa, Some(CausaDoProvedor::Rede | CausaDoProvedor::Limite));
+            passa && f.endereco.is_err() && f.em.elapsed() >= PASSAGEIRA_VALE
+        });
+        if velha {
+            self.esquecer(m);
+        }
+    }
+
+    /// Quem dá o áudio desta faixa, para a pessoa (pelo Match, é o outro serviço).
+    pub fn nome_de_quem_toca(&self, m: &Musica) -> String {
+        match (self.quem_toca_esta(m), &m.remota) {
+            (QuemToca::Outro(servico), _) => self.nome_do_servico(&servico),
+            (_, Some(r)) => r.fonte.clone(),
+            _ => String::new(),
+        }
+    }
+
+    /// De que tipo foi a falha do endereço desta faixa, quando o provedor disse.
+    pub fn causa(&self, m: &Musica) -> Option<CausaDoProvedor> {
+        travar(&self.estado).fontes.get(m.caminho.to_string_lossy().as_ref()).and_then(|f| f.causa)
     }
 
     /// De que áudio é a pré-análise desta faixa: a gravação (pelo Match, a do par) e o endereço. `tocando`: é a faixa que
@@ -851,11 +903,7 @@ fn casar(
     recusar: bool,
     pares: &Mutex<Pares>,
 ) -> (FonteLida, Option<String>) {
-    let tocar = |par: Par| {
-        let endereco = p.resolver(&par.id, PRAZO).map_err(|e| motivo(&e)).and_then(endereco_de);
-        FonteLida { par: endereco.is_ok().then_some(par), endereco }
-    };
-    let sem = |motivo: String| FonteLida { endereco: Err(motivo), par: None };
+    let tocar = |par: Par| FonteLida::do_provedor(p.resolver(&par.id, PRAZO), Some(par));
     let guardado = travar(pares).de(chave).filter(|g| g.servico == p.apresentacao().servico).cloned();
     let mut recusados = guardado.as_ref().map(|g| g.recusados.clone()).unwrap_or_default();
     let mut fora = recusados.clone();
@@ -866,14 +914,17 @@ fn casar(
         } else {
             match tocar(g.clone()) {
                 lida @ FonteLida { endereco: Ok(_), .. } => return (lida, None),
-                FonteLida { endereco: Err(e), .. } => erro = Some(e),
+                falha => erro = Some(falha),
             }
         }
         fora.push(g.id.clone());
     }
     let itens = match p.buscar(&consulta(alvo), RESULTADOS, PRAZO) {
         Ok(itens) => itens,
-        Err(e) => return (sem(erro.unwrap_or_else(|| motivo(&e))), None),
+        Err(e) => {
+            let falha = FonteLida::falha(motivo(&e), e.causa_do_provedor());
+            return (erro.unwrap_or(falha), None);
+        }
     };
     match (escolher(alvo, &itens, &fora), guardado) {
         (Some(par), _) => {
@@ -890,7 +941,10 @@ fn casar(
             (lida, None)
         }
         (None, Some(g)) if recusar => (tocar(g), Some(format!("Não achei outra gravação no {nome}: fica a de antes"))),
-        (None, _) => (sem(erro.unwrap_or_else(|| format!("não achei esta música no {nome}"))), None),
+        (None, _) => {
+            let nao_achei = || FonteLida::falha(format!("não achei esta música no {nome}"), None);
+            (erro.unwrap_or_else(nao_achei), None)
+        }
     }
 }
 
@@ -1161,10 +1215,7 @@ fn trabalhar(
             Tarefa::Casar { alvo, chave, recusar } => {
                 let (lida, aviso) = match vivo {
                     Some(p) => casar(p, &nome, &alvo, &chave, recusar, pares),
-                    None => {
-                        let endereco = Err(format!("o provedor {nome} não está aberto"));
-                        (FonteLida { endereco, par: None }, None)
-                    }
+                    None => (FonteLida::falha(format!("o provedor {nome} não está aberto"), None), None),
                 };
                 if let Err(e) = &lida.endereco {
                     log::warn!("{nome} não achou {chave}: {e}");
@@ -1176,14 +1227,14 @@ fn trabalhar(
                 versao.fetch_add(1, Ordering::Release);
             }
             Tarefa::Resolver { id, chave } => {
-                let resultado = match vivo {
-                    Some(p) => p.resolver(&id, PRAZO).map_err(|e| motivo(&e)).and_then(endereco_de),
-                    None => Err(format!("o provedor {nome} não está aberto")),
+                let lida = match vivo {
+                    Some(p) => FonteLida::do_provedor(p.resolver(&id, PRAZO), None),
+                    None => FonteLida::falha(format!("o provedor {nome} não está aberto"), None),
                 };
-                if let Err(e) = &resultado {
+                if let Err(e) = &lida.endereco {
                     log::warn!("{nome} não deu o endereço de {chave}: {e}");
                 }
-                travar(estado).fontes.insert(chave, FonteLida { endereco: resultado, par: None });
+                travar(estado).fontes.insert(chave, lida);
                 versao.fetch_add(1, Ordering::Release);
             }
         }
@@ -1443,6 +1494,10 @@ mod testes {
         assert_eq!(r.quem_toca_esta(&m), QuemToca::Ninguem);
         r.ligar_tocador("exemplo", Some("errada".into()));
         assert!(esperar(&mut r, |r| situacao(r) == Some(SituacaoDoTocador::Falhou)));
+        let estado = |r: &Remoto| r.tocador("exemplo").map(|l| l.estado).unwrap_or_default();
+        assert_eq!(estado(&r).alternativa.as_deref(), Some("1.0"));
+        r.trocar_tocador("exemplo");
+        assert!(esperar(&mut r, |r| estado(r).versao.as_deref() == Some("1.0")), "passou a usar o outro");
         r.ligar_tocador("exemplo", Some("nenhuma".into()));
         assert!(esperar(&mut r, |r| r.aviso.is_some()), "a ordem recusada diz o motivo");
         assert_eq!(r.aviso.take().as_deref(), Some("cole a chave"));
@@ -1459,7 +1514,9 @@ mod testes {
         // Tocou antes pelo Match: o endereço é do par, e nunca vira a análise da faixa do Spotify.
         let par = Par { servico: "yt".into(), id: "v".into(), ..Default::default() };
         let endereco = Ok(tocador::Endereco::novo("http://127.0.0.1:9/v"));
-        travar(&r.estado).fontes.insert("exemplo:1".into(), FonteLida { endereco, par: Some(par) });
+        travar(&r.estado)
+            .fontes
+            .insert("exemplo:1".into(), FonteLida { endereco, par: Some(par), causa: None, em: Instant::now() });
         assert_eq!(r.alvo_da_analise(&m, false), (None, None), "quem soa é o tocador do serviço");
         let (par, endereco) = r.alvo_da_analise(&m, true);
         assert_eq!((par.as_deref(), endereco.is_some()), (Some("yt:v"), true), "a que o daqui ainda toca");

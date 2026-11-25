@@ -8,6 +8,7 @@ description = "Toca música de arquivos e de endereços na internet: decodifica 
 
 [dependencies]
 nucleo.workspace = true
+audio.workspace = true
 log.workspace = true
 cpal.workspace = true
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "wav", "pcm", "ogg", "vorbis", "aac", "isomp4"] }

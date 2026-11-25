@@ -382,7 +382,7 @@ impl Player {
             .when(posicao.is_some(), |d| d.child(relogio(posicao.map(|p| p.duracao_s))))
     }
 
-    /// Barra de volume do sistema. Arrastar além das pontas estica a barra, que volta sozinha ao soltar; a roda
+    /// Barra de volume (da música do Player, ou do sistema: ver [`Player::volume_e_da_musica`]). Arrastar além das pontas estica a barra, que volta sozinha ao soltar; a roda
     /// do mouse anda de 2 em 2; o número só aparece enquanto se mexe.
     fn dock_volume(&self, largura: f32, cx: &mut Context<Self>) -> Stateful<Div> {
         let c = self.cores();
@@ -412,6 +412,13 @@ impl Player {
             .flex_none()
             .ml(px(4.0))
             .mr(px(8.0))
+            .child(self.marca("volume"))
+            .on_hover(self.ao_pairar(
+                "volume",
+                None,
+                if self.volume_e_da_musica() { "Volume da música" } else { "Volume do PC" },
+                cx,
+            ))
             .child(marcador)
             .child(
                 div()

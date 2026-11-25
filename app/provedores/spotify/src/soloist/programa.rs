@@ -1,6 +1,6 @@
 //! O programa do Soloist de verdade: abrir com a chave, achar a porta da API local e fechar junto com o Player.
 
-use super::instalar::{self, Instalado};
+use super::instalar::{self, Instalado, Preparo};
 use super::{nao_abriu, sem_janela};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -30,12 +30,18 @@ pub enum Falha {
 pub trait Programa: Send + Sync + 'static {
     /// Deixa o programa pronto para abrir, baixando se preciso.
     /// `parar`: a pessoa desistiu (as duas voltam logo).
-    fn preparar(&self, de_novo: bool, parar: &AtomicBool, progresso: &dyn Fn(f32)) -> Result<(), String>;
+    fn preparar(&self, como: Preparo, parar: &AtomicBool, progresso: &dyn Fn(f32)) -> Result<(), String>;
     fn abrir(&self, chave: &str, parar: &AtomicBool) -> Result<Box<dyn Aberto>, Falha>;
     /// Caiu sozinho; devolve se este programa é dos que só caem.
     fn caiu(&self) -> bool;
     /// Tocou por um tempo sem cair.
     fn funcionou(&self);
+    /// A versão do que vai abrir.
+    fn versao(&self) -> Option<String>;
+    /// Outro Soloist deste computador que serve no lugar (a versão e de quem é).
+    fn alternativa(&self, parar: &AtomicBool) -> Option<String>;
+    /// Copia o da alternativa para cá.
+    fn trazer(&self, parar: &AtomicBool) -> Result<(), String>;
 }
 
 /// Um Soloist aberto; soltar o valor o fecha.
@@ -59,6 +65,15 @@ impl DoSpotify {
 }
 
 impl DoSpotify {
+    fn programas(&self) -> PathBuf {
+        self.pasta.join("programa")
+    }
+
+    fn de_outro(&self, parar: &AtomicBool) -> Option<instalar::DeOutroPrograma> {
+        let base = instalar::pasta_do_spotifast()?;
+        instalar::de_outro_programa(&self.programas(), &base, instalar::agora_s(), parar)
+    }
+
     fn o_instalado(&self) -> Option<Instalado> {
         self.instalado.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
@@ -66,7 +81,7 @@ impl DoSpotify {
 
 impl Programa for DoSpotify {
     fn caiu(&self) -> bool {
-        self.o_instalado().is_some_and(|i| i.caiu())
+        self.o_instalado().is_some_and(|i| i.caiu(instalar::agora_s()))
     }
 
     fn funcionou(&self) {
@@ -75,11 +90,24 @@ impl Programa for DoSpotify {
         }
     }
 
-    fn preparar(&self, de_novo: bool, parar: &AtomicBool, progresso: &dyn Fn(f32)) -> Result<(), String> {
+    fn versao(&self) -> Option<String> {
+        self.o_instalado().and_then(|i| i.versao())
+    }
+
+    fn alternativa(&self, parar: &AtomicBool) -> Option<String> {
+        self.de_outro(parar).map(|o| format!("{} (do Spotifast)", o.versao.texto))
+    }
+
+    fn trazer(&self, parar: &AtomicBool) -> Result<(), String> {
+        let outro = self.de_outro(parar).ok_or("não há outro Soloist que sirva neste computador")?;
+        instalar::trazer(&self.programas(), &outro, parar).map(|_| ())
+    }
+
+    fn preparar(&self, como: Preparo, parar: &AtomicBool, progresso: &dyn Fn(f32)) -> Result<(), String> {
         if !cfg!(windows) {
             return Err("o Soloist só entra no Player do Windows por enquanto".into());
         }
-        let i = instalar::preparar(&self.pasta.join("programa"), de_novo, parar, progresso)?;
+        let i = instalar::preparar(&self.programas(), como, parar, progresso)?;
         *self.instalado.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(i);
         Ok(())
     }
@@ -112,6 +140,7 @@ impl Programa for DoSpotify {
         // A da abertura anterior fica: é nela que se vê por que caiu.
         let _ = std::fs::rename(self.pasta.join("saida.log"), self.pasta.join("saida-anterior.log"));
         guardar_saida(&self.pasta.join("saida.log"), chave, &mut filho);
+        let nosso = filho.id();
         let mut processo = Processo { filho, porta: 0, _grupo: grupo };
         let ate = Instant::now() + PRAZO_PARA_ABRIR;
         loop {
@@ -124,7 +153,7 @@ impl Programa for DoSpotify {
                 }
                 None => {}
             }
-            if let Some(porta) = porta_em(&dados) {
+            if let Some(porta) = porta_em(&dados, nosso) {
                 processo.porta = porta?;
                 return Ok(Box::new(processo));
             }
@@ -139,8 +168,13 @@ impl Programa for DoSpotify {
     }
 }
 
-/// A porta que o Soloist escolheu (`None`: ainda não). Só a deste computador.
-fn porta_em(dados: &Path) -> Option<Result<u16, Falha>> {
+/// A porta que o Soloist `filho` escolheu (`None`: ainda não). Só a deste computador, e só a do processo que abrimos: um
+/// Soloist morto pode ter deixado os arquivos dele para trás, com uma porta que já não existe.
+fn porta_em(dados: &Path, filho: u32) -> Option<Result<u16, Falha>> {
+    let dono = std::fs::read_to_string(dados.join("soloist.pid")).ok().and_then(|t| t.trim().parse::<u32>().ok());
+    if dono.is_some_and(|d| d != filho) {
+        return None;
+    }
     let porta = std::fs::read_to_string(dados.join("ws.port")).ok()?.trim().parse::<u16>().ok().filter(|p| *p != 0)?;
     let endereco = std::fs::read_to_string(dados.join("ws.addr")).ok()?;
     if endereco.trim().is_empty() {
@@ -260,17 +294,21 @@ mod testes {
     use super::*;
 
     #[test]
-    fn a_porta_so_vale_neste_computador() {
+    fn a_porta_so_vale_neste_computador_e_do_nosso_processo() {
         let p = std::env::temp_dir().join(format!("tccplayer-soloist-porta-{}", std::process::id()));
         std::fs::create_dir_all(&p).expect("pasta");
-        assert_eq!(porta_em(&p), None);
+        assert_eq!(porta_em(&p, 42), None);
         std::fs::write(p.join("ws.port"), "0").expect("porta");
         std::fs::write(p.join("ws.addr"), "127.0.0.1\n").expect("endereço");
-        assert_eq!(porta_em(&p), None);
+        assert_eq!(porta_em(&p, 42), None);
         std::fs::write(p.join("ws.port"), "4123\n").expect("porta");
-        assert_eq!(porta_em(&p), Some(Ok(4123)));
+        assert_eq!(porta_em(&p, 42), Some(Ok(4123)));
+        std::fs::write(p.join("soloist.pid"), "41\n").expect("pid");
+        assert_eq!(porta_em(&p, 42), None, "é de uma instância que já morreu");
+        std::fs::write(p.join("soloist.pid"), "42\n").expect("pid");
+        assert_eq!(porta_em(&p, 42), Some(Ok(4123)));
         std::fs::write(p.join("ws.addr"), "0.0.0.0").expect("endereço");
-        assert!(matches!(porta_em(&p), Some(Err(_))));
+        assert!(matches!(porta_em(&p, 42), Some(Err(_))));
         let _ = std::fs::remove_dir_all(&p);
     }
 

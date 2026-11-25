@@ -71,10 +71,11 @@ O primeiro pedido é sempre `ola`. O provedor se apresenta e diz o que sabe faze
 | `tchau` | — | `ok`, e o provedor sai |
 | `entrar` (só com a capacidade `conta`) | — | `ok` na hora (o navegador abriu; o login continua no provedor) ou `erro` com o motivo |
 | `sair` | — | `ok` (a credencial guardada é apagada) |
-| `tocador` (só com a capacidade `toca-sozinho`) | — | `tocador` (`situacao`: `desligado`, `baixando`, `abrindo`, `pareando`, `pronto` ou `falhou`; `tem_chave`; `nome`, `progresso`, `erro`, `processo` e `tocando` opcionais) |
+| `tocador` (só com a capacidade `toca-sozinho`) | — | `tocador` (`situacao`: `desligado`, `baixando`, `abrindo`, `pareando`, `pronto` ou `falhou`; `tem_chave`; `nome`, `progresso`, `erro`, `processo`, `tocando`, `versao`, `alternativa` e `adianta` opcionais) |
 | `ligar-tocador` | `chave` (opcional: sem ela, vale a guardada) | `ok` na hora (o resto continua no provedor) ou `erro` |
 | `desligar-tocador` | — | `ok` |
-| `controlar` | `acao`: `tocar` (com `faixa`), `pausar`, `continuar`, `ir` (com `segundos`) ou `parar` | `ok` ou `erro` |
+| `trocar-tocador` | — | `ok` na hora (passa a usar o programa de `alternativa` e liga com ele) ou `erro` |
+| `controlar` | `acao`: `tocar` (com `faixa`), `preparar` (com `faixa`), `pausar`, `continuar`, `ir` (com `segundos`) ou `parar` | `ok` ou `erro` |
 | `conta` | — | `conta` (`situacao`: `fora`, `entrando` ou `dentro`; `nome`, `premium`, `erro` e `navegador` opcionais; `navegador` em `entrando` diz que o navegador está aberto esperando a pessoa) |
 
 O Player abre o provedor na pasta dele e passa em `TCCPLAYER_PROVEDOR_DADOS` uma pasta só dele
@@ -84,6 +85,12 @@ o YouTube Music e o Spotify) ficam ao lado do `player.exe` e entram na lista sem
 Nenhum campo do pedido se chama `id` além do número do pedido (por isso `resolver` usa `faixa`, e não `id`).
 Qualquer pedido pode ser respondido com `{"id":7,"resposta":"erro","mensagem":"..."}`. Um pedido que o provedor
 não conhece também (assim versões novas do Player falam com provedores antigos).
+
+O erro pode vir com **`causa`** (opcional, F6): `rede`, `limite`, `indisponivel`, `sem-conta`, `sem-premium`,
+`sessao-recusada`, `chave-de-audio` ou `quebrado`. Ela diz ao Player o que fazer com a faixa (a regra está em
+`player/src/cadeia.rs`): `rede` e `limite` são tentadas de novo (2, 5 e 10 s depois) e, se não voltarem, a fila **para** na
+música, sem passar pelas outras; as demais pulam só aquela faixa. Sem `causa`, ou com uma que o Player não conhece, vale o
+tratamento de antes (pula). O prazo estourado e o provedor que fechou contam como `rede`.
 
 A **faixa** é igual em todo serviço:
 
@@ -114,7 +121,10 @@ A **fonte** diz como tocar:
 **O tocador do serviço** (F6, capacidade `toca-sozinho`): um provedor sem `audio` pode tocar por um programa do próprio serviço
 (o Soloist do Spotify). `tocando` traz `faixa`, `vez` (sobe a cada `tocar`), `situacao` (`carregando`, `tocando`, `pausada`, `acabou`,
 `em-outro-lugar` ou `falhou`), `posicao_s`, `duracao_s` e `erro`. Com ele pronto, o Player manda `controlar` e acompanha pelo `tocador`;
-se a faixa falha, ela vai para outro serviço (o Match). Um provedor em Rust pode responder as páginas lentas de outra thread
+se a faixa falha, ela vai para outro serviço (o Match). `versao` é a do programa em uso. `alternativa` vem quando o programa que o
+serviço publica não serve e há outro neste computador (a versão e de onde é): o Player oferece, e `trocar-tocador` passa a usá-lo.
+Com **`adianta`**, a 10 s do fim o Player manda `preparar` com a próxima: o tocador passa para ela sozinho, sem intervalo e sem `tocar`
+(em `tocando`, a `faixa` muda e a `vez` não), e a fila do Player anda junto. Um provedor em Rust pode responder as páginas lentas de outra thread
 (`Servico::em_segundo_plano`), para a pausa não esperar por elas.
 
 ## Casar uma faixa entre serviços

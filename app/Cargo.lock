@@ -5430,13 +5430,15 @@ dependencies = [
 name = "provedor-spotify"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "flate2",
+ "getrandom 0.3.4",
  "librespot-core",
- "librespot-oauth",
  "provedores",
  "reqwest",
  "serde_json",
  "servicos",
+ "sha2 0.10.9",
  "tokio",
  "tungstenite",
  "windows 0.62.2",
@@ -7569,6 +7571,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 name = "tocador"
 version = "0.1.0"
 dependencies = [
+ "audio",
  "cpal",
  "log",
  "native-tls",

@@ -1,4 +1,5 @@
-//! O volume do sistema no dock: mudar, silenciar e arrastar (também os gestos de arrastar da janela).
+//! O volume no dock: mudar, silenciar e arrastar (também os gestos de arrastar da janela). Com a música do Player na tela, é o
+//! volume só dela (o resto do PC não muda, e o visual não sente); com a de outro app, é o do sistema.
 
 use super::*;
 
@@ -8,6 +9,16 @@ impl Player {
             return;
         }
         let alvo = alvo.clamp(0.0, 1.0);
+        if self.volume_e_da_musica() {
+            self.ajustes.volume_musica = alvo;
+            (self.volume, self.volume_disponivel) = (alvo, true);
+            if alvo > 0.0 {
+                (self.mudo_da_musica, self.mudo) = (false, false);
+            }
+            self.aplicar_volume_da_musica();
+            self.t_volume_salvo = Some(0.0);
+            return;
+        }
         if audio::volume::definir(alvo) {
             self.volume = alvo;
             self.volume_disponivel = true;
@@ -18,7 +29,49 @@ impl Player {
         }
     }
 
+    /// A barra é a da música do Player, e não a do sistema.
+    pub(crate) fn volume_e_da_musica(&self) -> bool {
+        self.origem_local
+    }
+
+    /// Leva o volume da música a quem a toca: o tocador daqui e o programa do serviço.
+    pub(super) fn aplicar_volume_da_musica(&self) {
+        let v = if self.mudo_da_musica { 0.0 } else { self.ajustes.volume_musica };
+        self.local.volume(crate::mesa::ganho_da_barra(v));
+        self.mesa.volume(v);
+    }
+
+    /// Lê o volume da barra (outro programa pode ter mexido nele, e a barra pode ter trocado de dono).
+    pub(super) fn ler_volume(&mut self) {
+        if self.volume_e_da_musica() {
+            if let Some(v) = self.mesa.mudou_de_fora() {
+                // No mudo, o programa está no piso: só uma mudança de verdade vale.
+                self.ajustes.volume_musica = v;
+                self.mudo_da_musica = false;
+                self.aplicar_volume_da_musica();
+                self.t_volume_salvo = Some(0.0);
+            }
+            self.volume = self.ajustes.volume_musica;
+            self.mudo = self.mudo_da_musica;
+            self.volume_disponivel = true;
+            return;
+        }
+        match audio::volume::ler() {
+            Some(n) => {
+                self.volume = n.volume;
+                self.mudo = n.mudo;
+                self.volume_disponivel = true;
+            }
+            None => self.volume_disponivel = false,
+        }
+    }
+
     pub(super) fn silenciar(&mut self, mudo: bool) {
+        if self.volume_e_da_musica() {
+            (self.mudo_da_musica, self.mudo) = (mudo, mudo);
+            self.aplicar_volume_da_musica();
+            return;
+        }
         if audio::volume::silenciar(mudo) {
             self.mudo = mudo;
         }

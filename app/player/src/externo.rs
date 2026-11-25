@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 /// De quanto em quanto tempo perguntar: com uma faixa andando, com algo mudando (baixar, abrir, parear, pausada) e parado.
 const TOCANDO: Duration = Duration::from_millis(200);
+/// Nos últimos segundos da faixa: a seguinte só é pedida quando o fim chega aqui.
+const NO_FIM: Duration = Duration::from_millis(50);
+const ULTIMOS_S: f64 = 2.0;
 const MUDANDO: Duration = Duration::from_millis(500);
 const PARADO: Duration = Duration::from_secs(3);
 const PRAZO_DO_ESTADO: Duration = Duration::from_secs(3);
@@ -130,6 +133,8 @@ impl Laco {
             CorpoDoPedido::Controlar(Acao::Tocar { faixa }) => Some(faixa.clone()),
             _ => None,
         };
+        // (Sem a próxima adiantada, ela só demora um pouco mais: não há o que dizer à pessoa.)
+        let calada = matches!(ordem.pedido, CorpoDoPedido::Controlar(Acao::Preparar { .. }));
         let feito = match self.provedor(&ordem.servico) {
             Some(p) => p.ordenar(ordem.pedido, PRAZO_DA_ORDEM).map_err(|e| crate::remoto::motivo(&e)),
             None => Err("o provedor não está aberto".to_string()),
@@ -142,6 +147,7 @@ impl Laco {
                     let (situacao, erro) = (SituacaoDaFaixa::Falhou, Some(motivo));
                     estado.tocando = Some(Tocando { faixa, situacao, erro, ..Default::default() });
                 }
+                None if calada => {}
                 None => (self.mudou)(Some(motivo)),
             }
         }
@@ -197,6 +203,12 @@ fn toca_sozinho(p: &Provedor) -> bool {
 }
 
 fn ritmo(e: &EstadoDoTocador) -> Duration {
+    let acabando = |t: &Tocando| {
+        t.situacao == SituacaoDaFaixa::Tocando && t.duracao_s > 0.0 && t.duracao_s - t.posicao_s <= ULTIMOS_S
+    };
+    if e.situacao == SituacaoDoTocador::Pronto && e.tocando.as_ref().is_some_and(acabando) {
+        return NO_FIM;
+    }
     match (e.situacao, e.tocando.as_ref().map(|t| t.situacao)) {
         (SituacaoDoTocador::Pronto, Some(SituacaoDaFaixa::Carregando | SituacaoDaFaixa::Tocando)) => TOCANDO,
         (SituacaoDoTocador::Pronto, Some(SituacaoDaFaixa::Pausada | SituacaoDaFaixa::EmOutroLugar)) => MUDANDO,
@@ -208,6 +220,20 @@ fn ritmo(e: &EstadoDoTocador) -> Duration {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn perto_do_fim_a_pergunta_e_mais_seguida() {
+        let com = |situacao, posicao_s, duracao_s| EstadoDoTocador {
+            situacao: SituacaoDoTocador::Pronto,
+            tocando: Some(Tocando { situacao, posicao_s, duracao_s, ..Default::default() }),
+            ..Default::default()
+        };
+        assert_eq!(ritmo(&com(SituacaoDaFaixa::Tocando, 10.0, 200.0)), TOCANDO);
+        assert_eq!(ritmo(&com(SituacaoDaFaixa::Tocando, 198.5, 200.0)), NO_FIM);
+        assert_eq!(ritmo(&com(SituacaoDaFaixa::Tocando, 0.0, 0.0)), TOCANDO, "ainda sem a duração");
+        assert_eq!(ritmo(&com(SituacaoDaFaixa::Pausada, 199.0, 200.0)), MUDANDO);
+        assert_eq!(ritmo(&com(SituacaoDaFaixa::Acabou, 200.0, 200.0)), PARADO);
+    }
 
     #[test]
     fn a_posicao_anda_entre_as_leituras_mas_nao_passa_do_fim() {

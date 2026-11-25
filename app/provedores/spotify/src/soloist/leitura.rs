@@ -6,6 +6,13 @@ use serde_json::{Value, json};
 
 /// Quanto antes do fim a faixa é dada por acabada: o Spotify emendaria outra (a fila é do Player).
 const ANTES_DO_FIM_MS: f64 = 250.0;
+/// A menos disto do fim, "carregando" é o Soloist sem mais nada para decodificar (medido: 0,95 s antes): o som que falta já
+/// está na placa, e a posição que ele conta fica parada.
+const CAUDA_MS: f64 = 1_500.0;
+/// Quanto o som sai depois da posição que ele conta (medido: de 85 a 145 ms).
+const SOM_ATRASA_MS: f64 = 100.0;
+/// Com a próxima na fila do Spotify, quanto depois do fim ainda se espera o Soloist passar para ela.
+const EMENDA_MS: f64 = 1_500.0;
 /// Quanto esperar a faixa pedida começar.
 const PRAZO_PARA_COMECAR_MS: u64 = 15_000;
 /// Quanto uma faixa diferente da pedida precisa ficar para ser a mesma com outro id (o Spotify troca ids por país).
@@ -44,6 +51,8 @@ pub struct Leitura {
     duracao_ms: f64,
     /// Posição, hora dela e velocidade.
     ancora: Option<(f64, u64, f64)>,
+    /// As próximas na fila do Spotify (`None`: ele ainda não contou).
+    fila: Option<Vec<String>>,
     /// O último erro que ele respondeu, até ser lido.
     pub erro: Option<String>,
 }
@@ -66,6 +75,12 @@ impl Leitura {
             "track_changed" => self.ler_faixa(&v["item"]),
             "playback_changed" => self.ler_status(v),
             "position_sync" => self.ler_posicao(&v["position"]),
+            "queue_changed" => {
+                // (O que vem do contexto, como as sugestões do Spotify, toca depois do que está na fila: não atrapalha.)
+                let na_fila = |e: &&Value| e["source"].as_str().is_none_or(|s| s == "queue");
+                let uri = |e: &Value| e["item"]["uri"].as_str().unwrap_or_default().to_string();
+                self.fila = v["upcoming"].as_array().map(|u| u.iter().filter(na_fila).map(uri).collect());
+            }
             "error" => self.erro = v["message"].as_str().map(str::to_string),
             _ => {}
         }
@@ -108,16 +123,37 @@ impl Leitura {
         self.ativo && matches!(self.status, Some(Status::Tocando | Status::Carregando))
     }
 
+    /// Só falta sair o som que já está na placa.
+    fn na_cauda(&self) -> bool {
+        self.status == Some(Status::Carregando)
+            && self.duracao_ms > 0.0
+            && self.ancora.is_some_and(|(ms, _, _)| self.duracao_ms - ms <= CAUDA_MS)
+    }
+
+    /// Onde a faixa está agora, sem parar na duração dela (o fim do som vem um pouco depois).
+    fn andou_ms(&self, agora_ms: u64) -> f64 {
+        let Some((ms, quando, velocidade)) = self.ancora else { return 0.0 };
+        let passou = if quando == 0 { 0.0 } else { agora_ms.saturating_sub(quando) as f64 };
+        match self.status {
+            Some(Status::Tocando) => ms + passou * velocidade,
+            _ if self.na_cauda() => ms + passou,
+            _ => ms,
+        }
+    }
+
     /// A posição agora, em milissegundos.
     fn posicao_ms(&self, agora_ms: u64) -> f64 {
-        let Some((ms, quando, velocidade)) = self.ancora else { return 0.0 };
-        let anda = if quando == 0 || self.status != Some(Status::Tocando) {
-            0.0
-        } else {
-            agora_ms.saturating_sub(quando) as f64 * velocidade
-        };
-        let p = ms + anda;
+        let p = self.andou_ms(agora_ms);
         if self.duracao_ms > 0.0 { p.min(self.duracao_ms) } else { p }
+    }
+
+    fn fila_vazia(&self) -> bool {
+        self.fila.as_ref().is_some_and(Vec::is_empty)
+    }
+
+    /// A faixa que ele diz tocar.
+    pub fn uri(&self) -> &str {
+        &self.uri
     }
 
     /// Uma faixa nova foi pedida: o que se sabia da anterior não vale mais (a mesma pedida de novo parece no fim).
@@ -146,6 +182,13 @@ pub struct Pedida {
     fim: Option<(SituacaoDaFaixa, Option<String>)>,
     posicao_s: f64,
     duracao_s: f64,
+    /// A que o Player pôs para vir depois desta, sem intervalo.
+    proxima: Option<Proxima>,
+}
+
+struct Proxima {
+    faixa: String,
+    uri: String,
 }
 
 /// O endereço de uma faixa no Spotify. Só ids do formato dele: o texto vai para outro programa.
@@ -179,6 +222,7 @@ impl Pedida {
             fim,
             posicao_s: 0.0,
             duracao_s: 0.0,
+            proxima: None,
         };
         let tocar = uri.map(|uri| {
             let mut c = comando("play");
@@ -186,6 +230,55 @@ impl Pedida {
             c
         });
         (pedida, tocar)
+    }
+
+    /// Põe a próxima na fila do Spotify, para ela entrar sem intervalo. Só com a fila vazia: dali nada se tira, e o que já
+    /// estivesse lá tocaria antes dela.
+    pub fn adiantar(&mut self, faixa: &str, l: &Leitura) -> Option<Value> {
+        let uri = uri_da_faixa(faixa)?;
+        let tocando = self.comecou && self.fim.is_none();
+        // (A mesma faixa de novo não se distingue desta: ela acaba e é pedida, como sempre.)
+        if !tocando || self.proxima.is_some() || uri == self.uri || faixa == self.faixa || !l.fila_vazia() {
+            return None;
+        }
+        let mut c = comando("add_to_queue");
+        c["uri"] = json!(uri);
+        self.proxima = Some(Proxima { faixa: faixa.to_string(), uri });
+        Some(c)
+    }
+
+    /// A que foi adiantada está na fila do Spotify.
+    pub fn deixou_na_fila(&self, l: &Leitura) -> bool {
+        let fila = l.fila.as_deref().unwrap_or_default();
+        self.proxima.as_ref().is_some_and(|p| fila.contains(&p.uri))
+    }
+
+    /// `faixa` é a que está na fila do Spotify, e falta para o fim desta (perto dele, ela já pode ter entrado, e passar
+    /// adiante a pularia).
+    pub fn e_a_seguinte(&self, faixa: &str, l: &Leitura, agora_ms: u64) -> bool {
+        let longe_do_fim = l.duracao_ms > 0.0 && l.duracao_ms - l.andou_ms(agora_ms) > CAUDA_MS;
+        longe_do_fim && self.deixou_na_fila(l) && self.proxima.as_ref().is_some_and(|p| p.faixa == faixa)
+    }
+
+    /// A que estava na fila do Spotify entrou sozinha: daqui em diante, a faixa é ela.
+    fn passar_para(&mut self, p: Proxima, agora_ms: u64) {
+        *self = Self {
+            faixa: p.faixa,
+            vez: self.vez,
+            anterior: std::mem::replace(&mut self.uri, p.uri.clone()),
+            uri: p.uri,
+            // (A posição dela pode chegar com a hora de um instante antes de a troca ser vista.)
+            pedida_ms: agora_ms.saturating_sub(1_000),
+            perguntada_ms: agora_ms,
+            diferente_ms: None,
+            comecou: true,
+            ir_para_s: None,
+            pausar_ao_comecar: false,
+            fim: None,
+            posicao_s: 0.0,
+            duracao_s: 0.0,
+            proxima: None,
+        };
     }
 
     /// O que a leitura diz desta faixa. Devolve o que mandar ao Soloist.
@@ -237,6 +330,11 @@ impl Pedida {
     fn avaliar_tocando(&mut self, l: &Leitura, agora_ms: u64) -> Vec<Value> {
         // (Antes de mudar a posição guardada: se a faixa trocou, a leitura já é da outra.)
         if l.uri != self.uri && !l.uri.is_empty() {
+            if let Some(p) = self.proxima.take_if(|p| p.uri == l.uri) {
+                self.passar_para(p, agora_ms);
+                self.medir(l, agora_ms);
+                return Vec::new();
+            }
             self.fim = Some((SituacaoDaFaixa::Acabou, None));
             return vec![comando("pause")];
         }
@@ -255,10 +353,24 @@ impl Pedida {
         self.medir(l, agora_ms);
         // (Uma posição de antes do pedido é da faixa anterior, ou desta mesma na vez passada.)
         let desta_vez = l.ancora.is_some_and(|(_, quando, _)| quando >= self.pedida_ms);
-        let acabando = desta_vez && l.duracao_ms > 0.0 && l.posicao_ms(agora_ms) >= l.duracao_ms - ANTES_DO_FIM_MS;
-        if acabando && l.status == Some(Status::Tocando) {
-            self.fim = Some((SituacaoDaFaixa::Acabou, None));
-            return vec![comando("pause")];
+        if desta_vez && l.duracao_ms > 0.0 {
+            let falta = l.duracao_ms - l.andou_ms(agora_ms);
+            let tocando = l.status == Some(Status::Tocando);
+            if self.deixou_na_fila(l) {
+                // Quem passa para a próxima é o Soloist; só se ele não passar, esta acaba aqui.
+                if (tocando || l.na_cauda()) && falta <= -EMENDA_MS {
+                    self.fim = Some((SituacaoDaFaixa::Acabou, None));
+                }
+                return Vec::new();
+            }
+            if tocando && falta <= ANTES_DO_FIM_MS {
+                self.fim = Some((SituacaoDaFaixa::Acabou, None));
+                return vec![comando("pause")];
+            }
+            // O som acabou de sair. Sem pausa: a próxima vem em seguida (e o que o Spotify emendar, quem chama cala).
+            if l.na_cauda() && falta <= -SOM_ATRASA_MS {
+                self.fim = Some((SituacaoDaFaixa::Acabou, None));
+            }
         }
         Vec::new()
     }
@@ -280,6 +392,11 @@ impl Pedida {
 
     pub fn acabou(&self) -> bool {
         self.fim.is_some()
+    }
+
+    /// Chegou ao fim (e não: falhou, ou foi para outro aparelho).
+    pub fn chegou_ao_fim(&self) -> bool {
+        matches!(self.fim, Some((SituacaoDaFaixa::Acabou, _)))
     }
 
     /// Não tocou (e não: acabou, ou foi para outro aparelho).
@@ -371,6 +488,12 @@ mod testes {
         })
     }
 
+    fn estado_parado(id: &str, posicao_ms: u64, quando: u64) -> Value {
+        let mut v = estado(id, "buffering", posicao_ms, quando);
+        v["position"]["speed"] = json!(0.0);
+        v
+    }
+
     fn comecada(agora: u64) -> (Leitura, Pedida) {
         let mut l = Leitura { dentro: true, ..Default::default() };
         let (mut p, tocar) = Pedida::nova(A, 1, &mut l, agora);
@@ -400,6 +523,133 @@ mod testes {
         assert_eq!(p.avaliar(&mut l, 229_800)[0]["command"], "pause", "para antes de emendar");
         assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Acabou);
         assert!(p.avaliar(&mut l, 230_000).is_empty(), "uma vez só");
+    }
+
+    /// Como o Soloist 1.4.0.12 acaba uma faixa (medido em 24/11/2026): 0,95 s antes ele já decodificou tudo e diz
+    /// "carregando", com a posição parada; o som que falta ainda sai.
+    #[test]
+    fn carregando_perto_do_fim_a_faixa_acaba_quando_o_som_acaba() {
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&json!({"type":"playback_changed","status":"buffering"}));
+        l.receber(&estado_parado(A, 199_035, 200_035));
+        assert!(p.avaliar(&mut l, 200_500).is_empty());
+        let t = p.publicar(&l);
+        assert_eq!((t.situacao, t.posicao_s), (SituacaoDaFaixa::Tocando, 199.5), "a posição anda com o som");
+        // A posição chegou ao fim, mas a placa ainda tem um resto.
+        assert!(p.avaliar(&mut l, 201_050).is_empty());
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Tocando);
+        assert!(p.avaliar(&mut l, 201_150).is_empty(), "sem pausa: a próxima vem em seguida");
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Acabou);
+    }
+
+    #[test]
+    fn carregando_no_meio_a_posicao_espera_e_a_faixa_nao_acaba() {
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&estado_parado(A, 60_000, 61_000));
+        assert!(p.avaliar(&mut l, 260_000).is_empty());
+        let t = p.publicar(&l);
+        assert_eq!((t.situacao, t.posicao_s), (SituacaoDaFaixa::Tocando, 60.0));
+        // Pausada no fim, ela espera a pessoa.
+        l.receber(&estado_parado(A, 199_500, 261_000));
+        l.receber(&json!({"type":"playback_changed","status":"paused"}));
+        assert!(p.avaliar(&mut l, 290_000).is_empty());
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Pausada);
+    }
+
+    fn fila_de(uris: &[&str]) -> Value {
+        let entradas: Vec<Value> =
+            uris.iter().map(|id| json!({"item":{"uri":format!("spotify:track:{id}")}})).collect();
+        json!({"type":"queue_changed","previous":[],"upcoming":entradas})
+    }
+
+    #[test]
+    fn a_proxima_adiantada_entra_sozinha_sem_pausa_nem_ordem() {
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&fila_de(&[]));
+        let posta = p.adiantar(B, &l).expect("põe na fila");
+        assert_eq!(
+            (posta["command"].as_str(), posta["uri"].as_str()),
+            (Some("add_to_queue"), Some(&*format!("spotify:track:{B}")))
+        );
+        assert!(p.adiantar(B, &l).is_none(), "uma vez só");
+        l.receber(&fila_de(&[B]));
+        assert!(p.deixou_na_fila(&l));
+        // No fim, quem passa para ela é o Soloist: sem pausa e sem dar a de agora por acabada.
+        assert!(p.avaliar(&mut l, 200_800).is_empty());
+        assert!(p.avaliar(&mut l, 201_200).is_empty());
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Tocando);
+        l.receber(&json!({"type":"track_changed","item":{"uri":format!("spotify:track:{B}"),
+            "decorations":{"playback":{"duration_ms":90_000}}}}));
+        l.receber(&fila_de(&[]));
+        l.receber(&json!({"type":"position_sync","position":{"position_ms":10,"timestamp_ms":201_295,"speed":1.0}}));
+        assert!(p.avaliar(&mut l, 201_300).is_empty());
+        let t = p.publicar(&l);
+        assert_eq!((t.faixa.as_str(), t.vez, t.situacao, t.duracao_s), (B, 1, SituacaoDaFaixa::Tocando, 90.0));
+        assert!(!p.deixou_na_fila(&l));
+        // E ela também acaba (a posição é de um instante antes de a troca ser vista).
+        assert_eq!(p.avaliar(&mut l, 291_100)[0]["command"], "pause");
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Acabou);
+    }
+
+    #[test]
+    fn pular_so_passa_direto_para_a_seguinte_longe_do_fim() {
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&fila_de(&[]));
+        p.adiantar(B, &l);
+        assert!(!p.e_a_seguinte(B, &l, 150_000), "ainda não está na fila");
+        l.receber(&fila_de(&[B]));
+        assert!(p.e_a_seguinte(B, &l, 195_000));
+        assert!(!p.e_a_seguinte(A, &l, 195_000));
+        assert!(!p.e_a_seguinte(B, &l, 200_000), "ela já pode ter entrado");
+    }
+
+    #[test]
+    fn so_adianta_com_a_fila_do_spotify_vazia_e_conhecida() {
+        let (mut l, mut p) = comecada(1_000);
+        assert!(p.adiantar(B, &l).is_none(), "ainda não se sabe o que há na fila");
+        l.receber(&fila_de(&["3n3Ppam7vgaVa1iaRUc9Lp"]));
+        assert!(p.adiantar(B, &l).is_none(), "o que já está lá tocaria antes");
+        // O que vem do contexto (como o Soloist 1.4.0.12 conta) não é da fila.
+        l.receber(&json!({"type":"queue_changed","previous":[],"upcoming":[
+            {"item":{"uri":"spotify:track:placeholder"},"uid":"node_rules_placeholder","source":"context"}]}));
+        assert!(p.adiantar(A, &l).is_none(), "a mesma faixa não se distingue dela mesma");
+        assert!(p.adiantar("../x", &l).is_none());
+        assert!(p.adiantar(B, &l).is_some());
+        let mut outra = Leitura { dentro: true, ..Default::default() };
+        outra.receber(&fila_de(&[]));
+        let (mut p, _) = Pedida::nova(A, 2, &mut outra, 0);
+        assert!(p.adiantar(B, &outra).is_none(), "ela ainda nem começou");
+    }
+
+    #[test]
+    fn se_o_soloist_nao_passa_para_a_adiantada_a_faixa_acaba_e_o_player_pede() {
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&fila_de(&[]));
+        p.adiantar(B, &l);
+        l.receber(&fila_de(&[B]));
+        l.receber(&estado_parado(A, 199_035, 200_035));
+        assert!(p.avaliar(&mut l, 201_800).is_empty());
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Tocando, "espera um pouco");
+        p.avaliar(&mut l, 202_600);
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Acabou);
+        assert!(p.deixou_na_fila(&l), "e ela ainda está lá");
+        // O Spotify recusou pôr na fila: o fim é o de sempre.
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&fila_de(&[]));
+        p.adiantar(B, &l);
+        assert!(!p.deixou_na_fila(&l));
+        assert_eq!(p.avaliar(&mut l, 200_800)[0]["command"], "pause");
+    }
+
+    #[test]
+    fn outra_no_lugar_da_adiantada_e_calada() {
+        let (mut l, mut p) = comecada(1_000);
+        l.receber(&fila_de(&[]));
+        p.adiantar(B, &l);
+        l.receber(&fila_de(&[B]));
+        l.receber(&json!({"type":"track_changed","item":{"uri":"spotify:track:3n3Ppam7vgaVa1iaRUc9Lp"}}));
+        assert_eq!(p.avaliar(&mut l, 201_000)[0]["command"], "pause");
+        assert_eq!(p.publicar(&l).situacao, SituacaoDaFaixa::Acabou);
     }
 
     #[test]

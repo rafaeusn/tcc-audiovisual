@@ -104,6 +104,7 @@ impl Player {
                 }
             }
             BotaoDoTocador::Ligar => self.local.remoto.ligar_tocador(servico, None),
+            BotaoDoTocador::UsarOutro => self.local.remoto.trocar_tocador(servico),
             BotaoDoTocador::Desligar => self.local.remoto.desligar_tocador(servico),
         }
     }

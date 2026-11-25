@@ -7,8 +7,8 @@
 //! A fila de músicas não é daqui: quem usa diz qual toca agora ([`Comando::Tocar`]) e qual vem depois
 //! ([`Comando::Seguinte`]). Quando a seguinte entra sozinha, [`Situacao::avancou`] muda.
 //!
-//! O volume geral é o do sistema, como no resto do app. O visual não precisa de nada especial: ele ouve o que
-//! sai do computador, e o que o tocador toca sai por lá.
+//! O volume ([`Comando::Volume`]) é só da música e vem por último, na saída. O visual ouve a música antes dele
+//! ([`Tocador::derivacao`]): baixar o som não o enfraquece.
 
 pub mod fonte;
 pub mod mistura;
@@ -108,6 +108,8 @@ pub enum Comando {
         crossfade_s: f32,
         eq: Vec<f32>,
     },
+    /// O ganho do volume da música (0 a 1).
+    Volume(f32),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -133,6 +135,7 @@ pub struct Situacao {
 pub struct Tocador {
     comandos: Option<Sender<Comando>>,
     situacao: Arc<Mutex<Situacao>>,
+    derivacao: Arc<audio::Derivacao>,
 }
 
 fn com<T>(m: &Mutex<Situacao>, f: impl FnOnce(&mut Situacao) -> T) -> T {
@@ -147,15 +150,21 @@ impl Tocador {
     pub fn iniciar(mudo: bool) -> Self {
         let situacao = Arc::new(Mutex::new(Situacao::default()));
         let (comandos, fila) = channel::<Comando>();
-        let s = situacao.clone();
-        let criada = std::thread::Builder::new().name("tocador".into()).spawn(move || rodar(&fila, &s, mudo));
+        let derivacao: Arc<audio::Derivacao> = Arc::default();
+        let (s, d) = (situacao.clone(), derivacao.clone());
+        let criada = std::thread::Builder::new().name("tocador".into()).spawn(move || rodar(&fila, &s, mudo, d));
         match criada {
-            Ok(_) => Self { comandos: Some(comandos), situacao },
+            Ok(_) => Self { comandos: Some(comandos), situacao, derivacao },
             Err(e) => {
                 log::error!("não foi possível iniciar o tocador: {e}");
-                Self { comandos: None, situacao }
+                Self { comandos: None, situacao, derivacao }
             }
         }
+    }
+
+    /// O que está tocando, antes do volume: para o visual.
+    pub fn derivacao(&self) -> Arc<audio::Derivacao> {
+        self.derivacao.clone()
     }
 
     pub fn mandar(&self, comando: Comando) {
@@ -178,6 +187,8 @@ struct Motor {
     saida: Option<Saida>,
     mistura: Option<Mistura>,
     mudo: bool,
+    volume: f32,
+    derivacao: Arc<audio::Derivacao>,
     crossfade_s: f32,
     eq: Vec<f32>,
     /// Quadros postos na fila da placa desde o último descarte (mesmo marco zero de `painel.tocados`).
@@ -260,7 +271,9 @@ impl Motor {
     /// Abre a saída de som (e a mistura na taxa dela) se ainda não estiver aberta.
     fn garantir_saida(&mut self) -> bool {
         if self.saida.is_none() {
-            self.saida = Saida::abrir().map_err(|e| log::warn!("sem saída de som: {e}")).ok();
+            self.saida = Saida::abrir(self.volume, Some(self.derivacao.clone()))
+                .map_err(|e| log::warn!("sem saída de som: {e}"))
+                .ok();
             self.mistura = self.saida.as_ref().map(|s| {
                 let mut m = Mistura::nova(s.taxa);
                 m.ajustar_crossfade(self.crossfade_s);
@@ -284,11 +297,18 @@ impl Motor {
     }
 }
 
-fn rodar(fila: &std::sync::mpsc::Receiver<Comando>, situacao: &Mutex<Situacao>, mudo: bool) {
+fn rodar(
+    fila: &std::sync::mpsc::Receiver<Comando>,
+    situacao: &Mutex<Situacao>,
+    mudo: bool,
+    derivacao: Arc<audio::Derivacao>,
+) {
     let mut m = Motor {
         saida: None,
         mistura: None,
         mudo,
+        volume: 1.0,
+        derivacao,
         crossfade_s: 0.0,
         eq: Vec::new(),
         empurrados: 0,
@@ -519,6 +539,12 @@ fn atender(m: &mut Motor, comando: Comando, situacao: &Mutex<Situacao>) {
             if let Some(onde) = m.mistura.as_mut().and_then(|mix| mix.ir(segundos)) {
                 m.descartar(onde);
                 com(situacao, |e| e.posicao_s = onde);
+            }
+        }
+        Comando::Volume(v) => {
+            m.volume = if v.is_finite() { v.clamp(0.0, 1.0) } else { 1.0 };
+            if let Some(saida) = &m.saida {
+                saida.painel.volume.store(m.volume.to_bits(), Ordering::Release);
             }
         }
         Comando::Mixagem { crossfade_s, eq } => {

@@ -15,12 +15,15 @@ mod visionos;
 
 use conversao::{album_item, artista_item, faixa, playlist_item};
 use provedores::{
-    Apresentacao, Capacidade, CorpoDaResposta, CorpoDoPedido, Fonte, Identidade, Item, Prateleira, Servico,
+    Apresentacao, Capacidade, Causa, CorpoDaResposta, CorpoDoPedido, Fonte, Identidade, Item, Prateleira, Servico,
     VERSAO_DO_PROTOCOLO, servir,
 };
 use rustypipe::client::RustyPipe;
+use rustypipe::error::Error;
 use std::future::Future;
 
+/// Quanto o áudio de uma faixa pode demorar ao todo (o Player espera 20 s: o motivo tem de chegar antes).
+const PRAZO_DO_AUDIO: std::time::Duration = std::time::Duration::from_secs(12);
 /// Quanto cada uma das buscas de uma pesquisa pode demorar (o Player espera 20 s pela resposta inteira).
 const PRAZO_DE_CADA_BUSCA: std::time::Duration = std::time::Duration::from_secs(8);
 
@@ -43,7 +46,24 @@ fn item_da_busca(i: &rustypipe::model::MusicItem) -> Option<Item> {
 }
 
 fn erro(e: impl std::fmt::Display) -> CorpoDaResposta {
-    CorpoDaResposta::Erro { mensagem: e.to_string() }
+    CorpoDaResposta::erro(e.to_string())
+}
+
+/// O erro do rustypipe, com a causa que ele deixa ver.
+fn erro_do_youtube(e: &Error) -> CorpoDaResposta {
+    CorpoDaResposta::Erro { mensagem: e.to_string(), causa: causa_de(e) }
+}
+
+/// De que tipo foi o erro: a rede e o YouTube pedindo calma são passageiros; o que não existe mais é do item.
+fn causa_de(e: &Error) -> Option<Causa> {
+    use rustypipe::error::ExtractionError as E;
+    match e {
+        Error::Http(_) => Some(Causa::Rede),
+        Error::HttpStatus(status, _) => visionos::falha_do_status(*status).causa,
+        Error::Extraction(E::NotFound { .. } | E::Unavailable { .. }) => Some(Causa::Indisponivel),
+        Error::Extraction(E::InvalidData(_)) => Some(Causa::Quebrado),
+        _ => None,
+    }
 }
 
 impl YoutubeMusic {
@@ -82,16 +102,16 @@ impl YoutubeMusic {
             )
         });
         let mut falhas = Vec::new();
-        let mut lista = |r: Result<Result<Vec<Item>, rustypipe::error::Error>, tokio::time::error::Elapsed>| match r {
-            Ok(Ok(itens)) => itens,
-            Ok(Err(e)) => {
-                falhas.push(e.to_string());
-                Vec::new()
-            }
-            Err(_) => {
-                falhas.push("demorou demais".into());
-                Vec::new()
-            }
+        let mut causa = None;
+        let mut lista = |r: Result<Result<Vec<Item>, Error>, tokio::time::error::Elapsed>| {
+            let (motivo, de) = match r {
+                Ok(Ok(itens)) => return itens,
+                Ok(Err(e)) => (e.to_string(), causa_de(&e)),
+                Err(_) => ("demorou demais".to_string(), Some(Causa::Rede)),
+            };
+            falhas.push(motivo);
+            causa = causa.or(de);
+            Vec::new()
         };
         let principal = lista(principal.map(|r| r.map(|r| r.items.items.iter().filter_map(item_da_busca).collect())));
         let por_tipo = vec![
@@ -103,7 +123,7 @@ impl YoutubeMusic {
             ),
         ];
         if falhas.len() == 5 {
-            return erro(falhas.join("; "));
+            return CorpoDaResposta::Erro { mensagem: falhas.join("; "), causa };
         }
         CorpoDaResposta::Itens { itens: conversao::juntar_busca(principal, por_tipo, limite as usize) }
     }
@@ -163,14 +183,14 @@ impl YoutubeMusic {
                     .collect();
                 CorpoDaResposta::Itens { itens }
             }
-            Err(e) => erro(e),
+            Err(e) => erro_do_youtube(&e),
         }
     }
 
     fn playlist(&self, id: &str) -> CorpoDaResposta {
         match self.esperar(self.rp.query().music_playlist(id)) {
             Ok(p) => CorpoDaResposta::Itens { itens: p.tracks.items.iter().map(|t| Item::Faixa(faixa(t))).collect() },
-            Err(e) => erro(e),
+            Err(e) => erro_do_youtube(&e),
         }
     }
 
@@ -181,13 +201,17 @@ impl YoutubeMusic {
                 itens.extend(a.albums.iter().map(|al| Item::Album(album_item(al))));
                 CorpoDaResposta::Itens { itens }
             }
-            Err(e) => erro(e),
+            Err(e) => erro_do_youtube(&e),
         }
     }
 
     /// O endereço do áudio, pela rota direta. Uma faixa sem endereço direto (com DRM, por exemplo) não toca.
     fn resolver(&mut self, id: &str) -> CorpoDaResposta {
-        match self.rt.block_on(self.direto.audio(id)) {
+        let audio = self.rt.block_on(async {
+            let demorou = |_| visionos::Falha::nova(Causa::Rede, "o YouTube demorou demais");
+            tokio::time::timeout(PRAZO_DO_AUDIO, self.direto.audio(id)).await.map_err(demorou).and_then(|r| r)
+        });
+        match audio {
             // O googlevideo serve os endereços desse cliente para o agente dele.
             Ok(a) => CorpoDaResposta::Fonte(Fonte::Endereco {
                 url: a.url,
@@ -195,7 +219,10 @@ impl YoutubeMusic {
                 formato: Some("m4a".into()),
                 duracao_s: a.duracao_s,
             }),
-            Err(motivo) => erro(format!("o YouTube Music não deu o áudio desta faixa: {motivo}")),
+            Err(f) => CorpoDaResposta::Erro {
+                mensagem: format!("o YouTube Music não deu o áudio desta faixa: {}", f.motivo),
+                causa: f.causa,
+            },
         }
     }
 }
@@ -284,5 +311,21 @@ fn main() {
     }
     if let Err(e) = servir(std::io::stdin().lock(), std::io::stdout(), &mut yt) {
         eprintln!("youtube-music: {e}");
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use rustypipe::error::ExtractionError;
+
+    #[test]
+    fn a_causa_dos_erros_do_youtube() {
+        assert_eq!(causa_de(&Error::Http("sem conexão".into())), Some(Causa::Rede));
+        assert_eq!(causa_de(&Error::HttpStatus(429, "".into())), Some(Causa::Limite));
+        assert_eq!(causa_de(&Error::HttpStatus(502, "".into())), Some(Causa::Rede));
+        let sumiu = ExtractionError::NotFound { id: "x".into(), msg: "".into() };
+        assert_eq!(causa_de(&Error::Extraction(sumiu)), Some(Causa::Indisponivel));
+        assert_eq!(causa_de(&Error::Other("?".into())), None);
     }
 }

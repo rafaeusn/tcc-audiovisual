@@ -11,13 +11,16 @@
 //! queda ele já abre `entrando`, como um provedor com a credencial guardada. Com a conta ele também tem uma biblioteca
 //! (uma playlist); com `--revoga`, pedi-la (ou buscar) derruba a conta (`fora`, com o motivo), como um login revogado no serviço.
 //!
+//! Com `--falha-rede N`, os primeiros N `resolver` respondem erro com a causa `rede`.
+//!
 //! Com `--sozinho`, em vez de dar o áudio ele finge um tocador próprio (capacidade `TocaSozinho`): ligar com a chave
-//! "errada" falha, com "nenhuma" é recusado; com outra, a primeira pergunta diz `pareando` e a seguinte `pronto`. A faixa anda com o relógio; a `3`
+//! "errada" falha (e oferece outro programa, o "1.0"), com "nenhuma" é recusado; com outra, a primeira pergunta diz `pareando` e a seguinte `pronto`. A faixa anda com o relógio; a `3`
 //! falha, e a `2` é tomada por outro aparelho depois de 1 s. Com `--atrasa`, pausar, continuar e pular só valem 350 ms
-//! depois de respondidos, como no tocador de verdade.
+//! depois de respondidos, como no tocador de verdade. Com `--adianta`, ele aceita a próxima antes do fim (`preparar`) e passa para
+//! ela sozinho.
 
 use provedores::{
-    Acao, Apresentacao, Capacidade, Conta, CorpoDaResposta, CorpoDoPedido, EstadoDoTocador, Faixa, Fonte, Item,
+    Acao, Apresentacao, Capacidade, Causa, Conta, CorpoDaResposta, CorpoDoPedido, EstadoDoTocador, Faixa, Fonte, Item,
     Playlist, Prateleira, Servico, SituacaoDaConta, SituacaoDaFaixa, SituacaoDoTocador, Tocando, VERSAO_DO_PROTOCOLO,
     servir,
 };
@@ -30,8 +33,12 @@ struct Exemplo {
     /// O tocador fingido (`--sozinho`) e desde quando a faixa dele anda.
     tocador: EstadoDoTocador,
     andando: Option<std::time::Instant>,
+    /// A próxima, se o Player já disse (`--adianta`).
+    proxima: Option<String>,
     /// Com `--atrasa`, as ordens (fora `tocar`) que ainda não valeram, e quando valem.
     atrasadas: Vec<(std::time::Instant, Acao)>,
+    /// Quantos `resolver` ainda falham por rede (`--falha-rede`).
+    falhas_de_rede: u32,
 }
 
 fn faixa(id: &str, titulo: &str, artista: &str, duracao_s: f64) -> Faixa {
@@ -70,7 +77,7 @@ impl Servico for Exemplo {
         match pedido {
             CorpoDoPedido::Buscar { .. } if tem("--revoga") => {
                 self.conta = Some(Conta { erro: Some("o login foi revogado".into()), ..Conta::default() });
-                CorpoDaResposta::Erro { mensagem: "o login foi revogado".into() }
+                CorpoDaResposta::erro("o login foi revogado")
             }
             CorpoDoPedido::Buscar { texto, limite } => {
                 match texto.as_str() {
@@ -98,9 +105,13 @@ impl Servico for Exemplo {
                     itens: self.catalogo.iter().cloned().map(Item::Faixa).collect(),
                 }],
             },
+            CorpoDoPedido::Resolver { .. } if self.falhas_de_rede > 0 => {
+                self.falhas_de_rede -= 1;
+                CorpoDaResposta::erro_com(Causa::Rede, "sem conexão")
+            }
             CorpoDoPedido::Resolver { faixa: id } => {
                 let Some(f) = self.catalogo.iter().find(|f| f.id == id) else {
-                    return CorpoDaResposta::Erro { mensagem: format!("faixa desconhecida: {id}") };
+                    return CorpoDaResposta::erro(format!("faixa desconhecida: {id}"));
                 };
                 match &self.url {
                     Some(base) => CorpoDaResposta::Fonte(Fonte::Endereco {
@@ -109,12 +120,12 @@ impl Servico for Exemplo {
                         formato: Some("wav".into()),
                         duracao_s: f.duracao_s,
                     }),
-                    None => CorpoDaResposta::Erro { mensagem: "este exemplo não tem áudio".into() },
+                    None => CorpoDaResposta::erro("este exemplo não tem áudio"),
                 }
             }
             CorpoDoPedido::Biblioteca if tem("--revoga") => {
                 self.conta = Some(Conta { erro: Some("o login foi revogado".into()), ..Conta::default() });
-                CorpoDaResposta::Erro { mensagem: "o login foi revogado".into() }
+                CorpoDaResposta::erro("o login foi revogado")
             }
             CorpoDoPedido::Biblioteca if self.conta.is_some() => CorpoDaResposta::Itens {
                 itens: vec![Item::Playlist(Playlist {
@@ -133,6 +144,7 @@ impl Servico for Exemplo {
                     self.controlar(acao);
                 }
                 self.andar();
+                self.tocador.adianta = tem("--adianta");
                 let agora = self.tocador.clone();
                 if self.tocador.situacao == SituacaoDoTocador::Pareando {
                     self.tocador.situacao = SituacaoDoTocador::Pronto;
@@ -140,12 +152,19 @@ impl Servico for Exemplo {
                 CorpoDaResposta::Tocador(Box::new(agora))
             }
             CorpoDoPedido::LigarTocador { chave: Some(c) } if tem("--sozinho") && c.0 == "nenhuma" => {
-                CorpoDaResposta::Erro { mensagem: "cole a chave".into() }
+                CorpoDaResposta::erro("cole a chave")
             }
             CorpoDoPedido::LigarTocador { chave } if tem("--sozinho") => {
                 let errada = chave.is_some_and(|c| c.0 == "errada");
                 let situacao = if errada { SituacaoDoTocador::Falhou } else { SituacaoDoTocador::Pareando };
-                self.tocador = EstadoDoTocador { situacao, tem_chave: true, ..Default::default() };
+                let alternativa = errada.then(|| "1.0".to_string());
+                self.tocador = EstadoDoTocador { situacao, tem_chave: true, alternativa, ..Default::default() };
+                CorpoDaResposta::Ok
+            }
+            CorpoDoPedido::TrocarTocador if tem("--sozinho") => {
+                let versao = self.tocador.alternativa.take();
+                let situacao = SituacaoDoTocador::Pareando;
+                self.tocador = EstadoDoTocador { situacao, tem_chave: true, versao, ..Default::default() };
                 CorpoDaResposta::Ok
             }
             CorpoDoPedido::DesligarTocador if tem("--sozinho") => {
@@ -162,7 +181,7 @@ impl Servico for Exemplo {
                 }
                 CorpoDaResposta::Ok
             }
-            outro => CorpoDaResposta::Erro { mensagem: format!("o exemplo não sabe responder {outro:?}") },
+            outro => CorpoDaResposta::erro(format!("o exemplo não sabe responder {outro:?}")),
         }
     }
 }
@@ -170,7 +189,12 @@ impl Servico for Exemplo {
 impl Exemplo {
     fn controlar(&mut self, acao: Acao) {
         self.andar();
+        if let Acao::Preparar { faixa } = acao {
+            self.proxima = Some(faixa);
+            return;
+        }
         if let Acao::Tocar { faixa } = &acao {
+            self.proxima = None;
             let duracao_s = self.catalogo.iter().find(|f| &f.id == faixa).and_then(|f| f.duracao_s).unwrap_or(4.0);
             let vez = self.tocador.tocando.as_ref().map_or(1, |t| t.vez + 1);
             let (situacao, erro) = match faixa.as_str() {
@@ -198,7 +222,10 @@ impl Exemplo {
             if t.faixa == "2" && t.posicao_s >= 1.0 {
                 t.situacao = SituacaoDaFaixa::EmOutroLugar;
             } else if t.posicao_s >= t.duracao_s {
-                t.situacao = SituacaoDaFaixa::Acabou;
+                match self.proxima.take() {
+                    Some(faixa) => *t = Tocando { faixa, posicao_s: 0.0, duracao_s: 4.0, ..t.clone() },
+                    None => t.situacao = SituacaoDaFaixa::Acabou,
+                }
             }
         }
     }
@@ -257,7 +284,13 @@ fn main() {
         conta: tem("--conta").then(ao_abrir),
         tocador: EstadoDoTocador::default(),
         andando: None,
+        proxima: None,
         atrasadas: Vec::new(),
+        falhas_de_rede: std::env::args()
+            .skip_while(|a| a != "--falha-rede")
+            .nth(1)
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0),
     };
     eprintln!("exemplo pronto");
     if let Err(e) = servir(std::io::stdin().lock(), std::io::stdout(), &mut exemplo) {

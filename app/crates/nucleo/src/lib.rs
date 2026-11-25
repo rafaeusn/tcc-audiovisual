@@ -11,7 +11,7 @@ pub use ajustes::{
     Ajustes, BANDAS_EQ, BordaIlha, Layout, Modelo, Modulo, PRESETS_EQ, Repetir, Skin, TamanhoIlha, Tema,
 };
 pub use comando::{Comando, Pagina};
-pub use erro::{Erro, Resultado};
+pub use erro::{CausaDoProvedor, Erro, Resultado};
 
 /// Nome provisório do app (pasta de dados, título da janela, instância única).
 pub const NOME_APP: &str = "TccPlayer";

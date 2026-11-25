@@ -7,7 +7,7 @@
 use crate::Anel;
 use nucleo::{Erro, Resultado};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 
 /// A taxa em que o som de um app é entregue (o Windows converte para ela).
@@ -64,6 +64,27 @@ pub fn nomes_com_som(com_som: &[u32], processos: &[Processo], proprio: u32) -> V
     nomes
 }
 
+/// Os processos `exe` abertos por `ancestral` (ou por um que ele abriu), do mais antigo da linhagem para o mais novo.
+pub fn descendentes(ancestral: u32, exe: &str, processos: &[Processo]) -> Vec<u32> {
+    let exe = exe.to_lowercase();
+    let pai = |pid: u32| processos.iter().find(|p| p.pid == pid).map(|p| p.pai);
+    // A quantos passos de `ancestral` está (o limite evita uma volta sem fim, como em `raiz`).
+    let distancia = |pid: u32| {
+        let mut atual = pid;
+        for passos in 1..=32 {
+            atual = pai(atual).filter(|p| *p != atual)?;
+            if atual == ancestral {
+                return Some(passos);
+            }
+        }
+        None
+    };
+    let mut achados: Vec<(u32, u32)> =
+        processos.iter().filter(|p| p.exe == exe).filter_map(|p| distancia(p.pid).map(|d| (d, p.pid))).collect();
+    achados.sort_unstable();
+    achados.into_iter().map(|(_, pid)| pid).collect()
+}
+
 /// O que o sistema tem agora: os processos e quais deles têm som aberto na saída padrão.
 #[derive(Clone, Debug, Default)]
 pub struct Panorama {
@@ -92,10 +113,21 @@ impl Panorama {
         nomes_com_som(&self.com_som, &self.processos, std::process::id())
     }
 
+    /// Os processos `exe` que o Player abriu (o Soloist, e não o de outro programa que esteja aberto).
+    pub fn do_player(&self, exe: &str) -> Vec<u32> {
+        descendentes(std::process::id(), exe, &self.processos)
+    }
+
     /// O primeiro processo do próprio Player (para ouvir só a música local).
     pub fn raiz_propria(&self) -> u32 {
         raiz(std::process::id(), &self.processos)
     }
+}
+
+/// Liga o COM nesta thread (as funções que falam com o som do Windows precisam).
+#[cfg(windows)]
+pub(crate) fn ligar_o_com() {
+    so::com();
 }
 
 /// A captura do som de um processo. Soltar o valor encerra a captura.
@@ -109,6 +141,12 @@ pub struct CapturaDeApp {
 impl CapturaDeApp {
     /// Começa a ouvir o processo `pid` e os que ele abriu. As amostras (mono, a [`TAXA_DE_APP`]) vão para `anel`.
     pub fn abrir(anel: Arc<Anel>, pid: u32) -> Resultado<Self> {
+        Self::abrir_com(anel, pid, Arc::new(AtomicU32::new(1f32.to_bits())))
+    }
+
+    /// Como [`Self::abrir`], com um ganho (os bits de um `f32`, que pode mudar a qualquer hora): a captura vem depois do volume
+    /// do app no misturador do Windows, e o ganho o desfaz.
+    pub fn abrir_com(anel: Arc<Anel>, pid: u32, ganho: Arc<AtomicU32>) -> Resultado<Self> {
         #[cfg(windows)]
         {
             let parar = Arc::new(AtomicBool::new(false));
@@ -117,7 +155,7 @@ impl CapturaDeApp {
             let (p, f) = (parar.clone(), falhou.clone());
             let fio = std::thread::Builder::new()
                 .name("escuta-app".into())
-                .spawn(move || so::capturar(pid, &anel, &p, &f, &pronto))
+                .spawn(move || so::capturar(pid, &anel, &ganho, (&p, &f), &pronto))
                 .map_err(|e| Erro::Audio(e.to_string()))?;
             match espera.recv_timeout(std::time::Duration::from_secs(3)) {
                 Ok(Ok(())) => Ok(Self { parar, falhou, fio: Some(fio), pid }),
@@ -134,7 +172,7 @@ impl CapturaDeApp {
         }
         #[cfg(not(windows))]
         {
-            let _ = (anel, pid);
+            let _ = (anel, pid, ganho);
             Err(Erro::Audio("ouvir um app só existe no Windows".into()))
         }
     }
@@ -158,7 +196,7 @@ impl Drop for CapturaDeApp {
 mod so {
     use super::{Processo, TAXA_DE_APP};
     use crate::Anel;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::mpsc::Sender;
     use std::time::Duration;
     use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
@@ -185,10 +223,12 @@ mod so {
     use windows::core::{HRESULT, IUnknown, Interface, Ref, Result, implement};
 
     const CANAIS: u16 = 2;
-    const BITS: u16 = 16;
+    /// Ponto flutuante: com o volume do app baixo, 16 bits deixavam poucos degraus para a análise (que o compensa).
+    const BITS: u16 = 32;
+    const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
 
     /// Liga o COM nesta thread (uma vez por thread; ligar de novo não faz mal).
-    fn com() {
+    pub fn com() {
         thread_local!(static LIGADO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
         LIGADO.with(|l| {
             if !l.replace(true) {
@@ -315,7 +355,7 @@ mod so {
         };
         let bloco = CANAIS * BITS / 8;
         let formato = WAVEFORMATEX {
-            wFormatTag: 1,
+            wFormatTag: WAVE_FORMAT_IEEE_FLOAT,
             nChannels: CANAIS,
             nSamplesPerSec: TAXA_DE_APP,
             nAvgBytesPerSec: TAXA_DE_APP * u32::from(bloco),
@@ -345,8 +385,8 @@ mod so {
     pub fn capturar(
         pid: u32,
         anel: &Anel,
-        parar: &AtomicBool,
-        falhou: &AtomicBool,
+        ganho: &AtomicU32,
+        (parar, falhou): (&AtomicBool, &AtomicBool),
         pronto: &Sender<std::result::Result<(), String>>,
     ) {
         com();
@@ -392,11 +432,10 @@ mod so {
                         if silencio {
                             anel.escrever(std::iter::repeat_n(0.0, quadros as usize));
                         } else {
-                            let amostras = std::slice::from_raw_parts(dados.cast::<i16>(), quadros as usize * canais);
+                            let amostras = std::slice::from_raw_parts(dados.cast::<f32>(), quadros as usize * canais);
+                            let g = f32::from_bits(ganho.load(Ordering::Acquire)) / canais as f32;
                             anel.escrever(
-                                amostras
-                                    .chunks_exact(canais)
-                                    .map(|q| q.iter().map(|s| f32::from(*s) / 32768.0).sum::<f32>() / canais as f32),
+                                amostras.chunks_exact(canais).map(|q| (q.iter().sum::<f32>() * g).clamp(-1.0, 1.0)),
                             );
                         }
                         let _ = leitor.ReleaseBuffer(quadros);
@@ -452,6 +491,24 @@ mod testes {
         // Pai e filho apontando um para o outro não prendem a busca.
         let volta = vec![p(1, 2, "a.exe"), p(2, 1, "a.exe")];
         assert!([1, 2].contains(&raiz(1, &volta)));
+    }
+
+    #[test]
+    fn acha_so_os_processos_que_o_player_abriu() {
+        let mut s = sistema();
+        // O Soloist do Player (por dentro do provedor), com o filho dele, e o de outro programa.
+        s.extend([
+            p(410, 400, "provedor-spotify.exe"),
+            p(430, 420, "soloist.exe"),
+            p(420, 410, "soloist.exe"),
+            p(500, 100, "spotifast.exe"),
+            p(510, 500, "soloist.exe"),
+        ]);
+        assert_eq!(descendentes(400, "Soloist.exe", &s), [420, 430]);
+        assert!(descendentes(400, "chrome.exe", &s).is_empty());
+        assert!(descendentes(400, "player.exe", &s).is_empty(), "ele mesmo não é filho dele");
+        let volta = vec![p(1, 2, "a.exe"), p(2, 1, "b.exe")];
+        assert!(descendentes(9, "a.exe", &volta).is_empty(), "uma volta não prende a busca");
     }
 
     #[test]

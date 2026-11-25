@@ -6,9 +6,11 @@
 
 mod anel;
 mod captura;
+mod derivacao;
 mod processo;
 pub mod volume;
 
 pub use anel::Anel;
 pub use captura::{Captura, nome_da_saida_padrao};
+pub use derivacao::Derivacao;
 pub use processo::{CapturaDeApp, Panorama, Processo, TAXA_DE_APP};

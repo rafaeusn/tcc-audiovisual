@@ -333,6 +333,8 @@ pub struct Ajustes {
     pub espaco: String,
     /// Músicas do computador: segundos de crossfade entre uma e outra (0 = sem; a troca continua sem intervalo).
     pub crossfade_s: f32,
+    /// O volume da música que o Player toca (0 a 1). O do PC não é daqui.
+    pub volume_musica: f32,
     /// Igualar o volume entre as músicas pelo ReplayGain do arquivo.
     pub volume_igualado: bool,
     /// Equalizador ligado e o ganho de cada banda, em dB.
@@ -381,6 +383,7 @@ impl Default for Ajustes {
             letra_romanizar: false,
             espaco: "tudo".into(),
             crossfade_s: 0.0,
+            volume_musica: 1.0,
             volume_igualado: true,
             eq_ligado: false,
             eq: vec![0.0; BANDAS_EQ],
@@ -450,6 +453,7 @@ impl Ajustes {
         if self.escuta_app.len() > 120 || self.escuta_app.contains(['/', '\\']) {
             self.escuta_app.clear();
         }
+        self.volume_musica = if self.volume_musica.is_finite() { self.volume_musica.clamp(0.0, 1.0) } else { 1.0 };
         self.crossfade_s = if self.crossfade_s.is_finite() { self.crossfade_s.clamp(0.0, 12.0) } else { 0.0 };
         self.eq.resize(BANDAS_EQ, 0.0);
         for g in &mut self.eq {

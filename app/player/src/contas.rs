@@ -23,6 +23,8 @@ pub enum BotaoDoTocador {
     PaginaDaChave,
     ColarChave,
     Ligar,
+    /// O outro programa deste computador que o tocador ofereceu.
+    UsarOutro,
     Desligar,
 }
 
@@ -32,12 +34,13 @@ impl BotaoDoTocador {
             Self::PaginaDaChave => "Criar a chave no Spotify",
             Self::ColarChave => "Colar a chave copiada",
             Self::Ligar => "Ligar o Soloist",
+            Self::UsarOutro => "Usar esse Soloist",
             Self::Desligar => "Desligar o Soloist",
         }
     }
 
     pub fn principal(self) -> bool {
-        matches!(self, Self::ColarChave | Self::Ligar)
+        matches!(self, Self::ColarChave | Self::Ligar | Self::UsarOutro)
     }
 }
 
@@ -50,7 +53,8 @@ pub struct TelaDoTocador {
 }
 
 pub fn tela_do_tocador(e: &EstadoDoTocador) -> TelaDoTocador {
-    use BotaoDoTocador::{ColarChave, Desligar, Ligar, PaginaDaChave};
+    use BotaoDoTocador::{ColarChave, Desligar, Ligar, PaginaDaChave, UsarOutro};
+    let versao = e.versao.as_deref().map(|v| format!(" {v}")).unwrap_or_default();
     let erro = e.erro.as_deref().map(|m| format!(" Da última vez: {m}.")).unwrap_or_default();
     let nome = e.nome.as_deref().unwrap_or("Player (Soloist)");
     let (frase, botoes) = match e.situacao {
@@ -76,10 +80,20 @@ pub fn tela_do_tocador(e: &EstadoDoTocador) -> TelaDoTocador {
             vec![Desligar],
         ),
         SituacaoDoTocador::Pronto => (
-            "O Soloist está ligado: o som é o do próprio Spotify. Equalizador, crossfade e pré-análise valem só pelo \
-             YouTube Music."
-                .into(),
+            format!(
+                "O Soloist{versao} está ligado: o som é o do próprio Spotify. Equalizador, crossfade e pré-análise valem \
+                 só pelo YouTube Music."
+            ),
             vec![Desligar],
+        ),
+        SituacaoDoTocador::Falhou if e.alternativa.is_some() && e.tem_chave => (
+            format!(
+                "O Soloist parou: {}. Há outro neste computador, o {}, assinado pelo Spotify: o Player pode copiar e usar \
+                 esse.",
+                e.erro.as_deref().unwrap_or("não disse por quê"),
+                e.alternativa.as_deref().unwrap_or_default()
+            ),
+            vec![UsarOutro, Desligar],
         ),
         SituacaoDoTocador::Falhou => (
             format!("O Soloist parou: {}.", e.erro.as_deref().unwrap_or("não disse por quê")),
@@ -167,6 +181,17 @@ mod testes {
         ] {
             assert!(tela(s, true).botoes.contains(&Desligar), "{s:?}: sempre dá para sair");
         }
+        let outro = EstadoDoTocador {
+            alternativa: Some("1.3.10.51 (do Spotifast)".into()),
+            ..com(SituacaoDoTocador::Falhou, true)
+        };
+        let t = tela_do_tocador(&outro);
+        assert_eq!(t.botoes, [BotaoDoTocador::UsarOutro, Desligar]);
+        assert!(t.frase.contains("1.3.10.51 (do Spotifast)"), "{}", t.frase);
+        let sem_chave = EstadoDoTocador { tem_chave: false, ..outro };
+        assert!(tela_do_tocador(&sem_chave).botoes.contains(&ColarChave), "sem chave, primeiro ela");
+        let ligado = EstadoDoTocador { versao: Some("1.3.10.51".into()), ..com(SituacaoDoTocador::Pronto, true) };
+        assert!(tela_do_tocador(&ligado).frase.contains("Soloist 1.3.10.51"));
         let pareando = EstadoDoTocador { nome: Some("Sala".into()), ..com(SituacaoDoTocador::Pareando, true) };
         assert!(tela_do_tocador(&pareando).frase.contains("Sala"));
         let recusada =

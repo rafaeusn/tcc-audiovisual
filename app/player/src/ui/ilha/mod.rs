@@ -321,7 +321,8 @@ pub struct VistaIlha {
     rolagem: f32,
     rolou_em: Instant,
     faixa_vista: Option<String>,
-    volume_visto: Option<f32>,
+    /// De quem era a barra (a música ou o sistema) e onde estava.
+    volume_visto: Option<(bool, f32)>,
     parada_desde: Option<Instant>,
     /// Quando o sistema foi consultado (tela cheia, Player na frente, movimento reduzido, monitor).
     sistema_em: Instant,
@@ -784,10 +785,11 @@ impl VistaIlha {
             }
             self.faixa_vista = chave;
         }
-        if self.volume_visto.is_some_and(|v| (v - volume).abs() > 0.004) {
+        let da_musica = p.volume_e_da_musica();
+        if self.volume_visto.is_some_and(|(de, v)| de == da_musica && (v - volume).abs() > 0.004) {
             self.controle.alertar(Alerta::Volume, agora);
         }
-        self.volume_visto = Some(volume);
+        self.volume_visto = Some((da_musica, volume));
         self.parada_desde = if tocando { None } else { Some(self.parada_desde.unwrap_or(agora)) };
 
         let arrastando = self.arrasto.is_some_and(|a| a.modo == ModoDoArrasto::Mover);

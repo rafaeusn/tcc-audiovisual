@@ -16,6 +16,7 @@ mod codigos;
 mod conta;
 mod conversao;
 mod dados;
+mod oauth;
 mod pathfinder;
 mod porta;
 mod soloist;
@@ -23,8 +24,8 @@ mod spotify;
 
 use conta::Login;
 use provedores::{
-    Apresentacao, Capacidade, CorpoDaResposta, CorpoDoPedido, EmSegundoPlano, Identidade, Servico, SituacaoDaConta,
-    VERSAO_DO_PROTOCOLO, servir,
+    Apresentacao, Capacidade, Causa, CorpoDaResposta, CorpoDoPedido, EmSegundoPlano, Identidade, Servico,
+    SituacaoDaConta, VERSAO_DO_PROTOCOLO, servir,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -74,7 +75,7 @@ impl Servico for Spotify {
             CorpoDoPedido::Conta => CorpoDaResposta::Conta(self.login.estado()),
             CorpoDoPedido::Entrar => match self.login.entrar() {
                 Ok(()) => CorpoDaResposta::Ok,
-                Err(mensagem) => CorpoDaResposta::Erro { mensagem },
+                Err(mensagem) => erro(mensagem),
             },
             CorpoDoPedido::Sair => {
                 self.login.sair();
@@ -82,6 +83,7 @@ impl Servico for Spotify {
             }
             CorpoDoPedido::Tocador => CorpoDaResposta::Tocador(Box::new(self.soloist.estado())),
             CorpoDoPedido::LigarTocador { chave } => ok(self.soloist.ligar(chave.as_ref().map(|c| c.0.as_str()))),
+            CorpoDoPedido::TrocarTocador => ok(self.soloist.trocar()),
             CorpoDoPedido::DesligarTocador => {
                 self.soloist.desligar();
                 CorpoDaResposta::Ok
@@ -117,7 +119,7 @@ fn ok(feito: Result<(), String>) -> CorpoDaResposta {
 }
 
 fn erro(mensagem: String) -> CorpoDaResposta {
-    CorpoDaResposta::Erro { mensagem }
+    CorpoDaResposta::erro(mensagem)
 }
 
 fn itens(resultado: Result<Vec<provedores::Item>, String>) -> CorpoDaResposta {
@@ -136,7 +138,9 @@ fn pagina(login: &Login, dados: &dados::Dados, pedido: CorpoDoPedido) -> CorpoDa
     match login.estado().situacao {
         SituacaoDaConta::Dentro => {}
         SituacaoDaConta::Entrando => return erro("O Spotify ainda está entrando na conta.".into()),
-        SituacaoDaConta::Fora => return erro("Entre na sua conta do Spotify.".into()),
+        SituacaoDaConta::Fora => {
+            return CorpoDaResposta::erro_com(Causa::SemConta, "Entre na sua conta do Spotify.");
+        }
     }
     match pedido {
         CorpoDoPedido::Inicio => {
@@ -193,9 +197,7 @@ fn main() {
     };
     let soloist = soloist::Soloist::novo(Arc::new(soloist::DoSpotify::novo(pasta.join("soloist"))), pasta);
     let mut spotify = Spotify { login, dados: Arc::new(dados), soloist };
-    // A saída sem `lock()`: cada resposta trava só enquanto é escrita. O `librespot-oauth` escreve o endereço do
-    // login na saída padrão, de outra thread, antes de escutar na porta; com a saída travada o tempo todo, ele
-    // esperava para sempre e o navegador voltava para uma porta fechada.
+    // A saída sem `lock()`: cada resposta trava só enquanto é escrita (as lentas saem de outras threads).
     if let Err(e) = servir(std::io::stdin().lock(), std::io::stdout(), &mut spotify) {
         eprintln!("spotify: {e}");
     }
@@ -229,11 +231,16 @@ mod testes {
             CorpoDaResposta::Itens { itens: Vec::new() },
             "o convite já está na tela"
         );
-        let CorpoDaResposta::Erro { mensagem } = s.atender(CorpoDoPedido::Inicio) else { panic!("devia ser erro") };
+        let CorpoDaResposta::Erro { mensagem, .. } = s.atender(CorpoDoPedido::Inicio) else { panic!("devia ser erro") };
         assert!(mensagem.contains("Entre na sua conta"), "{mensagem}");
+        let sem_conta =
+            matches!(s.atender(CorpoDoPedido::Inicio), CorpoDaResposta::Erro { causa: Some(Causa::SemConta), .. });
+        assert!(sem_conta);
         s.login.entrar().expect("entrar");
         assert!(conta::falso::esperar(|| s.login.estado().situacao == SituacaoDaConta::Dentro));
-        assert!(matches!(s.atender(buscar), CorpoDaResposta::Erro { mensagem } if mensagem.contains("sem conexão")));
+        assert!(
+            matches!(s.atender(buscar), CorpoDaResposta::Erro { mensagem, .. } if mensagem.contains("sem conexão"))
+        );
     }
 
     #[test]
@@ -244,9 +251,9 @@ mod testes {
         let CorpoDaResposta::Tocador(e) = s.atender(CorpoDoPedido::Tocador) else { panic!("o estado") };
         assert_eq!(*e, provedores::EstadoDoTocador::default());
         let tocar = CorpoDoPedido::Controlar(provedores::Acao::Tocar { faixa: "f".into() });
-        assert!(matches!(s.atender(tocar), CorpoDaResposta::Erro { mensagem } if mensagem.contains("desligado")));
+        assert!(matches!(s.atender(tocar), CorpoDaResposta::Erro { mensagem, .. } if mensagem.contains("desligado")));
         let ligar = CorpoDoPedido::LigarTocador { chave: None };
-        assert!(matches!(s.atender(ligar), CorpoDaResposta::Erro { mensagem } if mensagem.contains("chave")));
+        assert!(matches!(s.atender(ligar), CorpoDaResposta::Erro { mensagem, .. } if mensagem.contains("chave")));
     }
 
     #[test]

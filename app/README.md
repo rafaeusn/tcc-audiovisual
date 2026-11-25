@@ -75,7 +75,10 @@ mais recente das outras e nunca espera por elas.
   janela inteira, escurecido, e a letra rola grande por cima, a linha de agora enchendo palavra por palavra, com
   a tradução embaixo, a fonte e o acerto de sincronia no rodapé. O topo arrasta a janela; Esc fecha.
 - **Configurações › Serviços**: a conta e por onde as músicas de cada serviço tocam, e o Soloist do Spotify (chave, ligar, parear,
-  desligar).
+  desligar, a versão em uso). Se o Soloist que o Spotify publica só fecha sozinho, o Player volta ao anterior ou oferece o do
+  Spotifast, se ele estiver neste computador ("Usar esse Soloist": é copiado, e só com a assinatura do Spotify).
+- **Sem internet**: uma faixa de serviço é tentada de novo algumas vezes e, se não voltar, a fila para nela com um aviso, em vez de
+  passar por todas. Tocar tenta outra vez.
 - **Configurações › Letras**: a ordem das fontes (setas), ligar e desligar cada uma (uma fica sempre ligada),
   preferir palavra por palavra, traduzir (e o idioma) e letras latinas.
 - **Espaços e navegação** (F2): a folha das páginas tem, no topo, voltar e avançar (também `Alt ←`/`Alt →` e os
@@ -124,7 +127,7 @@ mais recente das outras e nunca espera por elas.
   com som aberto. Com um app escolhido, o visual ouve só ele (captura por processo do Windows, com os processos
   que o app abre) e o "tocando agora" segue só ele: um anúncio no navegador não mexe em nada de quem escolheu o
   Spotify. Se o app fecha, o topo mostra "Esperando..." e a captura volta sozinha quando ele reabre. Tocando uma
-  música local com um app escolhido, a escuta ouve o próprio Player. Fica em `escuta-app` no `ajustes.toml`.
+  música do Player, a escuta ouve só ela (ver Volume). Fica em `escuta-app` no `ajustes.toml`.
   Teste manual: `cargo run -p audio --example ouvir_app -- opera.exe spotify.exe` abre e fecha a captura de cada
   app e mostra o nível do som.
 - **Músicas** (aba da Biblioteca): escolha pastas ("Adicionar pasta") e o app lê as músicas delas e das pastas
@@ -287,8 +290,12 @@ mais recente das outras e nunca espera por elas.
   Valem as variáveis de ambiente presentes ao abrir o app; se não houver, as que existiam na compilação. Sem
   elas a ficha do módulo avisa que ele não está configurado.
 - **Skin imersiva** (`I`): o visual ocupa a janela inteira e o painel, o dock e o topo viram vidro por cima dele.
-- **Volume** no dock: é o volume do sistema. O Modo Escuta analisa o som antes dele, então baixar o volume (ou
-  deixar no mudo) não enfraquece o visual.
+- **Volume** no dock (e `Ctrl ↑/↓`, `M`): com uma música do Player na tela (arquivo, YouTube Music ou Spotify pelo Soloist), é o volume
+  **só da música**: o jogo e o resto do PC não mudam, e o visual e a pré-análise não sentem, nem no 1 ou no mudo. Ele fica
+  guardado, e mexer no misturador de volume do Windows também move a barra quando toca o Soloist. Com a música de outro app (Modo
+  Escuta), continua sendo o volume do PC; a dica da barra diz qual é.
+- **O que o visual ouve**: com uma música do Player, só ela (o topo diz "Ouvindo o Player" ou "Ouvindo Soloist"), mesmo com "todo o
+  som" escolhido; com a de outro app, o que você escolheu.
 - **Cores reativas**: o dock e o alto do painel acompanham a cor da energia. No tema Mono tudo fica sem cor,
   inclusive as capas.
 - **Micro-interações** (artefato "Micro-interações do Player"): botões afundam ao pressionar, o play vira pause

@@ -11,15 +11,16 @@ Regra: código **copiado ou adaptado** de outro projeto entra na seção 3, com 
 - A rota do áudio pelo cliente visionOS do YouTube (`visionos.rs`) segue o que fazem o **MixMusic**
   (<https://github.com/fzn0x/mixmusic>, MIT ou GPL-3) e o **limusic** (<https://github.com/SimoHypers/limusic>,
   GPL-3). Nenhum código foi copiado: só os valores do cliente (nome, versão, agente), que são do YouTube.
-- `app/provedores/spotify` usa o **librespot** (`librespot-core` e `librespot-oauth`, MIT,
-  <https://github.com/librespot-org/librespot>) para o login e a sessão do Spotify. O caminho (o Client ID público do
-  librespot e a porta 8898) é o mesmo do **Spotifast** (<https://github.com/crmne/spotifast>, MIT). Os pedidos dos dados seguem o que
+- `app/provedores/spotify` usa o **librespot** (`librespot-core`, MIT,
+  <https://github.com/librespot-org/librespot>) para a sessão do Spotify. O login é nosso (`oauth.rs`, com `sha2` 0.10, `base64` 0.22 e
+  `getrandom` 0.3, os três MIT OR Apache-2.0); o caminho (o Client ID público do librespot e a porta 8898) é o mesmo do
+  **Spotifast** (<https://github.com/crmne/spotifast>, MIT). Os pedidos dos dados seguem o que
   fazem o Spotifast, o **Prism** (<https://github.com/Yigder/Prism>, GPL-3), o **Metrolist** (GPL-3) e o **limusic**
   (<https://github.com/SimoHypers/limusic>, GPL-3; a ideia de reler o código das consultas do site). Nenhum código deles
   foi copiado.
 - O **Soloist** (o player do Spotify) não vem com o Player nem está neste repositório: o programa é baixado do servidor do Spotify
   quando a pessoa o liga, com a chave dela, e vale a licença dele. O jeito de o abrir e de falar com a API local segue a
-  documentação oficial e o **Spotifast** (MIT), sem código copiado. Para isso o provedor usa `tungstenite` 0.28 (MIT OR Apache-2.0)
+  documentação oficial e o **Spotifast** (MIT), sem código copiado; voltar ao build anterior também é ideia dele. Para isso o provedor usa `tungstenite` 0.28 (MIT OR Apache-2.0)
   e `zip` 2.6 (MIT).
 - A conta do casador entre serviços (Match) vem do **MixMusic** (MIT), com pisos de título, artista e versão nossos.
 

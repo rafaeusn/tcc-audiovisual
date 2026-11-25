@@ -9,6 +9,7 @@
 mod anim;
 mod app;
 mod arranjo;
+mod cadeia;
 mod capas;
 mod catalogo;
 mod contas;
@@ -22,6 +23,7 @@ mod gravador;
 mod ilha;
 mod letrista;
 mod local;
+mod mesa;
 mod navegacao;
 mod paginas;
 mod pares;

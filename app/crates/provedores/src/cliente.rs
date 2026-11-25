@@ -6,9 +6,9 @@
 
 use crate::modelo::{Item, Prateleira};
 use crate::protocolo::{
-    Apresentacao, CorpoDaResposta, CorpoDoPedido, Fonte, Pedido, VERSAO_DO_PROTOCOLO, em_linha, ler_resposta,
+    Apresentacao, Causa, CorpoDaResposta, CorpoDoPedido, Fonte, Pedido, VERSAO_DO_PROTOCOLO, em_linha, ler_resposta,
 };
-use nucleo::{Erro, Resultado};
+use nucleo::{CausaDoProvedor, Erro, Resultado};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -27,6 +27,28 @@ type Pendentes = Arc<Mutex<HashMap<u64, Sender<CorpoDaResposta>>>>;
 
 fn erro(e: impl std::fmt::Display) -> Erro {
     Erro::Provedor(e.to_string())
+}
+
+/// O erro que o provedor mandou, com a causa quando ele soube classificar.
+fn erro_do_provedor(mensagem: String, causa: Option<Causa>) -> Erro {
+    match causa {
+        Some(c) => Erro::ProvedorComCausa { mensagem, causa: do_protocolo(c) },
+        None => Erro::Provedor(mensagem),
+    }
+}
+
+/// A causa do protocolo na do núcleo, onde a interface e o tocador a entendem.
+pub fn do_protocolo(c: Causa) -> CausaDoProvedor {
+    match c {
+        Causa::Rede => CausaDoProvedor::Rede,
+        Causa::Limite => CausaDoProvedor::Limite,
+        Causa::Indisponivel => CausaDoProvedor::Indisponivel,
+        Causa::SemConta => CausaDoProvedor::SemConta,
+        Causa::SemPremium => CausaDoProvedor::SemPremium,
+        Causa::SessaoRecusada => CausaDoProvedor::SessaoRecusada,
+        Causa::ChaveDeAudio => CausaDoProvedor::ChaveDeAudio,
+        Causa::Quebrado => CausaDoProvedor::Quebrado,
+    }
 }
 
 fn travar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -146,13 +168,15 @@ impl Provedor {
             return Err(e);
         }
         match resposta.recv_timeout(prazo) {
-            Ok(CorpoDaResposta::Erro { mensagem }) => Err(Erro::Provedor(mensagem)),
+            Ok(CorpoDaResposta::Erro { mensagem, causa }) => Err(erro_do_provedor(mensagem, causa)),
             Ok(corpo) => Ok(corpo),
             Err(RecvTimeoutError::Timeout) => {
                 travar(&self.pendentes).remove(&id);
-                Err(erro(format!("o provedor não respondeu em {:.0} s", prazo.as_secs_f32())))
+                let mensagem = format!("o provedor não respondeu em {:.0} s", prazo.as_secs_f32());
+                Err(erro_do_provedor(mensagem, Some(Causa::Rede)))
             }
-            Err(RecvTimeoutError::Disconnected) => Err(erro("o provedor fechou")),
+            // (O Player o reabre: tentar de novo resolve.)
+            Err(RecvTimeoutError::Disconnected) => Err(erro_do_provedor("o provedor fechou".into(), Some(Causa::Rede))),
         }
     }
 

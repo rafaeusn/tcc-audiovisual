@@ -182,13 +182,14 @@ impl Player {
         self.t_volume += dt;
         if self.t_volume >= 0.5 && !self.arrastando_volume {
             self.t_volume = 0.0;
-            match audio::volume::ler() {
-                Some(n) => {
-                    self.volume = n.volume;
-                    self.mudo = n.mudo;
-                    self.volume_disponivel = true;
-                }
-                None => self.volume_disponivel = false,
+            self.ler_volume();
+        }
+        // Arrastando a barra o volume muda a cada quadro: ele é guardado quando sossega.
+        if let Some(t) = self.t_volume_salvo.as_mut() {
+            *t += dt;
+            if *t >= 1.0 {
+                self.t_volume_salvo = None;
+                self.salvar();
             }
         }
         self.t_hora += dt;

@@ -2,6 +2,7 @@
 //! do Spotify, baixado quando a pessoa o liga, com a chave pessoal dela; o som sai por ele. Aqui só se abre, se pareia e
 //! se manda nele pela API local (`--ws`). Nada do áudio passa pelo Player.
 
+mod assinatura;
 mod instalar;
 mod leitura;
 mod motor;

@@ -9,9 +9,9 @@
 //! [`Situacao`].
 
 use analise::{FFT_PRINCIPAL, Motor, PASSO, Retrato};
-use audio::{Anel, Captura, CapturaDeApp, Panorama, TAXA_DE_APP, nome_da_saida_padrao};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use audio::{Anel, Captura, CapturaDeApp, Derivacao, Panorama, TAXA_DE_APP, nome_da_saida_padrao};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -44,14 +44,24 @@ pub enum Fonte {
     Tudo,
     /// Só o app deste executável (`spotify.exe`) e os processos que ele abre.
     App(String),
-    /// Só o próprio Player (a pessoa escolheu um app, mas está tocando uma música local).
+    /// Só a música que o próprio Player toca, antes do volume dela (a captura nem passa pelo Windows).
     Proprio,
+    /// Só o programa que o Player abriu para tocar (o Soloist), desfazendo o volume dele.
+    DoPlayer(String),
+}
+
+/// O que o Player empresta à escuta para ouvir a música dele.
+struct DoPlayer {
+    derivacao: Arc<Derivacao>,
+    /// Quanto multiplicar o som do programa que toca por fora.
+    ganho: Arc<AtomicU32>,
 }
 
 /// A captura em andamento.
 enum Captando {
     Sistema(Captura),
     App(CapturaDeApp),
+    Direto(Arc<Derivacao>),
 }
 
 impl Captando {
@@ -59,6 +69,7 @@ impl Captando {
         match self {
             Self::Sistema(c) => c.falhou(),
             Self::App(c) => c.falhou(),
+            Self::Direto(_) => false,
         }
     }
 }
@@ -69,6 +80,7 @@ pub struct Escuta {
     fonte: Arc<Mutex<Fonte>>,
     /// Os apps (executáveis) que têm som aberto agora, para a pessoa escolher.
     apps: Arc<Mutex<Vec<String>>>,
+    do_player: Arc<OnceLock<DoPlayer>>,
     parar: Arc<AtomicBool>,
     fio: Option<JoinHandle<()>>,
 }
@@ -104,6 +116,7 @@ struct Ligacao {
     situacao: Arc<Mutex<Situacao>>,
     fonte: Arc<Mutex<Fonte>>,
     apps: Arc<Mutex<Vec<String>>>,
+    do_player: Arc<OnceLock<DoPlayer>>,
     parar: Arc<AtomicBool>,
 }
 
@@ -118,7 +131,9 @@ impl Escuta {
         let fonte = Arc::new(Mutex::new(fonte));
         let apps = Arc::new(Mutex::new(Vec::new()));
         let parar = Arc::new(AtomicBool::new(false));
+        let do_player = Arc::new(OnceLock::new());
         let ligacao = Ligacao {
+            do_player: do_player.clone(),
             retrato: retrato.clone(),
             situacao: situacao.clone(),
             fonte: fonte.clone(),
@@ -133,7 +148,12 @@ impl Escuta {
                 None
             }
         };
-        Self { retrato, situacao, fonte, apps, parar, fio }
+        Self { retrato, situacao, fonte, apps, do_player, parar, fio }
+    }
+
+    /// De onde vem a música do próprio Player ([`Fonte::Proprio`], [`Fonte::DoPlayer`]).
+    pub fn ligar_ao_player(&self, derivacao: Arc<Derivacao>, ganho: Arc<AtomicU32>) {
+        let _ = self.do_player.set(DoPlayer { derivacao, ganho });
     }
 
     pub fn retrato(&self) -> Retrato {
@@ -169,7 +189,7 @@ impl Drop for Escuta {
 fn nome_da_fonte(fonte: &Fonte) -> String {
     match fonte {
         Fonte::Tudo => "o PC".into(),
-        Fonte::App(exe) => sessao::nome_do_app(exe),
+        Fonte::App(exe) | Fonte::DoPlayer(exe) => sessao::nome_do_app(exe),
         Fonte::Proprio => "o Player".into(),
     }
 }
@@ -233,10 +253,17 @@ fn rodar(l: &Ligacao) {
                         proxima_tentativa = agora;
                     }
                 }
-                Fonte::App(_) | Fonte::Proprio => {
+                Fonte::Proprio if l.do_player.get().is_some() => {}
+                Fonte::App(_) | Fonte::Proprio | Fonte::DoPlayer(_) => {
                     let alvo = match &fonte {
                         Fonte::App(exe) => panorama.alvo(exe),
+                        // (O do Player, e não o de outro programa que esteja aberto com o mesmo nome.)
+                        Fonte::DoPlayer(exe) => panorama.do_player(exe).first().copied().or_else(|| panorama.alvo(exe)),
                         _ => Some(panorama.raiz_propria()),
+                    };
+                    let ganho = match (&fonte, l.do_player.get()) {
+                        (Fonte::DoPlayer(_), Some(p)) => p.ganho.clone(),
+                        _ => Arc::new(AtomicU32::new(1f32.to_bits())),
                     };
                     let nome = nome_da_fonte(&fonte);
                     match alvo {
@@ -250,7 +277,7 @@ fn rodar(l: &Ligacao) {
                                 && !matches!(&captura, Some(Captando::App(c)) if c.pid == pid) =>
                         {
                             captura = None;
-                            match CapturaDeApp::abrir(anel.clone(), pid) {
+                            match CapturaDeApp::abrir_com(anel.clone(), pid, ganho) {
                                 Ok(c) => {
                                     trocar_taxa(TAXA_DE_APP, &mut motor);
                                     log::info!("Modo Escuta: ouvindo só {nome} (processo {pid})");
@@ -293,6 +320,20 @@ fn rodar(l: &Ligacao) {
             }
         }
 
+        if fonte == Fonte::Proprio
+            && let Some(p) = l.do_player.get()
+        {
+            if !matches!(captura, Some(Captando::Direto(_))) {
+                captura = Some(Captando::Direto(p.derivacao.clone()));
+                publicar(situacao, Situacao::Ouvindo { dispositivo: nome_da_fonte(&fonte) });
+            }
+            trocar_taxa(p.derivacao.taxa(), &mut motor);
+        }
+
+        let anel = match &captura {
+            Some(Captando::Direto(d)) => &d.anel,
+            _ => &*anel,
+        };
         let total = anel.total();
         if total != total_visto {
             total_visto = total;
@@ -311,5 +352,37 @@ fn rodar(l: &Ligacao) {
         if let Some(resto) = passo.checked_sub(agora.elapsed()) {
             std::thread::sleep(resto);
         }
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    /// A música do Player chega direto do tocador: nada do Windows no caminho, e o silêncio também é visto.
+    #[test]
+    fn a_musica_do_player_e_ouvida_direto() {
+        let derivacao: Arc<Derivacao> = Arc::default();
+        let escuta = Escuta::iniciar(Fonte::Proprio);
+        escuta.ligar_ao_player(derivacao.clone(), Arc::new(AtomicU32::new(1f32.to_bits())));
+        let mut n = 0u32;
+        let mut tocar = |por: Duration, nivel: f32| {
+            let ate = Instant::now() + por;
+            while Instant::now() < ate {
+                derivacao.anel.escrever((0..480).map(|_| {
+                    n += 1;
+                    (n as f32 * 0.02).sin() * nivel
+                }));
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        tocar(Duration::from_millis(1500), 0.5);
+        assert_eq!(escuta.situacao(), Situacao::Ouvindo { dispositivo: "o Player".into() });
+        let r = escuta.retrato();
+        assert!(r.gate > 0.5 && r.espectro.iter().any(|v| *v > 60), "ouve: {} {:?}", r.gate, r.espectro.iter().max());
+        // A saída parou de pedir som (a música foi parada): é silêncio, e não o último trecho para sempre.
+        std::thread::sleep(Duration::from_millis(2500));
+        let r = escuta.retrato();
+        assert!(r.gate < 0.5, "silêncio: {}", r.gate);
     }
 }

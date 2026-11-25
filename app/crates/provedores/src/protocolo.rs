@@ -70,6 +70,8 @@ pub enum CorpoDoPedido {
         chave: Option<Segredo>,
     },
     DesligarTocador,
+    /// Passa a usar o programa que `EstadoDoTocador::alternativa` ofereceu, e liga com ele.
+    TrocarTocador,
     /// Manda no que toca nele.
     Controlar(Acao),
     /// O Player vai fechar: o provedor responde `ok` e sai.
@@ -91,10 +93,19 @@ impl std::fmt::Debug for Segredo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "acao", rename_all = "kebab-case")]
 pub enum Acao {
-    Tocar { faixa: String },
+    Tocar {
+        faixa: String,
+    },
+    /// A que vem depois da de agora, perto do fim dela: o tocador passa para ela sozinho, sem intervalo (e sem `tocar`).
+    /// Só com [`EstadoDoTocador::adianta`].
+    Preparar {
+        faixa: String,
+    },
     Pausar,
     Continuar,
-    Ir { segundos: f64 },
+    Ir {
+        segundos: f64,
+    },
     Parar,
 }
 
@@ -114,9 +125,18 @@ pub struct EstadoDoTocador {
     pub erro: Option<String>,
     /// Já há uma chave guardada.
     pub tem_chave: bool,
+    /// A versão do programa em uso.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub versao: Option<String>,
+    /// O programa publicado não serve, e há este outro neste computador (a versão e de onde é): ver `TrocarTocador`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternativa: Option<String>,
     /// O programa que faz o som, para o visual ouvir só ele.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub processo: Option<String>,
+    /// Aceita a próxima antes do fim da de agora ([`Acao::Preparar`]).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub adianta: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tocando: Option<Tocando>,
 }
@@ -172,13 +192,64 @@ pub struct Resposta {
 #[serde(tag = "resposta", rename_all = "kebab-case")]
 pub enum CorpoDaResposta {
     Apresentacao(Apresentacao),
-    Itens { itens: Vec<Item> },
-    Prateleiras { prateleiras: Vec<Prateleira> },
+    Itens {
+        itens: Vec<Item>,
+    },
+    Prateleiras {
+        prateleiras: Vec<Prateleira>,
+    },
     Fonte(Fonte),
-    Erro { mensagem: String },
+    /// Algo não deu. `causa` (opcional) diz de que tipo foi o erro, para o Player decidir se tenta de novo ou troca
+    /// de jeito de tocar; provedor antigo não manda, e o Player trata como antes.
+    Erro {
+        mensagem: String,
+        #[serde(default, deserialize_with = "causa_conhecida", skip_serializing_if = "Option::is_none")]
+        causa: Option<Causa>,
+    },
     Ok,
     Conta(Conta),
     Tocador(Box<EstadoDoTocador>),
+}
+
+impl CorpoDaResposta {
+    /// Um erro sem causa (o que todo provedor antigo manda).
+    pub fn erro(mensagem: impl Into<String>) -> Self {
+        Self::Erro { mensagem: mensagem.into(), causa: None }
+    }
+
+    /// Um erro com causa: o Player escolhe o que fazer com ele.
+    pub fn erro_com(causa: Causa, mensagem: impl Into<String>) -> Self {
+        Self::Erro { mensagem: mensagem.into(), causa: Some(causa) }
+    }
+}
+
+/// Por que um pedido falhou, quando o provedor sabe classificar (F6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Causa {
+    /// A rede, um prazo: tentar de novo costuma resolver.
+    Rede,
+    /// O serviço pediu para esperar.
+    Limite,
+    /// A faixa não toca: saiu do catálogo ou não está no país desta conta. Só esta faixa muda de jeito.
+    Indisponivel,
+    /// Sem conta, ou a conta não serve para tocar.
+    SemConta,
+    /// A conta não é Premium (o áudio do serviço exige).
+    SemPremium,
+    /// O serviço recusou a sessão: entrar de novo.
+    SessaoRecusada,
+    /// O serviço recusou a chave que decifra o áudio desta faixa.
+    ChaveDeAudio,
+    /// Uma resposta que o provedor não entendeu (o serviço mudou).
+    Quebrado,
+}
+
+/// Lê a causa sem derrubar a resposta: um provedor mais novo pode mandar uma que este Player não conhece, e ela vale
+/// como "sem causa" (o erro continua chegando com a mensagem).
+fn causa_conhecida<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Causa>, D::Error> {
+    let valor = Option::<String>::deserialize(d)?;
+    Ok(valor.and_then(|v| serde_json::from_value(serde_json::Value::String(v)).ok()))
 }
 
 /// A conta do serviço, para os provedores que entram numa (capacidade `Conta`).
@@ -302,7 +373,7 @@ pub fn ler_resposta(linha: &str) -> Option<Resposta> {
     let valor: serde_json::Value = serde_json::from_str(linha).ok()?;
     let id = valor.get("id")?.as_u64()?;
     let corpo = serde_json::from_value::<CorpoDaResposta>(valor)
-        .unwrap_or_else(|e| CorpoDaResposta::Erro { mensagem: format!("resposta ilegível do provedor: {e}") });
+        .unwrap_or_else(|e| CorpoDaResposta::erro(format!("resposta ilegível do provedor: {e}")));
     Some(Resposta { id, corpo })
 }
 
@@ -389,6 +460,12 @@ mod testes {
         assert_eq!(ler_resposta(&linha), Some(r));
         let antigo: EstadoDoTocador = serde_json::from_str(r#"{"situacao":"pareando","nome":"X"}"#).expect("pouco");
         assert_eq!((antigo.situacao, antigo.tem_chave), (SituacaoDoTocador::Pareando, false));
+        assert_eq!((antigo.versao, antigo.alternativa, antigo.adianta), (None, None, false));
+        let preparar =
+            em_linha(&Pedido { id: 7, corpo: CorpoDoPedido::Controlar(Acao::Preparar { faixa: "x".into() }) });
+        assert_eq!(preparar, r#"{"id":7,"pedido":"controlar","acao":"preparar","faixa":"x"}"#);
+        let trocar = em_linha(&Pedido { id: 6, corpo: CorpoDoPedido::TrocarTocador });
+        assert_eq!(trocar, r#"{"id":6,"pedido":"trocar-tocador"}"#);
     }
 
     #[test]
@@ -457,7 +534,7 @@ mod testes {
                 duracao_s: Some(12.5),
             }),
             CorpoDaResposta::Fonte(Fonte::TocaSozinho { pid: 42 }),
-            CorpoDaResposta::Erro { mensagem: "não deu".into() },
+            CorpoDaResposta::erro("não deu"),
             CorpoDaResposta::Ok,
         ] {
             let r = Resposta { id: 9, corpo };
@@ -472,6 +549,26 @@ mod testes {
         assert_eq!(r.id, 5);
         assert!(matches!(r.corpo, CorpoDaResposta::Erro { .. }));
         assert_eq!(ler_resposta(r#"{"resposta":"ok"}"#), None);
+    }
+
+    #[test]
+    fn o_erro_com_causa_chega_e_o_sem_causa_tambem() {
+        let r = ler_resposta(r#"{"id":1,"resposta":"erro","mensagem":"sem chave","causa":"chave-de-audio"}"#)
+            .expect("lida");
+        assert_eq!(r.corpo, CorpoDaResposta::Erro { mensagem: "sem chave".into(), causa: Some(Causa::ChaveDeAudio) });
+        let antigo = ler_resposta(r#"{"id":2,"resposta":"erro","mensagem":"quebrou"}"#).expect("antiga");
+        assert_eq!(antigo.corpo, CorpoDaResposta::Erro { mensagem: "quebrou".into(), causa: None });
+        assert_eq!(em_linha(&CorpoDaResposta::erro("x")), r#"{"resposta":"erro","mensagem":"x"}"#);
+        let com = CorpoDaResposta::erro_com(Causa::SemPremium, "precisa de Premium");
+        assert_eq!(em_linha(&com), r#"{"resposta":"erro","mensagem":"precisa de Premium","causa":"sem-premium"}"#);
+    }
+
+    #[test]
+    fn causa_que_este_player_nao_conhece_vira_erro_comum() {
+        // Um provedor mais novo manda uma causa nova: a mensagem continua chegando, e o Player não quebra.
+        let r = ler_resposta(r#"{"id":3,"resposta":"erro","mensagem":"o serviço mudou","causa":"teletransporte"}"#)
+            .expect("lida");
+        assert_eq!(r.corpo, CorpoDaResposta::Erro { mensagem: "o serviço mudou".into(), causa: None });
     }
 
     #[test]

@@ -263,6 +263,12 @@ pub struct Player {
     pub(crate) volume_esticado: f32,
     pub(crate) pista_volume: Rc<Cell<Bounds<Pixels>>>,
     t_volume: f32,
+    /// O volume da música mudou há tantos segundos e ainda não foi guardado.
+    t_volume_salvo: Option<f32>,
+    /// A música do Player está muda (o resto do PC, não).
+    mudo_da_musica: bool,
+    /// O volume da música que toca por fora do Player.
+    mesa: crate::mesa::Mesa,
 
     pub(crate) secoes: Vec<Secao>,
     candidata: Option<(Rotulo, f32)>,
@@ -460,6 +466,9 @@ impl Player {
             volume_esticado: 0.0,
             pista_volume: Rc::default(),
             t_volume: 1.0,
+            t_volume_salvo: None,
+            mudo_da_musica: false,
+            mesa: crate::mesa::Mesa::iniciar(ajustes.volume_musica),
             secoes: Vec::new(),
             candidata: None,
             silencio_s: 0.0,
@@ -532,6 +541,8 @@ impl Player {
         player.atualizar_modulos();
         player.avisar_servicos();
         player.aplicar_reproducao();
+        player.aplicar_volume_da_musica();
+        player.escuta.ligar_ao_player(player.local.derivacao(), player.mesa.ganho());
         player.manter_o_player_local_andando(cx);
         player.configurar_letras();
         // Ajuda de teste: pastas de músicas (separadas por `;`) para já entrar na biblioteca ao abrir.
@@ -1318,10 +1329,14 @@ impl Player {
             }
         }
         let outro_mudou = self.ler_outro();
-        self.origem_local = self.escolher_origem();
+        let local = self.escolher_origem();
+        if std::mem::replace(&mut self.origem_local, local) != local {
+            self.ler_volume();
+        }
         self.origem_local_fora.store(self.origem_local, std::sync::atomic::Ordering::Release);
         // Com um app escolhido, a música local ainda move o visual: enquanto ela é a origem, a escuta ouve o Player.
         let processo = self.local.processo_externo();
+        self.mesa.programa(processo.clone());
         let fonte = fonte_de(&self.ajustes.escuta_app, self.origem_local, processo.as_deref());
         if fonte != self.fonte_pedida {
             self.escuta.escolher(fonte.clone());
@@ -1476,16 +1491,14 @@ impl Player {
     }
 }
 
-/// A fonte do Modo Escuta para o app escolhido nos ajustes (`""` = todo o som). Com um app escolhido e uma
-/// música local tocando, ouve o próprio Player, ou o `processo` que faz o som dela (o Soloist).
+/// A fonte do Modo Escuta para o app escolhido nos ajustes (`""` = todo o som). Com a música do Player, ouve só ela (antes do
+/// volume, que assim não muda o visual): a do tocador daqui, ou a do `processo` que a toca (o Soloist).
 fn fonte_de(exe: &str, local_tocando: bool, processo: Option<&str>) -> Fonte {
-    if let Some(processo) = processo.filter(|_| local_tocando && !exe.is_empty()) {
-        return Fonte::App(processo.to_string());
-    }
-    match (exe.is_empty(), local_tocando) {
-        (true, _) => Fonte::Tudo,
-        (false, true) => Fonte::Proprio,
-        (false, false) => Fonte::App(exe.to_string()),
+    match (local_tocando, processo) {
+        (true, Some(processo)) => Fonte::DoPlayer(processo.to_string()),
+        (true, None) => Fonte::Proprio,
+        (false, _) if exe.is_empty() => Fonte::Tudo,
+        (false, _) => Fonte::App(exe.to_string()),
     }
 }
 
@@ -1652,9 +1665,12 @@ mod testes_da_origem {
 
     #[test]
     fn o_visual_ouve_quem_faz_o_som() {
-        assert_eq!(fonte_de("", true, Some("soloist.exe")), Fonte::Tudo, "quem ouve tudo continua ouvindo tudo");
-        assert_eq!(fonte_de("opera.exe", true, Some("soloist.exe")), Fonte::App("soloist.exe".into()));
-        assert_eq!(fonte_de("opera.exe", true, None), Fonte::Proprio);
+        // A música do Player é ouvida sozinha: o volume dela não muda o visual, e o resto do PC não entra.
+        for exe in ["", "opera.exe"] {
+            assert_eq!(fonte_de(exe, true, Some("soloist.exe")), Fonte::DoPlayer("soloist.exe".into()));
+            assert_eq!(fonte_de(exe, true, None), Fonte::Proprio);
+        }
+        assert_eq!(fonte_de("", false, None), Fonte::Tudo);
         assert_eq!(fonte_de("opera.exe", false, Some("soloist.exe")), Fonte::App("opera.exe".into()));
     }
 

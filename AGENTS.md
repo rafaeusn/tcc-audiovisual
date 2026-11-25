@@ -1,7 +1,7 @@
 # AGENTS.md: contexto para qualquer agente de IA
 
 Leia isto antes de mexer no projeto. Vale para Cursor, Claude Code, Codex ou um chat novo. Atualizado em
-23/11/2026. **Responda sempre em português do Brasil.**
+24/11/2026. **Responda sempre em português do Brasil.**
 
 Detalhes de cada função do app: [`app/README.md`](app/README.md). História do projeto e decisões de produto:
 [`CONTEXTO-TCC.md`](CONTEXTO-TCC.md). Plano original da v1 (fases 0–6): [`docs/plano-v1.md`](docs/plano-v1.md).
@@ -65,7 +65,7 @@ Dentro de `app/`:
 ```bash
 cargo run -p player                      # abre o app (debug)
 cargo build --release -p player          # release (D:/Rust/target/release/player.exe)
-cargo test --workspace                   # 483 testes em 23/11/2026 (fora o `visual --test desenho`), todos passando
+cargo test --workspace                   # 526 testes em 25/11/2026 (fora o `visual --test desenho`), todos passando
 cargo clippy --workspace --all-targets   # tem que sair sem aviso
 cargo fmt --all
 cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
@@ -104,7 +104,7 @@ cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 | Crate | O que faz |
 | --- | --- |
 | `nucleo` | Erros, caminhos, `Ajustes` (TOML com gravação atômica), `Comando` (todas as ações do app), registro |
-| `audio` | Captura do som: loopback da saída padrão (`cpal`) ou de um app só (process loopback, `processo.rs`); anel sem trava; volume do sistema |
+| `audio` | Captura do som: loopback da saída padrão (`cpal`) ou de um app só (process loopback em ponto flutuante, `processo.rs`); anel sem trava; a `Derivacao` (a música do Player antes do volume); volume do sistema e o de um app no misturador (`volume.rs`) |
 | `analise` | FFT, descritores, ritmo (BPM e batida) e o diretor automático (port de `preview/director.js`) |
 | `sessao` | SMTC: "tocando agora", capa e controles; filtro por app (`Sessao::filtrar`) |
 | `visual` | Os visuais em wgpu: Spectral (262 mil partículas), Fluxo e Barras, mais o modo seguro |
@@ -119,7 +119,7 @@ cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 | `preanalise` | Pré-análise (porte de `preview/preanalysis.js`, em `pista.rs`): batidas por programação dinâmica, tempo forte, clareza do pulso, trechos por novidade, energia calibrada, drops e subida; tom (`tom.rs`); LUFS; o modo arquivo do diretor (`condutor.rs`); `cache::Cache` em `analises.db` (vale enquanto tamanho, data e `VERSAO` batem) |
 | `biblioteca` | Varre pastas, lê etiquetas e ReplayGain (`lofty`) e guarda no acervo SQLite (`faixas` com chave `(caminho, pasta)`, `playlists`, `playlist_itens`); consultas por `Filtro` (origem, busca, álbum, artista) |
 | `player` | O app em GPUI 0.2.2: estado em `app.rs`, telas em `ui/*.rs` |
-| `provedores/spotify` | O provedor do Spotify (F6, um programa à parte, embutido; o Soloist em `soloist/`): login pelo navegador com o Client ID público do librespot (`spotify.rs`), a conta e o refresh token cifrado (`conta.rs`), quem usa a porta 8898 (`porta.rs`); os dados pelo Pathfinder com a sessão (`pathfinder.rs`, `codigos.rs`), a conversão pura (`conversao.rs`) e as páginas (`dados.rs`). Compila só com `vergen` 9.0.6 no `Cargo.lock` |
+| `provedores/spotify` | O provedor do Spotify (F6, um programa à parte, embutido; o Soloist em `soloist/`): login pelo navegador com o Client ID público do librespot (`spotify.rs`, o fluxo com PKCE em `oauth.rs`), a conta e o refresh token cifrado (`conta.rs`), quem usa a porta 8898 (`porta.rs`); os dados pelo Pathfinder com a sessão (`pathfinder.rs`, `codigos.rs`), a conversão pura (`conversao.rs`) e as páginas (`dados.rs`). Compila só com `vergen` 9.0.6 no `Cargo.lock` |
 | `provedores/youtube-music` | O provedor do YouTube Music (um programa à parte, GPL-3.0-only por causa do `rustypipe`): metadados pelo `rustypipe`, áudio pelo cliente visionOS (`visionos.rs`). Embutido: o Player o acha ao lado do `player.exe` (`remoto::EMBUTIDOS`) |
 
 ### Princípio das threads
@@ -132,7 +132,9 @@ thread.** Pedidos seguem por canal (`mpsc`).
 ### Arquivos principais do `player`
 
 - `app.rs`: o `Player` (estado de tudo), `executar(Comando)`, `quadro()` (roda a cada frame), teclado.
-- `escuta.rs`: thread do Modo Escuta; `Fonte::{Tudo, App(exe), Proprio}`.
+- `escuta.rs`: thread do Modo Escuta; `Fonte::{Tudo, App(exe), Proprio, DoPlayer(exe)}`. Com uma música do Player, ouve só ela:
+  `Proprio` lê a `Derivacao` do tocador (antes do volume, sem o Windows); `DoPlayer` é o Soloist, com o ganho da mesa.
+- `mesa.rs`: o volume só da música que toca por fora (o Soloist), no misturador do Windows, e o ganho que o desfaz para o visual.
 - `local.rs`: player local (thread da biblioteca, tocador com a seguinte pré-carregada, SMTC via `souvlaki` com
   a capa).
 - `remoto.rs`: as músicas dos provedores (F1): uma thread por provedor instalado (`<dados>/provedores`), a busca
@@ -141,6 +143,7 @@ thread.** Pedidos seguem por canal (`mpsc`).
   antes de tocar (a de agora toca quando ele chega; a seguinte é resolvida antes, para entrar sem intervalo).
 - `preanalista.rs`: thread da pré-análise (prioridade: a de agora e as duas seguintes; depois a biblioteca, em
   prioridade baixa; análise da biblioteca interrompida quando chega prioridade).
+- `cadeia.rs`: o que fazer quando uma faixa de serviço não toca, pela causa do erro (tentar de novo, esperar ou pular).
 - `fila.rs`: a fila (aleatório que guarda a ordem original, repetir, a seguir, mover, tirar), só lógica e testada.
 - `ilha.rs`: a lógica da Ilha (formas, esperas para abrir e fechar, fila de avisos, medidas), testada; a vista é
   `ui/ilha.rs`, numa segunda janela GPUI (`WindowKind::PopUp`, fundo transparente, tamanho fixo da maior forma)
@@ -187,7 +190,8 @@ thread.** Pedidos seguem por canal (`mpsc`).
 
 - **Erro 4551 (Controle Inteligente de Aplicativos)** bloqueia de vez em quando um exe ou uma DLL de proc-macro
   recém-compilados ("can't find crate for X", "LoadLibraryExW ... 4551"). Solução: `cargo clean [--release] -p
-  <pacote>` e compilar de novo. **Confira sempre o código de saída do cargo**, porque um `| tail` esconde a falha
+  <pacote>` e compilar de novo. Se quase todas as bibliotecas somem de uma vez, o bloqueado é um proc-macro comum a elas
+  (em 25/11/2026, o `thiserror-impl`). **Confira sempre o código de saída do cargo**, porque um `| tail` esconde a falha
   e o exe antigo continua lá.
 - **O Rafael costuma deixar o Player aberto.** Para testar: renomeie o exe em uso
   (`D:/Rust/target/release/player.exe` → `player-em-uso.exe`), compile e abra uma cópia com `TCCPLAYER_DADOS`
@@ -211,6 +215,9 @@ thread.** Pedidos seguem por canal (`mpsc`).
 - **GPUI e o texto**: letras chegam por `WM_CHAR` → `EntityInputHandler`, registrado com `window.handle_input`
   só enquanto um campo está ativo.
 - Listas longas: `uniform_list` + `cx.processor` (só as linhas visíveis são montadas).
+- **Volume e visual**: a captura de um app vem **depois** do volume dele no misturador (medido: proporcional, até 0,00001, em ponto
+  flutuante; a mudança chega uns 50 ms depois). A `mesa` desfaz pelo **maior** volume dos últimos 80 ms: o visual pode piscar para baixo,
+  nunca estourar. Medindo no mesmo programa que toca, a conta sai ao quadrado (ele se ouve com o próprio volume): meça de outro processo.
 - O loopback do Windows para de entregar amostras quando nada toca: a escuta trata 80 ms sem amostra como
   silêncio.
 - Depois que a fila local acaba, o Windows guarda a última faixa do Player como "parada". `Local::e_resto`
@@ -393,9 +400,7 @@ motivo (`depois_de_perguntar`); as páginas do serviço são esquecidas quando a
 conta do Rafael: entrar pelo navegador, `conta.dpapi` guardada, reabrir e entrar sozinho, "Conectado como rafa ·
 Premium". Também conferido: Sair e a porta ocupada (por um programa de
 teste, no cartão e na Loja). Não conferido ao vivo: "Cancelar" com o navegador aberto (só o teste com a porta real, sem
-navegador), e uma conta gratuita. Ficou: o `librespot-oauth` aceita a primeira conexão na porta (uma
-ociosa do navegador prende o login; o certo é escrever a própria escuta), recusar no navegador mostra um erro em inglês, e
-`situacao` desconhecida invalida a apresentação.
+navegador), e uma conta gratuita. Ficou: `situacao` desconhecida invalida a apresentação. (O `librespot-oauth` saiu em 24/11.)
 
 **F6, parte 2 (23/11/2026)**, os dados: tudo pelo Pathfinder (`api-partner.spotify.com/pathfinder/v2/query`) com o portador
 do Login5 e o client token da sessão, **sem Client ID** (a sonda provou as 11 leituras na conta do Rafael; a reserva do
@@ -429,10 +434,37 @@ provedor. Conferido na cópia com a conta do Rafael, muda: as Curtidas e um arti
 a chave do Rafael (23/11/2026)**: baixou, o Windows não bloqueou, abriu, pareou, voltou sozinho à conta e a escuta achou o processo dele;
 mas o build 1.4.0.7 do Spotify (publicado no mesmo dia) cai com 0xc0000005 ao começar a tocar, sempre em `soloist.exe+0x2120d1`, também
 fora do Player, sem a API local, no modo de uma faixa e em todas as saídas de som (a pasta `D:/Rust/soloist-teste`; relato igual em
-crmne/spotifast#1412). Por isso um Soloist que cai duas vezes sem nunca ter tocado 20 s é dado por quebrado: não é mais aberto, o Match
-toca e outro build é procurado uma vez por dia (`Instalado::caiu`, `funcionou`). Falta ver tocar, pausar, pular, o fim e o visual com um
-build que funcione. Ficou: duas instâncias do Player na mesma pasta, trazer a posição ao cair para o Match, e o Soloist e o
+crmne/spotifast#1412). Um Soloist quebrado não é mais aberto, e o Match toca (regras no parágrafo de 24/11). Ficou: duas instâncias do Player na mesma pasta, trazer a posição ao cair para o Match, e o Soloist e o
 Spotifast abertos juntos (dois `soloist.exe` para a captura por nome).
+
+**F6, a branch do Rafael e o Soloist (24/11/2026)**: a `feat/spotify-audio-e-investigacao` (do Rafael) foi revista e o útil veio
+para o `main`, refeito; a parte `audio/` (tocar pelo librespot) ficou na branch. **Por que o Spotifast toca e o nosso não**: a versão.
+Ele usa o Soloist 1.3.10.51, baixado em 07/11; o Player baixou o 1.4.0.7, que cai. O servidor do Spotify só tem o último
+([`docs/spotify-investigacao-2026-11-24.md`](docs/spotify-investigacao-2026-11-24.md)). Agora (`soloist/instalar.rs`): volta ao build
+anterior (que fica guardado), dá por quebrado o que cai 2 vezes seguidas sem 15 s tocando ou 4 vezes no dia (só exceções do Windows
+contam, `motor::quebrou`), nunca abre o 1.4.0.7, só baixa se o pacote mudou (ETag), oferece copiar o Soloist do Spotifast
+(`EstadoDoTocador.alternativa`, `trocar-tocador`, "Usar esse Soloist") e confere a assinatura do Spotify antes de abrir
+(`assinatura.rs`). Login próprio (`oauth.rs`, sem `librespot-oauth`): uma conexão parada não prende mais a porta, o `state` é sempre
+conferido, e o id do aparelho é estável. Erro com `causa` (`Causa`, `nucleo::CausaDoProvedor`): sem rede, a faixa é tentada de novo e
+a fila para nela (`cadeia.rs`, `Local::falhou_o_endereco`). Conferido neste PC: achar, conferir e copiar o 1.3.10.51 do Spotifast (um
+teste `#[ignore]` em `instalar.rs`). **Tocou no Player do Rafael**: o Spotify publicou o 1.4.0.12 em
+24/11 às 21:02, o Player o baixou sozinho e ele tocou 80 min (umas 30 músicas) sem cair, com login, pausar, continuar, pular, o
+fim das faixas e o visual ouvindo só o Soloist. O fim de cada faixa deixava 1,2 a 1,6 s de silêncio (o Soloist diz `buffering` 0,95 s antes do fim e a
+posição para, com o som saindo: `leitura::na_cauda`); corrigido e medido em 25/11: de 0,70 a 0,87 s. **Troca sem intervalo (25/11)**:
+a 10 s do fim o Player manda `Acao::Preparar` com a próxima, o provedor a põe na fila do Spotify (`add_to_queue`, só com ela vazia) e
+o Soloist passa para ela sozinho (`Pedida::adiantar`, `passar_para`; `Local::avancou_no_externo`); pular ou parar antes a consome com
+`skip_next`. Conferido no Player do Rafael, quase mudo (4 trocas): a próxima começa de 30 a 50 ms depois do fim, com a fila e a tela
+andando juntas, também depois de pausar e continuar; pular nos últimos 10 s toca a certa e deixa a fila do Spotify vazia. Para testar sem
+incomodar: o volume só do Soloist pela API local (`set_volume`; o medidor não vê abaixo de 6). Não conferido ao vivo: o fim da fila (o
+que o Spotify emenda depois da última), o botão "Usar esse Soloist" na tela, tocar com o 1.3.10.51 pelo Player e outro aparelho tomando a vez.
+
+**Volume só da música (25/11/2026, a pedido do Rafael)**: com a música do Player na tela, a barra do dock, `Ctrl ↑/↓` e `M` mexem só
+nela (`ajustes.volume_musica`; o ganho é o quadrado da barra): no tocador daqui, na saída (`saida::preencher`, aos poucos, sem estalo);
+no Soloist, pela sessão dele no misturador (`mesa.rs`, só o processo que o Player abriu). O visual não sente (ver "Volume e visual" na
+seção 6), e a escuta ouve só a música do Player, mesmo com "todo o som". Conferido: na cópia muda, uma música local pré-analisada
+continua "Intensa" 0,84 com a barra em 100, em 9 e no mudo; no Soloist do Rafael, quase mudo, o que se captura com o volume do programa
+em 100%, 25%, 1%, 0,01% e 0,001% e o ganho da conta é igual. O Rafael testou no Player dele, no Spotify: ficou bom.
+Não conferido: a barra seguindo o misturador do Windows, e a Ilha.
 
 **F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
 LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
@@ -583,7 +615,7 @@ O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`
 | F3 | Provedor YouTube Music | Feita em 23/11/2026: `app/provedores/youtube-music`, embutido; metadados pelo `rustypipe` e áudio pelo cliente visionOS, como MixMusic e limusic ([`docs/f3-youtube-music.md`](docs/f3-youtube-music.md)) |
 | F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | Feita em 22/11/2026 (`letras::fontes`, `ttml`, `traducao`; Configurações › Letras; `ui/letra_cheia.rs`); ficaram estilos e bolinha, cartão e a letra no visual ([`docs/f4-letras.md`](docs/f4-letras.md)) |
 | F5 | **A Ilha** (Dynamic Island): janela flutuante no topo, estados repouso/alerta/expandida | Feita em 16/11/2026 (ver seção 7) |
-| F6 | Provedor Spotify: o Soloist ou o Match pelo YouTube Music | Feita em 23/11/2026, em 4 partes: login, dados, Match e Soloist ([`docs/f6-spotify.md`](docs/f6-spotify.md)). O Soloist ligou e pareou, mas o build 1.4.0.7 do Spotify cai ao tocar (seção 7); ficaram Canvas, as letras do Spotify e o ISRC |
+| F6 | Provedor Spotify: o Soloist ou o Match pelo YouTube Music | Feita em 23/11/2026, em 4 partes: login, dados, Match e Soloist ([`docs/f6-spotify.md`](docs/f6-spotify.md)). O Soloist toca (o 1.4.0.12; o 1.4.0.7 cai, e o Player volta ao anterior ou oferece o do Spotifast, seção 7); ficaram Canvas, as letras do Spotify e o ISRC |
 | F7 | Modo Escuta preciso + Shazam (SongRec): reconhecer, pré-analisar e alinhar ao som ao vivo | |
 | F8 | Som e fila: crossfade no compasso, modo DJ, smart shuffle, lixeira, A-B, timer, AutoEq | |
 | F9 | Juntos e controle: salas, controle pelo celular, MCP, overlay OBS, Chromecast | |
