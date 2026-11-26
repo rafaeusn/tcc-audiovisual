@@ -34,6 +34,8 @@ pub enum Falha {
     /// O Spotify trocou o código da consulta, e o novo não foi achado (ou ainda está sendo procurado).
     Codigo,
     Rede(String),
+    /// O prazo do pedido inteiro acabou antes desta resposta.
+    Prazo,
     /// Uma resposta que não dá para usar.
     Resposta(String),
 }
@@ -47,6 +49,7 @@ impl Falha {
                 "O Spotify mudou este pedido, e o Player ainda não achou o novo. Tente de novo mais tarde.".into()
             }
             Self::Rede(m) => format!("Sem resposta do Spotify ({m})."),
+            Self::Prazo => "Sem resposta do Spotify (demorou demais).".into(),
             Self::Resposta(m) => format!("O Spotify respondeu de um jeito inesperado ({m})."),
         }
     }

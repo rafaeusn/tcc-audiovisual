@@ -625,10 +625,20 @@ baixo); no empilhado a cena é a da janela inteira (o X não salta). O esticão 
 trechos com acento estragado (desde o commit anterior), consertados. "A lista que falha inteira" já estava resolvido pela
 `cadeia.rs` (24/11); tocar a seguir e pôr na fila ficam no ⋯ (que o Tab alcança). Conferido na cópia muda com o YouTube Music e o
 Spotify: Tab rolando o Início em 958 × 560 até um cartão da prateleira, a página larga indo e voltando (fotos no meio do caminho),
-o X no empilhado em 410 (a forma encolhe sem salto) e o Início do empilhado. Não conferido: a segunda cópia chamando a primeira (traria
-a janela para a frente, roubando o foco), renomear na tela, o coração com cliques rápidos, as fotos saindo da placa (só o teste da
-lógica), a posição ao cair para o Match, o Spotifast aberto junto, o aviso de corte com uma lista real, o volume em 125% e o CI rodando
-no GitHub (precisa do push). O roteiro da sessão com o Rafael está em [`docs/conferencia-fase1.md`](docs/conferencia-fase1.md).
+o X no empilhado em 410 (a forma encolhe sem salto) e o Início do empilhado. O CI passou no GitHub (26/11/2026: 25 min na primeira
+vez, 3 min com o cache). **Conferência feita pelo Claude (26/11/2026)**, sem mexer no mouse do Rafael: 21 itens, todos certos, e 5
+achados, em [`docs/conferencia-fase1.md`](docs/conferencia-fase1.md) (os principais: playlist do Spotify de 10 mil músicas que às
+vezes estoura o prazo de 16 s na primeira vez; a memória da placa cresce com as capas pequenas, que o app guarda). Truques novos de
+teste: `Ctrl`/`Alt` sem tocar no teclado (`AttachThreadInput` com a fila da cópia + `SetKeyboardState`, depois `PostMessage`;
+com Alt, `WM_SYSKEYDOWN`); texto Unicode só com `PostMessageW` (a versão ANSI corta o caractere); a capa das sessões de mídia
+pela WinRT (`GlobalSystemMediaTransportControlsSessionManager`). Ficou para o Rafael: o som de verdade, a janela de escolher pasta,
+o menu da bandeja, o Discord, um IME de verdade, o Soloist caindo e o Spotifast junto. **Os dois achados, consertados no mesmo
+dia:** o provedor do Spotify deixa até 6 pedidos sempre em andamento (`PelaSessao::consultar`, antes levas de 4) e, se o prazo
+acaba no meio de uma lista de faixas (`Lista::corta_no_prazo`: playlist, Curtidas, álbum), devolve as páginas que chegaram
+(`Falha::Prazo`), com o total sem as faixas escondidas (`em_paginas_e_total`; as Curtidas agora mandam o total); a playlist de
+9.999 abriu na primeira vez em menos de 5 s. As capas das páginas saem da placa 30 s depois de saírem da tela
+(`capas::ImagensNaTela`, `CAPA_FICA`; as fotos largas, `FUNDO_FICA`, 5 s): 4 artistas foram de 304 para 316 MB, antes de 384
+para 1516. Na versão de depuração, o registro diz cada imagem solta.
 
 **F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
 LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
@@ -774,7 +784,7 @@ acima) e a remodelagem.
 
 | # | Fase | Situação |
 | --- | --- | --- |
-| 1 | Arrumar a casa: CI no GitHub, os consertos pequenos e uma sessão de conferência com o Rafael | Feita em 26/11/2026; falta a sessão de conferência ([roteiro](docs/conferencia-fase1.md)) e ver o CI rodar no GitHub |
+| 1 | Arrumar a casa: CI no GitHub, os consertos pequenos e uma sessão de conferência com o Rafael | Feita em 26/11/2026 (o CI passa; a conferência do Claude achou 2 defeitos, já consertados, [roteiro](docs/conferencia-fase1.md)); falta o que só o Rafael confere |
 | 2 | Modo Escuta preciso + reconhecer (a F7 do v2): SongRec, alinhar ao som ao vivo, etiquetar as locais, compassos que não são 4/4 | |
 | 3 | Mais provedores (a F11 do v2): cache de pedaços, rádio, SoundCloud, rádios ao vivo, podcasts, conta do YouTube Music, sem perdas, Deezer | |
 | 4 | Letras 3: fontes novas, estilos e bolinha, cartão, editor de sincronia | |

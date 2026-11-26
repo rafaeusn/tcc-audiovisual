@@ -22,7 +22,7 @@ const PRAZO_DA_SESSAO: Duration = Duration::from_secs(30);
 /// Quanto o portador e o client token podem demorar.
 const PRAZO_DO_ACESSO: Duration = Duration::from_secs(8);
 /// Quantas consultas ao mesmo tempo.
-const PEDIDOS_POR_VEZ: usize = 4;
+const PEDIDOS_POR_VEZ: usize = 6;
 /// Quanto esperar o plano (o atributo `type`, que chega logo depois de entrar) e o nome do perfil.
 const PRAZO_DO_PERFIL: Duration = Duration::from_secs(5);
 /// A frase para a porta do retorno ocupada, com o programa que a usa quando dá para saber.
@@ -147,40 +147,47 @@ fn falha_do_acesso(tipo: ErrorKind) -> crate::pathfinder::Falha {
 impl Consultas for PelaSessao {
     fn consultar(&self, pedidos: &[Pedido], ate: Instant) -> Vec<Result<serde_json::Value, crate::pathfinder::Falha>> {
         use crate::pathfinder::Falha;
+        let prontas: std::sync::Mutex<Vec<Result<serde_json::Value, Falha>>> = std::sync::Mutex::default();
         let todas = async {
             let acesso = match self.acesso().await {
                 Ok(a) => Arc::new(a),
-                Err(f) => return pedidos.iter().map(|_| Err(f.clone())).collect(),
+                Err(f) => {
+                    let mut p = prontas.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    p.extend(pedidos.iter().map(|_| Err(f.clone())));
+                    return;
+                }
             };
-            let mut respostas = Vec::with_capacity(pedidos.len());
-            // Alguns por vez, e cada leva só começa se a anterior deu certo (um "pedidos demais" não é martelado).
-            for leva in pedidos.chunks(PEDIDOS_POR_VEZ) {
-                let tarefas: Vec<_> = leva
-                    .iter()
-                    .map(|(op, variaveis)| {
-                        let (pf, acesso) = (self.pathfinder.clone(), acesso.clone());
-                        let (op, variaveis) = (*op, variaveis.clone());
-                        tokio::spawn(async move { pf.consultar(&acesso, op, &variaveis).await })
-                    })
-                    .collect();
-                for t in tarefas {
-                    let caiu = || Falha::Resposta("o pedido parou no meio".into());
-                    respostas.push(t.await.unwrap_or_else(|_| Err(caiu())));
+            // Sempre até PEDIDOS_POR_VEZ em andamento (um sai, o próximo entra), na ordem; depois de um erro, nenhum
+            // pedido novo sai (um "pedidos demais" não é martelado).
+            let mut andando = std::collections::VecDeque::new();
+            let mut proximo = 0;
+            let mut falhou = None;
+            loop {
+                while falhou.is_none() && proximo < pedidos.len() && andando.len() < PEDIDOS_POR_VEZ {
+                    let (op, variaveis) = &pedidos[proximo];
+                    let (pf, acesso) = (self.pathfinder.clone(), acesso.clone());
+                    let (op, variaveis) = (*op, variaveis.clone());
+                    andando.push_back(tokio::spawn(async move { pf.consultar(&acesso, op, &variaveis).await }));
+                    proximo += 1;
                 }
-                if let Some(f) = respostas.iter().find_map(|r| r.as_ref().err().cloned()) {
-                    respostas.resize_with(pedidos.len(), || Err(f.clone()));
-                    break;
+                let Some(tarefa) = andando.pop_front() else { break };
+                let caiu = || Falha::Resposta("o pedido parou no meio".into());
+                let resposta = tarefa.await.unwrap_or_else(|_| Err(caiu()));
+                if let (Err(f), None) = (&resposta, &falhou) {
+                    falhou = Some(f.clone());
                 }
+                prontas.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(resposta);
             }
-            respostas
         };
-        // Passado o prazo, ninguém lê a resposta: o que já saiu termina sozinho, e o pedido seguinte não espera.
+        // Passado o prazo, ninguém lê o resto: o que já saiu termina sozinho, e o pedido seguinte não espera. As
+        // respostas que chegaram valem (as primeiras páginas de uma lista enorme); as outras são "demorou demais".
         self.real.rt.block_on(async {
-            match tokio::time::timeout_at(ate.into(), todas).await {
-                Ok(respostas) => respostas,
-                Err(_) => pedidos.iter().map(|_| Err(Falha::Rede("demorou demais".into()))).collect(),
-            }
-        })
+            let _ = tokio::time::timeout_at(ate.into(), todas).await;
+        });
+        let mut respostas = prontas.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let falha = respostas.iter().find_map(|r| r.as_ref().err().cloned()).unwrap_or(Falha::Prazo);
+        respostas.resize_with(pedidos.len(), || Err(falha.clone()));
+        respostas
     }
 }
 

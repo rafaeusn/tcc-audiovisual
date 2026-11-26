@@ -60,6 +60,9 @@ struct Lista {
     op: &'static str,
     por_pagina: u32,
     maximo: u32,
+    /// Se o prazo acabar no meio, vale o que já chegou (a página mostra "N de M" pelo total). Só nas listas de
+    /// faixas que levam o total junto; nas outras, cortada pareceria inteira.
+    corta_no_prazo: bool,
 }
 
 impl Dados {
@@ -92,7 +95,7 @@ impl Dados {
     }
 
     /// Todas as páginas, em ordem, até `maximo` itens. Uma que falha (ou vem vazia no meio) derruba a lista: cortada,
-    /// ela pareceria inteira.
+    /// ela pareceria inteira. A exceção é o prazo acabar numa lista que leva o total ([`Lista::corta_no_prazo`]).
     fn em_paginas<T>(
         &self,
         lista: &Lista,
@@ -100,6 +103,18 @@ impl Dados {
         variaveis: impl Fn(u32) -> Value,
         ler: impl Fn(&Value) -> Result<Pagina<T>, String>,
     ) -> Result<Vec<T>, String> {
+        self.em_paginas_e_total(lista, ate, variaveis, ler).map(|(itens, _)| itens)
+    }
+
+    /// [`Self::em_paginas`], com quantos a lista tem ao todo, sem as que o Player esconde entre as que vieram (as que
+    /// não tocam): inteira, o total é igual ao que veio.
+    fn em_paginas_e_total<T>(
+        &self,
+        lista: &Lista,
+        ate: Instant,
+        variaveis: impl Fn(u32) -> Value,
+        ler: impl Fn(&Value) -> Result<Pagina<T>, String>,
+    ) -> Result<(Vec<T>, u32), String> {
         let primeira = ler(&self.uma(lista.op, variaveis(0), ate)?)?;
         if primeira.vieram == 0 && primeira.total > 0 {
             return Err(CORTADA.into());
@@ -110,16 +125,24 @@ impl Dados {
             .into_iter()
             .map(|de| (lista.op, variaveis(de)))
             .collect();
-        let mut itens = primeira.itens;
+        let (mut itens, total, mut vieram) = (primeira.itens, primeira.total, primeira.vieram);
+        let demorou = Falha::Prazo.frase();
         for resposta in self.consultar(&resto, ate) {
-            let pagina = ler(&resposta?)?;
+            let resposta = match resposta {
+                // As páginas chegam em ordem: as que vieram antes do prazo valem, sem buracos.
+                Err(e) if lista.corta_no_prazo && e == demorou => break,
+                outra => outra?,
+            };
+            let pagina = ler(&resposta)?;
             if pagina.vieram == 0 {
                 return Err(CORTADA.into());
             }
+            vieram += pagina.vieram;
             itens.extend(pagina.itens);
         }
+        let escondidas = vieram.saturating_sub(itens.len() as u32);
         itens.truncate(lista.maximo as usize);
-        Ok(itens)
+        Ok((itens, total.saturating_sub(escondidas)))
     }
 
     pub fn buscar(&self, texto: &str, limite: u32) -> Result<Vec<Item>, String> {
@@ -149,7 +172,7 @@ impl Dados {
 
     pub fn album(&self, id: &str) -> Result<ComDetalhe, String> {
         conferir(id)?;
-        let lista = Lista { op: "getAlbum", por_pagina: POR_PAGINA_DE_ALBUM, maximo: MAXIMO };
+        let lista = Lista { op: "getAlbum", por_pagina: POR_PAGINA_DE_ALBUM, maximo: MAXIMO, corta_no_prazo: true };
         let pagina = |de: u32| json!({"uri": format!("spotify:album:{id}"), "locale": "", "offset": de, "limit": POR_PAGINA_DE_ALBUM});
         self.com_detalhe(&lista, pagina, conversao::album, conversao::detalhe_do_album)
     }
@@ -163,11 +186,14 @@ impl Dados {
         detalhar: impl Fn(&Value) -> Detalhe,
     ) -> Result<ComDetalhe, String> {
         let detalhe = std::cell::OnceCell::new();
-        let faixas = self.em_paginas(lista, Self::prazo(), variaveis, |v| {
+        let (faixas, total) = self.em_paginas_e_total(lista, Self::prazo(), variaveis, |v| {
             detalhe.get_or_init(|| detalhar(v));
             ler(v)
         })?;
-        Ok((em_itens(faixas), detalhe.into_inner().unwrap_or_default()))
+        let mut detalhe = detalhe.into_inner().unwrap_or_default();
+        // O total sem as escondidas: inteira, a página não avisa nada; cortada (pelo máximo ou pelo prazo), diz quantas.
+        detalhe.total = Some(total);
+        Ok((em_itens(faixas), detalhe))
     }
 
     /// As populares e os lançamentos. Sem os lançamentos, as populares valem sozinhas.
@@ -183,6 +209,7 @@ impl Dados {
             op: "queryArtistDiscographyAll",
             por_pagina: POR_PAGINA_DA_DISCOGRAFIA,
             maximo: MAXIMO_DE_LANCAMENTOS,
+            corta_no_prazo: false,
         };
         let pagina =
             |de: u32| json!({"uri": endereco, "offset": de, "limit": POR_PAGINA_DA_DISCOGRAFIA, "order": "DATE_DESC"});
@@ -197,13 +224,15 @@ impl Dados {
     pub fn playlist(&self, id: &str) -> Result<ComDetalhe, String> {
         let ate = Self::prazo();
         if id == conversao::CURTIDAS {
-            let lista = Lista { op: "fetchLibraryTracks", por_pagina: POR_PAGINA, maximo: MAXIMO };
+            let lista =
+                Lista { op: "fetchLibraryTracks", por_pagina: POR_PAGINA, maximo: MAXIMO, corta_no_prazo: true };
             let pagina = |de: u32| json!({"offset": de, "limit": POR_PAGINA});
-            let faixas = self.em_paginas(&lista, ate, pagina, conversao::curtidas)?;
-            return Ok((em_itens(faixas), Detalhe::default()));
+            let (faixas, total) = self.em_paginas_e_total(&lista, ate, pagina, conversao::curtidas)?;
+            // O total vai junto: se o prazo cortou a lista, a página diz quantas faltam.
+            return Ok((em_itens(faixas), Detalhe { total: Some(total), ..Detalhe::default() }));
         }
         conferir(id)?;
-        let lista = Lista { op: "fetchPlaylist", por_pagina: POR_PAGINA, maximo: MAXIMO };
+        let lista = Lista { op: "fetchPlaylist", por_pagina: POR_PAGINA, maximo: MAXIMO, corta_no_prazo: true };
         let pagina = |de: u32| {
             json!({"uri": format!("spotify:playlist:{id}"), "offset": de, "limit": POR_PAGINA,
                 "enableWatchFeedEntrypoint": false})
@@ -213,7 +242,12 @@ impl Dados {
 
     /// As playlists, os álbuns e os artistas da conta, na ordem do Spotify, com as Músicas Curtidas primeiro.
     pub fn biblioteca(&self) -> Result<Vec<Item>, String> {
-        let lista = Lista { op: "libraryV3", por_pagina: POR_PAGINA_DA_BIBLIOTECA, maximo: MAXIMO_DA_BIBLIOTECA };
+        let lista = Lista {
+            op: "libraryV3",
+            por_pagina: POR_PAGINA_DA_BIBLIOTECA,
+            maximo: MAXIMO_DA_BIBLIOTECA,
+            corta_no_prazo: false,
+        };
         let pagina = |de: u32| {
             json!({
                 "filters": [], "order": null, "textFilter": "",
@@ -322,6 +356,61 @@ mod testes {
     fn playlist_enorme_para_no_teto() {
         let (d, _, _) = dados("enorme", Falso::default(), |_, v| Ok(pagina_de_playlist(v, 9000)));
         assert_eq!(d.playlist("x").expect("playlist").0.len(), MAXIMO as usize);
+    }
+
+    #[test]
+    fn o_prazo_no_meio_deixa_as_paginas_que_chegaram_com_o_total() {
+        // Antes, uma playlist de 10 mil faixas inteira dava "demorou demais" quando o prazo acabava na 15ª página.
+        let (d, _, _) = dados("prazo", Falso::default(), |_, v| match v["offset"].as_u64() {
+            Some(de) if de >= 1000 => Err(Falha::Prazo),
+            _ => Ok(pagina_de_playlist(v, 9999)),
+        });
+        let (itens, detalhe) = d.playlist("x").expect("vale o que chegou");
+        assert_eq!(itens.len(), 1000);
+        assert_eq!(detalhe.total, Some(9999), "a página diz quantas faltam");
+        // Nas Curtidas também, com o total junto.
+        let (d, _, _) = dados("prazo-curtidas", Falso::default(), |_, v| match v["offset"].as_u64() {
+            Some(de) if de >= 300 => Err(Falha::Prazo),
+            _ => {
+                let de = v["offset"].as_u64().unwrap_or(0) as usize;
+                let itens: Vec<Value> =
+                    (de..900.min(de + 100)).map(|i| json!({"track": {"data": faixa(i), "_uri": ""}})).collect();
+                Ok(json!({"me": {"library": {"tracks": {"totalCount": 900, "items": itens}}}}))
+            }
+        });
+        let (itens, detalhe) = d.playlist(conversao::CURTIDAS).expect("curtidas");
+        assert_eq!((itens.len(), detalhe.total), (300, Some(900)));
+    }
+
+    #[test]
+    fn o_prazo_na_biblioteca_e_erro() {
+        // A lista da biblioteca não leva total para a página: cortada, ela pareceria inteira.
+        let (d, _, _) = dados("prazo-biblioteca", Falso::default(), |_, v| match v["offset"].as_u64() {
+            Some(de) if de >= 50 => Err(Falha::Prazo),
+            _ => {
+                let itens: Vec<Value> = (0..50)
+                    .map(|i| json!({"item": {"data": {"__typename": "Playlist", "uri": format!("spotify:playlist:p{i}"), "name": "L"}}}))
+                    .collect();
+                Ok(json!({"me": {"libraryV3": {"totalCount": 120, "items": itens}}}))
+            }
+        });
+        assert!(d.biblioteca().is_err());
+    }
+
+    #[test]
+    fn playlist_inteira_com_faixas_que_nao_tocam_nao_parece_cortada() {
+        // 250 itens, 15 deles episódios (que o Player não mostra): o total vai como 235, igual ao que aparece.
+        let (d, _, _) = dados("escondidas", Falso::default(), |_, v| {
+            let mut p = pagina_de_playlist(v, 250);
+            if let Some(itens) = p["playlistV2"]["content"]["items"].as_array_mut() {
+                for item in itens.iter_mut().take(5) {
+                    item["itemV2"]["data"]["__typename"] = json!("Episode");
+                }
+            }
+            Ok(p)
+        });
+        let (itens, detalhe) = d.playlist("x").expect("playlist");
+        assert_eq!((itens.len(), detalhe.total), (235, Some(235)));
     }
 
     #[test]

@@ -390,7 +390,7 @@ pub struct Player {
     /// Depois de um Tab: o elemento focado rola a página até aparecer.
     pub(crate) rolar_ao_foco: Rc<Cell<bool>>,
     /// Os fundos grandes desenhados, para soltar da placa os que saíram da tela.
-    pub(crate) fundos_na_tela: RefCell<crate::capas::FundosNaTela>,
+    pub(crate) imagens_na_tela: RefCell<crate::capas::ImagensNaTela>,
     /// Quando o estado (som, mídia, threads) foi atualizado pela última vez: a Ilha também atualiza, e a guarda
     /// evita rodar duas vezes no mesmo quadro.
     estado_em: Instant,
@@ -585,7 +585,7 @@ impl Player {
             foco_pelo_teclado: false,
             focos: RefCell::default(),
             rolar_ao_foco: Rc::default(),
-            fundos_na_tela: RefCell::default(),
+            imagens_na_tela: RefCell::default(),
             estado_em: agora,
             ilha: None,
             abrindo_ilha: false,
@@ -1543,15 +1543,21 @@ impl Player {
         }
     }
 
-    /// Solta da placa de vídeo (e do cache de imagens do GPUI) os fundos grandes que saíram da tela.
-    fn soltar_fundos(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let vencidos = self.fundos_na_tela.borrow_mut().vencidos(Instant::now());
+    /// Solta da placa de vídeo (e do cache de imagens do GPUI) as capas e os fundos que saíram da tela.
+    fn soltar_imagens(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let vencidos = self.imagens_na_tela.borrow_mut().vencidas(Instant::now());
         for arquivo in vencidos {
+            let nome = arquivo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let recurso = gpui::Resource::from(arquivo);
-            if let Some(Ok(imagem)) = window.get_asset::<gpui::ImgResourceLoader>(&recurso, cx) {
-                cx.drop_image(imagem, Some(window));
-            }
+            let solta = match window.get_asset::<gpui::ImgResourceLoader>(&recurso, cx) {
+                Some(Ok(imagem)) => {
+                    cx.drop_image(imagem, Some(window));
+                    true
+                }
+                _ => false,
+            };
             cx.remove_asset::<gpui::ImgResourceLoader>(&recurso);
+            log::debug!("imagem {nome} fora da tela: {}", if solta { "solta da placa" } else { "não estava na placa" });
         }
     }
 
@@ -1784,7 +1790,7 @@ impl Render for Player {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.quadro(window);
         self.focos.borrow_mut().preparar(cx);
-        self.soltar_fundos(window, cx);
+        self.soltar_imagens(window, cx);
         self.sincronizar_ilha(window, cx);
         let c = self.cores();
         let a = self.arranjo;

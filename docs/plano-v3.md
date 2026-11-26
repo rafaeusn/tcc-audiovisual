@@ -1,7 +1,8 @@
 # Plano v3: o que falta, do zero
 
-Feito e **aprovado em 26/11/2026**. **Fase 1 feita em 26/11/2026** (falta a sessão de conferência,
-[`conferencia-fase1.md`](conferencia-fase1.md), e ver o CI rodar no GitHub). Substitui a tabela de fases do [plano v2](plano-v2.md) (seção 7)
+Feito e **aprovado em 26/11/2026**. **Fase 1 feita em 26/11/2026** (o CI passa no GitHub; a conferência está em
+[`conferencia-fase1.md`](conferencia-fase1.md), com 2 defeitos achados e consertados, e o que só o Rafael
+confere). Substitui a tabela de fases do [plano v2](plano-v2.md) (seção 7)
 a partir da F7. O v2 continua valendo como pesquisa: a varredura dos repositórios (seção 3), a arquitetura dos
 provedores (seção 6) e os riscos (seção 8).
 

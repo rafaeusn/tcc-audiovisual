@@ -123,7 +123,7 @@ impl Player {
     fn fundo_de(&self, url: Option<&str>, tipo: TipoDeFundo) -> Option<Fundo> {
         let fundo = url.filter(|u| !u.is_empty()).and_then(|u| self.capas.fundo(u, tipo));
         if let Some(f) = &fundo {
-            self.fundos_na_tela.borrow_mut().visto(&f.arquivo, std::time::Instant::now());
+            self.imagens_na_tela.borrow_mut().vista(&f.arquivo, std::time::Instant::now(), crate::capas::FUNDO_FICA);
         }
         fundo
     }

@@ -133,14 +133,15 @@ impl Player {
         match url.and_then(|u| self.capas.arquivo_para(u, lado)) {
             // Enquanto decodifica, e se o arquivo não for uma imagem que dê para ler, fica a silhueta.
             // O raio é da imagem: o GPUI só recorta os filhos em retângulo.
-            Some(arquivo) => caixa.child(
+            Some(arquivo) => caixa.child({
+                self.imagens_na_tela.borrow_mut().vista(&arquivo, std::time::Instant::now(), crate::capas::CAPA_FICA);
                 img(arquivo)
                     .size(px(lado))
                     .rounded(px(raio))
                     .object_fit(ObjectFit::Cover)
                     .with_loading(silhueta)
-                    .with_fallback(silhueta),
-            ),
+                    .with_fallback(silhueta)
+            }),
             None => caixa.child(silhueta()),
         }
     }

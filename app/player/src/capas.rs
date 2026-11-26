@@ -356,26 +356,34 @@ fn baixar(url: &str, pasta: &std::path::Path) -> Option<PathBuf> {
     }
 }
 
-/// Quanto um fundo fica na placa de vídeo depois de sair da tela (voltar à página logo depois não o recarrega).
-const SOLTAR_DEPOIS: Duration = Duration::from_secs(5);
+/// Quanto um fundo grande fica na placa de vídeo depois de sair da tela (voltar à página logo depois não o recarrega).
+pub const FUNDO_FICA: Duration = Duration::from_secs(5);
+/// Quanto uma capa fica: são pequenas e muitas, e voltar a uma página é comum.
+pub const CAPA_FICA: Duration = Duration::from_secs(30);
 
-/// Os fundos grandes desenhados. O GPUI guarda toda imagem desenhada na placa até o fim; os que saem da tela por
-/// [`SOLTAR_DEPOIS`] são soltos (fotos largas de artista têm até 1280 px).
+/// As imagens desenhadas nas páginas. O GPUI guarda toda imagem desenhada na placa até o fim: numa sessão longa, cada
+/// página aberta deixava as capas e as fotos lá (uns 4 MB por artista). As que saem da tela pelo tempo de cada uma
+/// ([`FUNDO_FICA`], [`CAPA_FICA`]) são soltas.
 #[derive(Default)]
-pub struct FundosNaTela {
-    vistos: HashMap<PathBuf, Instant>,
+pub struct ImagensNaTela {
+    vistas: HashMap<PathBuf, (Instant, Duration)>,
 }
 
-impl FundosNaTela {
-    pub fn visto(&mut self, arquivo: &std::path::Path, agora: Instant) {
-        self.vistos.insert(arquivo.to_path_buf(), agora);
+impl ImagensNaTela {
+    pub fn vista(&mut self, arquivo: &std::path::Path, agora: Instant, fica: Duration) {
+        match self.vistas.get_mut(arquivo) {
+            Some(v) => *v = (agora, v.1.max(fica)),
+            None => {
+                self.vistas.insert(arquivo.to_path_buf(), (agora, fica));
+            }
+        }
     }
 
-    /// Os que não são desenhados há um tempo (e esquece deles).
-    pub fn vencidos(&mut self, agora: Instant) -> Vec<PathBuf> {
+    /// As que não são desenhadas há mais que o tempo delas (e esquece delas).
+    pub fn vencidas(&mut self, agora: Instant) -> Vec<PathBuf> {
         let mut fora = Vec::new();
-        self.vistos.retain(|arquivo, visto| {
-            let fica = agora.saturating_duration_since(*visto) < SOLTAR_DEPOIS;
+        self.vistas.retain(|arquivo, (vista, fica)| {
+            let fica = agora.saturating_duration_since(*vista) < *fica;
             if !fica {
                 fora.push(arquivo.clone());
             }
@@ -391,17 +399,21 @@ mod testes {
     use super::*;
 
     #[test]
-    fn fundo_que_sai_da_tela_e_solto_depois_de_um_tempo() {
-        let mut f = FundosNaTela::default();
+    fn imagem_que_sai_da_tela_e_solta_depois_do_tempo_dela() {
+        let mut f = ImagensNaTela::default();
         let t = Instant::now();
-        let (a, b) = (PathBuf::from("a.larga"), PathBuf::from("b.larga"));
-        f.visto(&a, t);
-        f.visto(&b, t);
-        f.visto(&a, t + Duration::from_secs(4));
-        assert!(f.vencidos(t + Duration::from_secs(4)).is_empty());
-        assert_eq!(f.vencidos(t + Duration::from_secs(6)), vec![b]);
-        assert_eq!(f.vencidos(t + Duration::from_secs(10)), vec![a]);
-        assert!(f.vencidos(t + Duration::from_secs(20)).is_empty(), "solto uma vez só");
+        let s = Duration::from_secs;
+        let (a, b, capa) = (PathBuf::from("a.larga"), PathBuf::from("b.larga"), PathBuf::from("c.quad"));
+        f.vista(&a, t, FUNDO_FICA);
+        f.vista(&b, t, FUNDO_FICA);
+        f.vista(&capa, t, CAPA_FICA);
+        f.vista(&a, t + s(4), FUNDO_FICA);
+        assert!(f.vencidas(t + s(4)).is_empty());
+        assert_eq!(f.vencidas(t + s(6)), vec![b]);
+        assert_eq!(f.vencidas(t + s(10)), vec![a]);
+        assert!(f.vencidas(t + s(20)).is_empty(), "a capa fica mais");
+        assert_eq!(f.vencidas(t + s(31)), vec![capa]);
+        assert!(f.vencidas(t + s(60)).is_empty(), "solta uma vez só");
     }
 
     #[test]
