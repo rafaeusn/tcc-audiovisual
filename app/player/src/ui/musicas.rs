@@ -305,7 +305,13 @@ impl Player {
     /// Abre a janela de playlist: pôr `musicas` numa playlist, ou só criar uma (`so_criar`).
     pub(crate) fn abrir_janela_playlist(&mut self, musicas: Vec<biblioteca::Musica>, so_criar: bool) {
         self.largar_campo();
-        self.janela_playlist = Some(JanelaPlaylist { musicas, nome: String::new(), so_criar });
+        self.janela_playlist = Some(JanelaPlaylist { musicas, nome: String::new(), so_criar, renomear: None });
+    }
+
+    /// Abre a janela de playlist para trocar o nome de uma (o texto começa com o nome de agora).
+    pub(crate) fn abrir_janela_renomear(&mut self, id: i64, nome: String) {
+        self.largar_campo();
+        self.janela_playlist = Some(JanelaPlaylist { musicas: Vec::new(), nome, so_criar: true, renomear: Some(id) });
     }
 
     /// Um campo de texto da página: o da busca (no topo) ou o filtro da Biblioteca. Clicar põe o teclado nele; Esc ou
@@ -545,13 +551,32 @@ impl Player {
                             })),
                     )
                 } else {
-                    chip.pr(px(4.0)).child(tirar(("playlist-apagar", i)).on_click(cx.listener(
-                        move |this, _: &ClickEvent, _, cx| {
-                            cx.stop_propagation();
-                            this.apagar_playlist = Some(id);
-                            cx.notify();
-                        },
-                    )))
+                    let nome = p.nome.clone();
+                    chip.pr(px(4.0))
+                        .child(
+                            medidas::apoio()
+                                .id(("playlist-renomear", i))
+                                .h(px(medidas::SELO))
+                                .px(px(8.0))
+                                .flex()
+                                .items_center()
+                                .rounded(px(medidas::PILULA))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(com_alfa(c.inv_texto, 0.15)))
+                                .child("Renomear")
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    cx.stop_propagation();
+                                    this.abrir_janela_renomear(id, nome.clone());
+                                    cx.notify();
+                                })),
+                        )
+                        .child(tirar(("playlist-apagar", i)).on_click(cx.listener(
+                            move |this, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                this.apagar_playlist = Some(id);
+                                cx.notify();
+                            },
+                        )))
                 };
             }
             categorias = categorias.child(chip);

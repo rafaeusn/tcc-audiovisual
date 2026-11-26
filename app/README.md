@@ -163,7 +163,8 @@ mais recente das outras e nunca espera por elas.
 - **Playlists**: "+ Playlist" cria uma (o nome aceita acentos e colar). Passando o mouse numa música aparecem
   três botões: tocar a seguir, pôr no fim da fila e pôr numa playlist (a janela lista as playlists e cria uma
   nova). Cada playlist vira uma categoria, na ordem em que as músicas entraram; dentro dela, o X da linha tira a
-  música. Apagar pede confirmação ("Apagar?"). Ficam no `biblioteca.db` (tabelas `playlists` e
+  música. Na playlist escolhida, "Renomear" troca o nome (pela mesma janela) e o X apaga, com confirmação ("Apagar?").
+  Ficam no `biblioteca.db` (tabelas `playlists` e
   `playlist_itens`), guardando o caminho dos arquivos.
 - **Barra de baixo**: a capa e o título da música do Player levam ao álbum (ou à página da faixa), o artista à página dele, e o coração
   curte a faixa de serviço. À direita: letra, fila, painel, volume e **⋯** (tela cheia, letra em tela cheia, janela mini, Ilha, saída de som
@@ -344,6 +345,10 @@ do quadro com `anim.seguir(chave, alvo, tempo)`.
   A skin imersiva volta à padrão enquanto o visual não existe.
 - Ajustes corrompidos: o arquivo é guardado como `.corrompido` e o app abre com os padrões.
 - Sem pasta de dados: o app funciona, só não lembra os ajustes.
+- Aberto de novo com o Player já aberto (na mesma pasta de dados): o que estava aberto vem para a frente, saindo da bandeja
+  se preciso, e a cópia nova fecha.
+- O tocador do Spotify (Soloist) cai no meio de uma música: ela continua pelo outro serviço do ponto em que estava.
+- Uma playlist maior do que o serviço manda (o Spotify, até 2000): o fim da lista diz quantas aparecem de quantas.
 - Sem controle de volume no sistema: a barra de volume fica apagada.
 - Sem pasta de dados ou com o banco estragado: o histórico fica desligado (ou recomeça vazio, guardando o
   arquivo antigo como `.corrompido`) e a Biblioteca avisa.
@@ -369,7 +374,8 @@ tradução ligada, as linhas da letra para a Unison; só com o módulo Letra lig
 juntos, e a janela muda de arranjo como se fosse menor (em 125%, uma janela de 1440 já mostra o trilho no lugar da lateral). A Ilha tem o tamanho dela.
 
 **Pelo teclado:** `Tab` e `Shift Tab` andam pelos botões, abas, filtros, cartões e linhas (navegação, topo, página, barra), com um anel em
-volta do que está focado; `Enter` ou espaço clicam nele, e `Esc` volta ao jeito de sempre. Um clique do mouse também volta.
+volta do que está focado; a página rola sozinha até ele. `Enter` ou espaço clicam nele, e `Esc` volta ao jeito de sempre. Um clique
+do mouse também volta. Tocar a seguir e pôr na fila, que aparecem com o mouse em cima de uma linha, estão no ⋯ dela.
 
 Espaço tocar/pausar · Ctrl ←/→ faixa anterior/próxima · Ctrl ↑/↓ volume · M mudo · F tela cheia · P painel ·
 Ctrl K ou / buscar · Ctrl , ajustes · V próximo visual · 1/2/3 escolher o visual · T próximo tema · I imersivo ·

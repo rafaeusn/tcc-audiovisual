@@ -556,10 +556,16 @@ impl Acervo {
 
     /// Cria uma playlist vazia e devolve o número dela.
     pub fn criar_playlist(&self, nome: &str) -> Resultado<i64> {
-        let nome: String = nome.chars().filter(|c| !c.is_control()).take(80).collect();
-        let nome = if nome.trim().is_empty() { "Nova playlist".to_string() } else { nome.trim().to_string() };
-        self.con.execute("INSERT INTO playlists (nome) VALUES (?1)", params![nome]).map_err(erro)?;
+        self.con.execute("INSERT INTO playlists (nome) VALUES (?1)", params![nome_da_playlist(nome)]).map_err(erro)?;
         Ok(self.con.last_insert_rowid())
+    }
+
+    /// Troca o nome da playlist (o mesmo cuidado do nome ao criar).
+    pub fn renomear_playlist(&self, id: i64, nome: &str) -> Resultado<()> {
+        self.con
+            .execute("UPDATE playlists SET nome = ?2 WHERE id = ?1", params![id, nome_da_playlist(nome)])
+            .map_err(erro)?;
+        Ok(())
     }
 
     /// Apaga a playlist e devolve o nome e as músicas dela, na ordem (para desfazer).
@@ -658,6 +664,12 @@ impl Acervo {
         }
         tx.commit().map_err(erro)
     }
+}
+
+/// O nome de uma playlist: sem caracteres de controle, até 80 letras, e "Nova playlist" quando vazio.
+fn nome_da_playlist(nome: &str) -> String {
+    let nome: String = nome.chars().filter(|c| !c.is_control()).take(80).collect();
+    if nome.trim().is_empty() { "Nova playlist".to_string() } else { nome.trim().to_string() }
 }
 
 #[cfg(test)]
@@ -811,6 +823,21 @@ mod testes {
         assert_eq!(titulos(&a, &da_ana), ["Canção 100%"]);
         // Com um artista escolhido, os álbuns são só os dele.
         assert_eq!(a.albuns(&da_ana).expect("albuns").len(), 1);
+    }
+
+    #[test]
+    fn renomear_playlist() {
+        let a = acervo();
+        let id = a.criar_playlist("Antiga").expect("criar");
+        a.renomear_playlist(
+            id,
+            "  Para
+correr  ",
+        )
+        .expect("renomear");
+        assert_eq!(a.playlists().expect("playlists")[0].nome, "Paracorrer");
+        a.renomear_playlist(id, "   ").expect("renomear");
+        assert_eq!(a.playlists().expect("playlists")[0].nome, "Nova playlist", "sem nome, o de sempre");
     }
 
     #[test]

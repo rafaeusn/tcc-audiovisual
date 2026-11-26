@@ -256,6 +256,45 @@ pub(crate) struct Botao {
 
 /// Largura aproximada da dica, em pixels (texto de 14 px em negrito, mais as teclas do atalho). Serve só para
 /// ela não sair da janela; o centro exato quem dá é o layout.
+/// Rola a página até o elemento em `caixa` aparecer, se ele é dela. As medidas aqui são do GPUI (pixels de verdade).
+fn rolar_a_pagina_ate(pagina: &gpui::ScrollHandle, caixa: gpui::Bounds<gpui::Pixels>, window: &mut Window) {
+    let f = f32::from;
+    let vista = pagina.bounds();
+    let (vl, vt, vr, vb) = (f(vista.left()), f(vista.top()), f(vista.right()), f(vista.bottom()));
+    if vb - vt < 1.0 {
+        return;
+    }
+    let (deslocado, maximo) = (pagina.offset(), pagina.max_offset());
+    let mascara = window.content_mask().bounds;
+    let da_pagina = if f(mascara.size.width) < 1.0 || f(mascara.size.height) < 1.0 {
+        // Recortado por inteiro: está fora da vista. É da página se fica no conteúdo dela.
+        let centro = caixa.center();
+        let topo_do_conteudo = vt + f(deslocado.y);
+        (vl..=vr).contains(&f(centro.x))
+            && (topo_do_conteudo..=topo_do_conteudo + (vb - vt) + f(maximo.height)).contains(&f(centro.y))
+    } else {
+        // Visível: é da página se o recorte dele fica dentro da vista dela (a barra de baixo e a lateral não ficam).
+        f(mascara.left()) >= vl - 1.0
+            && f(mascara.top()) >= vt - 1.0
+            && f(mascara.right()) <= vr + 1.0
+            && f(mascara.bottom()) <= vb + 1.0
+    };
+    if !da_pagina {
+        return;
+    }
+    let folga = 16.0 * medidas::escala();
+    if let Some(y) = crate::focos::rolar_para_ver(
+        (f(caixa.top()), f(caixa.bottom())),
+        (vt, vb),
+        f(deslocado.y),
+        f(maximo.height),
+        folga,
+    ) {
+        pagina.set_offset(gpui::point(deslocado.x, gpui::px(y)));
+        window.request_animation_frame();
+    }
+}
+
 fn largura_estimada(rotulo: &str, teclas: &[&str]) -> f32 {
     let texto = 8.4 * rotulo.chars().count() as f32;
     let atalho: f32 = teclas.iter().map(|t| (14.0 + 7.2 * t.chars().count() as f32).max(22.0) + 3.0).sum();
@@ -466,14 +505,37 @@ impl Player {
 
     /// Um elemento que o Tab alcança (Enter e espaço clicam nele). O anel (2 px) aparece só depois de um Tab: o clique do
     /// mouse também foca, e ali o anel só atrapalharia.
-    pub(crate) fn focavel<E: InteractiveElement + FluentBuilder>(&self, el: E, raio: f32) -> E {
+    pub(crate) fn focavel(&self, el: Stateful<Div>, raio: f32) -> Stateful<Div> {
         let cor = self.cores().texto;
-        let el = el.tab_index(0);
+        let foco = gpui::Element::id(&el).and_then(|id| self.focos.borrow_mut().pegar(id));
+        let el = match &foco {
+            Some(f) => el.track_focus(f),
+            None => el.tab_index(0),
+        };
         if !self.foco_pelo_teclado {
             return el;
         }
         // Uma borda, e não uma sombra: a sombra pinta também por baixo dos elementos sem fundo.
-        el.focus(move |s| s.rounded(px(raio)).border_2().border_color(cor))
+        let el = el.focus(move |s| s.rounded(px(raio)).border_2().border_color(cor));
+        let Some(foco) = foco else { return el };
+        // Depois de um Tab, o focado rola a página até aparecer (o GPUI não rola sozinho).
+        let pedido = self.rolar_ao_foco.clone();
+        let pagina = self.rolagem_da_pagina();
+        el.child(
+            gpui::canvas(
+                move |caixa, window, _| {
+                    if pedido.get() && foco.is_focused(window) {
+                        pedido.set(false);
+                        rolar_a_pagina_ate(&pagina, caixa, window);
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
     }
 
     /// Botão de ícone que afunda ao ser pressionado. A área de clique não muda de tamanho; só o desenho encolhe.

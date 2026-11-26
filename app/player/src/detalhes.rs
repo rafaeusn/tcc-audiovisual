@@ -186,10 +186,26 @@ pub fn mesmo_nome(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
+/// A lista veio cortada (o serviço tem mais faixas que as que mandou, como as playlists de mais de 2000 no Spotify).
+pub fn aviso_de_corte(mostradas: usize, total: Option<u32>) -> Option<String> {
+    let total = u64::from(total?);
+    let mostradas = mostradas as u64;
+    (mostradas > 0 && total > mostradas)
+        .then(|| format!("Mostrando {} de {} músicas", milhar(mostradas), milhar(total)))
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
     use provedores::Album;
+
+    #[test]
+    fn lista_cortada_avisa() {
+        assert_eq!(aviso_de_corte(2000, Some(2450)).as_deref(), Some("Mostrando 2.000 de 2.450 músicas"));
+        assert_eq!(aviso_de_corte(245, Some(245)), None);
+        assert_eq!(aviso_de_corte(10, None), None);
+        assert_eq!(aviso_de_corte(0, Some(30)), None, "ainda chegando");
+    }
 
     fn album(id: &str, tipo: Option<TipoDeAlbum>) -> Item {
         Item::Album(Album { id: id.into(), tipo, ..Default::default() })

@@ -1,7 +1,7 @@
 # AGENTS.md: contexto para qualquer agente de IA
 
 Leia isto antes de mexer no projeto. Vale para Cursor, Claude Code, Codex ou um chat novo. Atualizado em
-24/11/2026. **Responda sempre em português do Brasil.**
+26/11/2026. **Responda sempre em português do Brasil.**
 
 Detalhes de cada função do app: [`app/README.md`](app/README.md). História do projeto e decisões de produto:
 [`CONTEXTO-TCC.md`](CONTEXTO-TCC.md). Plano original da v1 (fases 0–6): [`docs/plano-v1.md`](docs/plano-v1.md).
@@ -65,19 +65,24 @@ Dentro de `app/`:
 ```bash
 cargo run -p player                      # abre o app (debug)
 cargo build --release -p player          # release (D:/Rust/target/release/player.exe)
-cargo test --workspace                   # 583 testes em 25/11/2026 (fora o `visual --test desenho`), todos passando
+cargo test --workspace                   # 604 testes em 26/11/2026 (fora os 3 do `visual --test desenho`), todos passando
 cargo clippy --workspace --all-targets   # tem que sair sem aviso
 cargo fmt --all
 cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
 ```
 
+- **CI** (`.github/workflows/ci.yml`, desde 26/11/2026): a cada envio ao `main` e a cada pedido de mudança, no Windows
+  (Rust 1.99.1, o mesmo daqui): `fmt --check`, `clippy -D warnings` e `cargo test --workspace --locked`; numa máquina Linux,
+  `cargo deny check licenses sources`. O servidor não tem placa de vídeo: `TCCPLAYER_SEM_GPU=1` faz o teste que desenha os
+  visuais terminar sem falhar (e, com placa, ele sai com erro se passar de 3 min, em vez de travar).
 - A pasta de build é `D:/Rust/target`, e o cache do cargo fica em `D:/Rust/cargo`.
 - `app/.cargo/config.toml` aponta o `fxc.exe` do Windows SDK 10.0.22621, que o GPUI usa para os shaders.
 - Rust edition 2024, MSRV 1.88. Lints do workspace: `unwrap_used`, `expect_used`, `panic`, `todo` e `dbg_macro`
   geram aviso; `unsafe_op_in_unsafe_fn` é erro. Em teste, use `#[allow(clippy::expect_used)]` no módulo.
 - Variáveis de ambiente para teste:
   - `TCCPLAYER_DADOS=<pasta>`: pasta de dados separada (ajustes, bancos, registro). Permite rodar uma cópia ao
-    lado do Player do Rafael.
+    lado do Player do Rafael. Uma cópia por pasta: abrir outra com a mesma pasta traz a aberta para a frente e fecha
+    (o mutex tem a chave da pasta, `nucleo::caminhos::chave_da_pasta`).
   - `TCCPLAYER_MUDO=1`: o player local toca sem som.
   - `TCCPLAYER_PASTA=<pasta1>;<pasta2>`: pastas de música que entram na Biblioteca ao abrir.
   - `TCCPLAYER_ILHA_ABERTA=1`: a Ilha fica aberta como se o mouse estivesse em cima (para fotografar a forma
@@ -206,8 +211,14 @@ thread.** Pedidos seguem por canal (`mpsc`).
 - **Erro 4551 (Controle Inteligente de Aplicativos)** bloqueia de vez em quando um exe ou uma DLL de proc-macro
   recém-compilados ("can't find crate for X", "LoadLibraryExW ... 4551"). Solução: `cargo clean [--release] -p
   <pacote>` e compilar de novo. Se quase todas as bibliotecas somem de uma vez, o bloqueado é um proc-macro comum a elas
-  (em 25/11/2026, o `thiserror-impl`). **Confira sempre o código de saída do cargo**, porque um `| tail` esconde a falha
-  e o exe antigo continua lá.
+  (em 25/11/2026, o `thiserror-impl`). "can't find crate for `gpui`": `cargo clean -p gpui -p gpui-macros`. Um build
+  script bloqueado (o do `librespot-protocol` é frequente): `cargo clean -p <pacote>`. Um exe de teste bloqueado ("could
+  not execute process ... 4551"): rode o pacote sozinho (`cargo test -p <pacote>`) ou mude um arquivo dele para o exe sair
+  com outro conteúdo. **Confira sempre o código de saída do cargo**, porque um `| tail` esconde a falha e o exe antigo
+  continua lá. O CI roda tudo sem esse bloqueio. **Cuidado:** `cargo clean -p <pacote>` sem `--release` limpa o pacote também
+  na release; em 26/11/2026 a release depois quebrou em cascata ("can't find crate for `symphonia`", `reqwest`... com os
+  arquivos lá). Resolveu guardar os `.exe` de `D:/Rust/target/release` e fazer `cargo clean --release` inteiro. Para achar a
+  DLL bloqueada: `LoadLibraryExW(dll, 0, 1)` em cada `deps/*.dll` (erro 4551).
 - **O Rafael costuma deixar o Player aberto.** Para testar: renomeie o exe em uso
   (`D:/Rust/target/release/player.exe` → `player-em-uso.exe`), compile e abra uma cópia com `TCCPLAYER_DADOS`
   apontando para uma pasta temporária. Guarde o PID do `Start-Process -PassThru` e feche só esse processo.
@@ -596,6 +607,29 @@ Ilha igual com a interface em 125%. Não conferido: `Ctrl +` e `Ctrl −` de ver
 ajustes), arrastar a divisória e os módulos fora de 100%, o tema Papel e uma tela com fator do Windows diferente de 100%. Ficou: o esticão da barra de
 volume é medido em pixels de verdade (sai um pouco maior fora de 100%), e em 125% a fileira de filtros de uma folha média rola para o lado.
 
+**Fase 1 do plano v3, arrumar a casa (26/11/2026)** ([plano](docs/superpowers/plans/2026-11-26-fase1-arrumar-a-casa.md)): o CI
+(seção 3); o teste da placa sai com erro depois de 3 min. Tab rola a página até o focado (`focos.rs`: um `FocusHandle` por elemento,
+pelo id, de um estoque refeito a cada quadro; o focado anota onde foi desenhado e `rolar_a_pagina_ate` em `ui/mod.rs` decide se ele é
+da página pelo recorte dele; `focavel` agora recebe `Stateful<Div>`). As fotos largas saem da placa 5 s depois de sair da tela
+(`capas::FundosNaTela`, `Player::soltar_fundos`). BPM 0 ("—") sem pulso (`pista::tem_pulso`; antes dava 240). `Faixa.numero`
+no protocolo (o Spotify pelo `trackNumber`, o YouTube Music pelo `track_nr`; vale só na lista do álbum). "Tocar" na página da
+faixa usa `Local::tocar_agora` (entra depois da de agora, a fila continua). O coração espera a biblioteca atender o último clique
+(`Lista.atendidos`, `Local::enviados`). Ids de artista na linha sem colisão (`id_do_artista_na_linha`). Renomear playlist (o chip
+"Renomear" da playlist escolhida, a janela de playlist com `renomear`, `Acervo::renomear_playlist`). A capa local vai ao Windows
+também pausada. A música que cai do Soloist para o Match continua da posição (`Local::comecar_em`). Uma cópia por pasta de dados:
+o mutex tem `caminhos::chave_da_pasta`, e a segunda cópia manda a mensagem registrada "TccPlayer.aparecer" com a chave
+(`integracao::pedir_que_apareca`; a janela com a mesma chave faz `mostrar`). A escuta segue só o `soloist.exe` aberto pelo Player
+(sem cair no do Spotifast pelo nome). A lista cortada diz "Mostrando N de M músicas" (`detalhes::aviso_de_corte`). Página larga em
+dois tempos, sem um passar por cima do outro (o visual baixa e a página desce ao lado; depois o visual alarga e a página desliza por
+baixo); no empilhado a cena é a da janela inteira (o X não salta). O esticão do volume em medida das telas. O `main.rs` tinha 20
+trechos com acento estragado (desde o commit anterior), consertados. "A lista que falha inteira" já estava resolvido pela
+`cadeia.rs` (24/11); tocar a seguir e pôr na fila ficam no ⋯ (que o Tab alcança). Conferido na cópia muda com o YouTube Music e o
+Spotify: Tab rolando o Início em 958 × 560 até um cartão da prateleira, a página larga indo e voltando (fotos no meio do caminho),
+o X no empilhado em 410 (a forma encolhe sem salto) e o Início do empilhado. Não conferido: a segunda cópia chamando a primeira (traria
+a janela para a frente, roubando o foco), renomear na tela, o coração com cliques rápidos, as fotos saindo da placa (só o teste da
+lógica), a posição ao cair para o Match, o Spotifast aberto junto, o aviso de corte com uma lista real, o volume em 125% e o CI rodando
+no GitHub (precisa do push). O roteiro da sessão com o Rafael está em [`docs/conferencia-fase1.md`](docs/conferencia-fase1.md).
+
 **F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
 LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
 palavras, o rodapé diz a fonte, o acerto de sincronia guardado por música, tradução pela Unison (5 idiomas, guardada
@@ -724,34 +758,35 @@ local no controle de mídia do Windows e arrastar nas barras do equalizador (só
 - O exe de teste do `provedor-youtube-music` costuma ser bloqueado pelo erro 4551 quando roda com o workspace; ele
   passa sozinho (`cargo test -p provedor-youtube-music`). Use `--no-fail-fast` para ver o resto.
 - O teste `visual --test desenho` (usa a placa de vídeo) travou uma vez por 50 min em 14/11/2026, com um jogo
-  aberto; os outros testes passam. Se travar, rode `cargo test --workspace --exclude visual` e o dele à parte.
-- Sem CI.
+  aberto. Desde 26/11/2026 ele sai com erro depois de 3 min.
 - Skins KDL carregadas de arquivo (plano da fase 1) não existem; os temas estão no código.
 - Medidor de flashes do modo seguro (fase 3) não existe.
 - O Spectral do mockup (`mockup/project/Main.dc.html`) ainda é o antigo.
-- Nada de capa da música local no controle de mídia do Windows (`cover_url: None`).
 
 ---
 
-## 8. Próximas fases (plano v2, aprovado em 16/11/2026)
+## 8. Próximas fases (plano v3, aprovado em 26/11/2026)
 
-O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`](docs/plano-v2.md). Ordem:
+O plano está em [`docs/plano-v3.md`](docs/plano-v3.md): o que a remodelagem já resolveu do v2, o que saiu do plano, as regras
+para as telas novas e o **inventário de todas as sobras** (seção 3), cada uma com a fase dela. O [plano v2](docs/plano-v2.md)
+continua valendo como pesquisa (repositórios, arquitetura dos provedores, riscos). Feitas antes do v3: F0 a F6 do v2 (seção 7
+acima) e a remodelagem.
 
 | # | Fase | Situação |
 | --- | --- | --- |
-| F0 | Base aberta: GPL-3, `LICENSE`, `THIRD-PARTY-NOTICES.md`, regras novas, `app/deny.toml`, README e CONTRIBUTING | Feita em 16/11/2026 (o `cargo-deny` não instala neste PC: o erro 4551 bloqueia os build scripts dele; as licenças foram conferidas pelo `cargo metadata`) |
-| F1 | Núcleo de provedores: protocolo, modelos, fila com vários serviços, motor tocando streams, cache de análise por ID/ISRC, casador entre serviços | Feita em 22/11/2026 (crate `provedores`, tocador por endereço, cache por ID/ISRC, `remoto.rs`, busca "Nos serviços", fila mista, aba Provedores na Loja); "Neste computador" como provedor ficou para a F2 |
-| F2 | Páginas unificadas e layouts (Palco, Estante), molas no `anim.rs` | Feita em 23/11/2026, em 6 partes: identidade e páginas dos provedores; curtir, salvar, fixar e playlists mistas; espaços e navegação; páginas, busca de todos os tipos e página da faixa; o layout Estante; comandos e documentos ([`docs/f2-paginas.md`](docs/f2-paginas.md)). Ficaram a página de podcast e o rádio |
-| F3 | Provedor YouTube Music | Feita em 23/11/2026: `app/provedores/youtube-music`, embutido; metadados pelo `rustypipe` e áudio pelo cliente visionOS, como MixMusic e limusic ([`docs/f3-youtube-music.md`](docs/f3-youtube-music.md)) |
-| F4 | Letras 2.0: fontes em cadeia, palavra por palavra, tela cheia, tradução, romanização | Feita em 22/11/2026 (`letras::fontes`, `ttml`, `traducao`; Configurações › Letras; `ui/letra_cheia.rs`); ficaram estilos e bolinha, cartão e a letra no visual ([`docs/f4-letras.md`](docs/f4-letras.md)) |
-| F5 | **A Ilha** (Dynamic Island): janela flutuante no topo, estados repouso/alerta/expandida | Feita em 16/11/2026 (ver seção 7) |
-| F6 | Provedor Spotify: o Soloist ou o Match pelo YouTube Music | Feita em 23/11/2026, em 4 partes: login, dados, Match e Soloist ([`docs/f6-spotify.md`](docs/f6-spotify.md)). O Soloist toca (o 1.4.0.12; o 1.4.0.7 cai, e o Player volta ao anterior ou oferece o do Spotifast, seção 7); ficaram Canvas, as letras do Spotify e o ISRC |
-| F7 | Modo Escuta preciso + Shazam (SongRec): reconhecer, pré-analisar e alinhar ao som ao vivo | |
-| F8 | Som e fila: crossfade no compasso, modo DJ, smart shuffle, lixeira, A-B, timer, AutoEq | |
-| F9 | Juntos e controle: salas, controle pelo celular, MCP, overlay OBS, Chromecast | |
-| F10 | Loja de verdade: registro no GitHub, temas em arquivo, Material dinâmico, plugins | |
-| F11 | Mais provedores: SoundCloud, rádios, podcasts, sem perdas | |
-| F12 | Extras: retrospectiva, backup, atualização automática, atalhos globais, offline, MilkDrop, karaokê, medidor de flashes | |
+| 1 | Arrumar a casa: CI no GitHub, os consertos pequenos e uma sessão de conferência com o Rafael | Feita em 26/11/2026; falta a sessão de conferência ([roteiro](docs/conferencia-fase1.md)) e ver o CI rodar no GitHub |
+| 2 | Modo Escuta preciso + reconhecer (a F7 do v2): SongRec, alinhar ao som ao vivo, etiquetar as locais, compassos que não são 4/4 | |
+| 3 | Mais provedores (a F11 do v2): cache de pedaços, rádio, SoundCloud, rádios ao vivo, podcasts, conta do YouTube Music, sem perdas, Deezer | |
+| 4 | Letras 3: fontes novas, estilos e bolinha, cartão, editor de sincronia | |
+| 5 | Som e fila (a F8 do v2): arrastar para reordenar, crossfade no compasso, modo DJ, lixeira, A-B, timer, ReplayGain de álbum, R128, AutoEq | |
+| 6 | Visual: MilkDrop, Canvas e capas animadas, a letra no visual, medidor de flashes | |
+| 7 | Juntos e controle (a F9 do v2): salas, celular, MCP, OBS, Chromecast | |
+| 8 | Loja e personalização (a F10 do v2): registro, temas em arquivo, Material dinâmico, plugins, editar a Início | |
+| 9 | Extras (a F12 do v2): retrospectiva, backup, atalhos globais, importar histórico, karaokê | |
+| 10 | Entrega: instalador, medições, teste com usuários, material do TCC | |
+
+Saíram do plano: "Neste computador" como provedor (virou o filtro "Neste PC"), os layouts Expressivo e Compacto, os downloads
+offline (regra 2) e o ListenBrainz (pedido do Rafael).
 
 **Remodelagem das telas de streaming e da Estante** (decidida em 25/11/2026; as 8 partes estão prontas desde 25/11/2026, seção 7): o serviço vira filtro
 (Início, Buscar, Biblioteca), Tudo misturado com selo em cada item, o visual no centro com a página ao lado, medidas num
@@ -759,13 +794,6 @@ arquivo só, barra de baixo nova e artista e álbum com imagem, em 8 partes. Aud
 [`docs/auditoria-ui-2026-11-25.md`](docs/auditoria-ui-2026-11-25.md), desenho em
 [`docs/superpowers/specs/2026-11-25-remodelagem-streaming-design.md`](docs/superpowers/specs/2026-11-25-remodelagem-streaming-design.md),
 protótipo em `mockup/remodelagem/`.
-
-Sobras das fases antigas que continuam valendo: renomear playlist, arrastar para reordenar, capas nos álbuns,
-ReplayGain de álbum, R128 para quem não tem etiqueta, *Beat This!* e compassos que não são 4/4, importar
-histórico (vai na F12), acabamento (instalador, CI, medições, teste com usuários). O ListenBrainz saiu do plano a
-pedido do Rafael.
-
----
 
 ## 9. Como entregar uma tarefa
 

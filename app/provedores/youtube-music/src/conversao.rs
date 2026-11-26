@@ -49,6 +49,7 @@ pub fn faixa(t: &TrackItem) -> Faixa {
         capa: capa(&t.cover),
         video: t.track_type != TrackType::Track,
         ouvidas: t.view_count,
+        numero: t.track_nr.map(u32::from).filter(|n| *n > 0),
     }
 }
 

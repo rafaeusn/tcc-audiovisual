@@ -5,7 +5,7 @@
 //! cópia que esteja aberta.
 
 use crate::{Erro, NOME_APP, Resultado};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Nome da variável de ambiente que escolhe outra pasta de dados.
 pub const VARIAVEL_DE_DADOS: &str = "TCCPLAYER_DADOS";
@@ -31,6 +31,15 @@ pub fn pasta_dados() -> Resultado<PathBuf> {
     Ok(pasta)
 }
 
+/// Um número que identifica a pasta de dados (sem diferença de maiúsculas nem de barras): duas cópias do Player na
+/// mesma pasta disputariam os bancos e o tocador do serviço, então a segunda chama a primeira e fecha.
+pub fn chave_da_pasta(pasta: &Path) -> u32 {
+    let texto = pasta.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    // FNV-1a: o mesmo número em qualquer versão do app (o hash da biblioteca padrão pode mudar).
+    let n = texto.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ u32::from(b)).wrapping_mul(0x0100_0193));
+    n.max(1)
+}
+
 pub fn arquivo_ajustes() -> Resultado<PathBuf> {
     Ok(pasta_dados()?.join("ajustes.toml"))
 }
@@ -54,4 +63,17 @@ pub fn pasta_registros() -> Resultado<PathBuf> {
     let pasta = pasta_dados()?.join("registros");
     std::fs::create_dir_all(&pasta).map_err(|e| Erro::arquivo(&pasta, e))?;
     Ok(pasta)
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn a_mesma_pasta_tem_a_mesma_chave() {
+        let a = chave_da_pasta(Path::new(r"C:\Users\ana\AppData\Roaming\TccPlayer"));
+        assert_eq!(a, chave_da_pasta(Path::new("c:/users/ana/appdata/roaming/tccplayer/")));
+        assert_ne!(a, chave_da_pasta(Path::new("D:/teste")));
+        assert_ne!(chave_da_pasta(Path::new("")), 0, "zero quer dizer sem chave");
+    }
 }

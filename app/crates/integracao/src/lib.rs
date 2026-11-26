@@ -27,6 +27,28 @@ pub enum Acao {
     Proxima,
 }
 
+/// Esta cópia aparece quando outra é aberta com a mesma pasta de dados (`chave`, diferente de 0). Vale depois de
+/// [`Integracao::instalar`]: quem recebe o pedido é a janela.
+pub fn atender_quem_abrir_de_novo(chave: usize) {
+    #[cfg(windows)]
+    sistema::atender_quem_abrir_de_novo(chave);
+    #[cfg(not(windows))]
+    let _ = chave;
+}
+
+/// Pede à cópia aberta com a mesma `chave` que apareça (saia da bandeja, restaure e venha para a frente).
+pub fn pedir_que_apareca(chave: usize) -> bool {
+    #[cfg(windows)]
+    {
+        sistema::pedir_que_apareca(chave)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = chave;
+        false
+    }
+}
+
 /// Ligação com a janela. Soltar o valor tira o ícone da bandeja e desfaz a ligação.
 pub struct Integracao {
     #[cfg(windows)]

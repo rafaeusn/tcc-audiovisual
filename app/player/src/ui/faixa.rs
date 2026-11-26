@@ -98,8 +98,11 @@ impl Player {
                 move |this, _: &ClickEvent, window, cx| {
                     if this.faixa_tocando(&esta) {
                         this.executar(Comando::TocarPausar, window, cx);
-                    } else {
-                        this.tocar_faixas(std::slice::from_ref(&esta), 0);
+                    } else if !this.avisar_se_nao_toca(&esta.servico) {
+                        // Sem trocar a fila: a faixa entra agora, e o que vinha depois continua.
+                        let m = crate::remoto::musica_de(&esta, &this.nome_do_servico(&esta.servico));
+                        this.lembrar_a_busca();
+                        this.local.tocar_agora(m);
                     }
                     cx.notify();
                 },

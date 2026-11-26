@@ -356,10 +356,53 @@ fn baixar(url: &str, pasta: &std::path::Path) -> Option<PathBuf> {
     }
 }
 
+/// Quanto um fundo fica na placa de vídeo depois de sair da tela (voltar à página logo depois não o recarrega).
+const SOLTAR_DEPOIS: Duration = Duration::from_secs(5);
+
+/// Os fundos grandes desenhados. O GPUI guarda toda imagem desenhada na placa até o fim; os que saem da tela por
+/// [`SOLTAR_DEPOIS`] são soltos (fotos largas de artista têm até 1280 px).
+#[derive(Default)]
+pub struct FundosNaTela {
+    vistos: HashMap<PathBuf, Instant>,
+}
+
+impl FundosNaTela {
+    pub fn visto(&mut self, arquivo: &std::path::Path, agora: Instant) {
+        self.vistos.insert(arquivo.to_path_buf(), agora);
+    }
+
+    /// Os que não são desenhados há um tempo (e esquece deles).
+    pub fn vencidos(&mut self, agora: Instant) -> Vec<PathBuf> {
+        let mut fora = Vec::new();
+        self.vistos.retain(|arquivo, visto| {
+            let fica = agora.saturating_duration_since(*visto) < SOLTAR_DEPOIS;
+            if !fica {
+                fora.push(arquivo.clone());
+            }
+            fica
+        });
+        fora
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn fundo_que_sai_da_tela_e_solto_depois_de_um_tempo() {
+        let mut f = FundosNaTela::default();
+        let t = Instant::now();
+        let (a, b) = (PathBuf::from("a.larga"), PathBuf::from("b.larga"));
+        f.visto(&a, t);
+        f.visto(&b, t);
+        f.visto(&a, t + Duration::from_secs(4));
+        assert!(f.vencidos(t + Duration::from_secs(4)).is_empty());
+        assert_eq!(f.vencidos(t + Duration::from_secs(6)), vec![b]);
+        assert_eq!(f.vencidos(t + Duration::from_secs(10)), vec![a]);
+        assert!(f.vencidos(t + Duration::from_secs(20)).is_empty(), "solto uma vez só");
+    }
 
     #[test]
     fn o_brilho_de_onde_fica_o_texto() {

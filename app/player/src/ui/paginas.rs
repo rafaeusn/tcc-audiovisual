@@ -787,7 +787,8 @@ impl Player {
             let rotulo = SharedString::from(format!("{nome}{separador}"));
             artistas = artistas.child(match rota_do_artista(f, k, sabe_artista) {
                 Some(rota) => medidas::apoio()
-                    .id(("faixa-artista", n * 10 + k))
+                    // A linha nos bits de cima e o artista nos de baixo: não colide com mais de 10 artistas.
+                    .id(("faixa-artista", id_do_artista_na_linha(n, k)))
                     .text_color(c.texto_2)
                     .flex_none()
                     .cursor_pointer()
@@ -862,7 +863,9 @@ impl Player {
                 d.child(div().w(px(28.0)).flex_none().flex().justify_center().child(if esta {
                     icone("icones/wave.svg", medidas::ICONE_LINHA, c.texto).into_any_element()
                 } else {
-                    mono().text_color(c.texto_3).child((i + 1).to_string()).into_any_element()
+                    // O número do álbum quando o serviço manda (um álbum com faixas que não tocam pula números).
+                    let n = f.numero.filter(|_| como.sem_capa).map_or(i + 1, |n| n as usize);
+                    mono().text_color(c.texto_3).child(n.to_string()).into_any_element()
                 }))
             })
             .when(!como.sem_capa, |d| {
@@ -972,9 +975,24 @@ impl Player {
     }
 }
 
+/// O id do `k`-ésimo artista da linha `n`: único para qualquer linha e até 65 536 artistas.
+fn id_do_artista_na_linha(n: usize, k: usize) -> usize {
+    (n << 16) | k.min(0xffff)
+}
+
 #[cfg(test)]
 mod testes {
-    use super::lado_do_cartao_em;
+    use super::{id_do_artista_na_linha, lado_do_cartao_em};
+
+    #[test]
+    fn ids_de_artista_nao_colidem() {
+        let mut vistos = std::collections::HashSet::new();
+        for n in 0..300 {
+            for k in 0..40 {
+                assert!(vistos.insert(id_do_artista_na_linha(n, k)), "linha {n}, artista {k}");
+            }
+        }
+    }
 
     #[test]
     fn os_cartoes_preenchem_a_largura() {

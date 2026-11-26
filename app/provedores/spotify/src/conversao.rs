@@ -348,7 +348,8 @@ pub fn album(data: &Value) -> Resultado<Pagina<Faixa>> {
     let (nome, id, capa) = (texto(&a["name"]), id(&a["uri"], "album"), capa(&a["coverArt"]));
     pagina(objeto(a, "/tracksV2", "as faixas do álbum")?, |i| {
         let f = faixa(&i["track"], &Value::Null)?;
-        Some(Faixa { album: nome.clone(), album_id: id.clone(), capa: capa.clone(), ..f })
+        let numero = numero(&i["track"]["trackNumber"]).and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0);
+        Some(Faixa { album: nome.clone(), album_id: id.clone(), capa: capa.clone(), numero, ..f })
     })
 }
 
@@ -613,12 +614,14 @@ mod testes {
     fn album_leva_o_disco_em_cada_faixa() {
         let mut sem_album = faixa_json("f1", "Um");
         sem_album.as_object_mut().expect("objeto").remove("albumOfTrack");
+        sem_album["trackNumber"] = json!(3);
         let data = json!({"albumUnion": {"uri": "spotify:album:al1", "name": "Disco", "coverArt": capas(),
             "tracksV2": {"items": [{"track": sem_album}, {"track": null}], "totalCount": 14}}});
         let Pagina { itens: faixas, total, .. } = album(&data).expect("álbum");
         assert_eq!((faixas.len(), total), (1, 14));
         assert_eq!((faixas[0].album.as_deref(), faixas[0].album_id.as_deref()), (Some("Disco"), Some("al1")));
         assert_eq!(faixas[0].capa.as_deref(), Some("c300"));
+        assert_eq!(faixas[0].numero, Some(3), "o número da faixa no álbum");
         assert!(album(&json!({"albumUnion": {"__typename": "NotFound"}})).is_err());
     }
 

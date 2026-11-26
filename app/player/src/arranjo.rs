@@ -397,13 +397,18 @@ fn estante_lado_a_lado(base: Arranjo, y0: f32, p: Pedido) -> Arranjo {
     let lado = Ret::new(miolo.x, y0, vw, meio_h);
     let tira = Ret::new(miolo.x, y0, miolo.w, if h < 640.0 { TIRA_BAIXA } else { TIRA });
     let em = if p.larga_em.is_finite() { p.larga_em.clamp(0.0, 1.0) } else { f32::from(u8::from(p.larga)) };
-    let visual = entre(&lado, &tira, em);
-    let heroi = if p.larga {
-        let y = tira.base() + MARGEM;
-        Ret::new(miolo.x, y, miolo.w, (miolo.base() - y).max(120.0))
-    } else {
-        Ret::new(lado.x + vw + MARGEM, y0, miolo.w - vw - MARGEM, meio_h)
-    };
+    // Em dois tempos, sem um passar por cima do outro: primeiro o visual baixa até a altura da tira e a página desce ao
+    // lado dele; depois o visual se alarga e a página desliza por baixo até a largura toda. A volta faz o caminho inverso.
+    let (baixa, alarga) = ((em * 2.0).min(1.0), (em * 2.0 - 1.0).max(0.0));
+    let visual = Ret::new(miolo.x, y0, vw + (miolo.w - vw) * alarga, meio_h + (tira.h - meio_h) * baixa);
+    let topo_da_pagina = y0 + (tira.base() + MARGEM - y0) * baixa;
+    let x_da_pagina = lado.x + vw + MARGEM - (vw + MARGEM) * alarga;
+    let heroi = arredondar(Ret::new(
+        x_da_pagina,
+        topo_da_pagina,
+        miolo.x + miolo.w - x_da_pagina,
+        (miolo.base() - topo_da_pagina).max(120.0),
+    ));
     let painel =
         p.gaveta_aberta.then(|| if ao_lado { Ret::new(miolo.x + miolo.w + MARGEM, y0, PAINEL, meio_h) } else { heroi });
     // A tira mostra o meio da cena do miolo inteiro; arrastando, a cena fica na largura maior. Nada é recriado no caminho.
@@ -455,11 +460,18 @@ fn estante_estreita(base: Arranjo, p: Pedido) -> Arranjo {
         miolo,
         painel: p.gaveta_aberta.then_some(heroi),
         painel_na_pagina: p.gaveta_aberta,
-        interno: (altura > 0.0).then(|| (lw, alta.unwrap_or(lw * 0.5))),
+        // A cena é a da janela inteira (o visual mostra o meio dela): expandir não muda o tamanho dela, e a forma não
+        // dá um salto no começo do X.
+        interno: (altura > 0.0).then_some((w, h)),
         titulo: SECAO,
         raio_visual: 16.0,
         ..base
     }
+}
+
+/// Em pixels inteiros: a página tem filhos parados, e um pai em posição fracionária os faz tremer (ver a Ilha).
+fn arredondar(r: Ret) -> Ret {
+    Ret::new(r.x.round(), r.y.round(), r.w.round(), r.h.round())
 }
 
 /// O retângulo a caminho de `a` para `b` (0 a 1).
@@ -620,10 +632,26 @@ mod testes {
         assert!(a.divisoria.is_none());
         assert_eq!(a.interno, Some((a.miolo.w, a.miolo.h)));
         assert_eq!(conferir(958.0, 560.0, p).visual.h, TIRA_BAIXA, "janela baixa");
-        // No caminho: a página já está no lugar e o visual vai encolhendo, desenhado num tamanho só.
-        let meio = calcular(1440.0, 900.0, Pedido { larga: true, larga_em: 0.5, ..ESTANTE });
-        assert_eq!((meio.heroi, meio.interno), (a.heroi, a.interno));
-        assert!(meio.visual.h > a.visual.h && meio.visual.w < a.visual.w);
+        // No caminho: a página anda junto (de ao lado do visual até a largura toda) e o visual vai encolhendo,
+        // desenhado num tamanho só.
+        let lado = calcular(1440.0, 900.0, ESTANTE);
+        for em in [0.1, 0.25, 0.5, 0.6, 0.75, 0.9] {
+            let meio = calcular(1440.0, 900.0, Pedido { larga: true, larga_em: em, ..ESTANTE });
+            assert_eq!(meio.interno, a.interno);
+            // Nunca um por cima do outro.
+            let (v, p) = (meio.visual, meio.heroi);
+            let longe = v.x + v.w <= p.x || v.base() <= p.y;
+            assert!(longe, "{em}: visual {v:?} e página {p:?} se cruzam");
+            assert!(p.w >= lado.heroi.w && p.w <= a.heroi.w && p.x == p.x.round(), "{em}: {p:?}");
+            // Voltando: com `larga` desligada, o mesmo caminho.
+            let volta = calcular(1440.0, 900.0, Pedido { larga: false, larga_em: em, ..ESTANTE });
+            assert_eq!((volta.heroi, volta.visual), (p, v));
+        }
+        let comeco = calcular(1440.0, 900.0, Pedido { larga: true, larga_em: 0.25, ..ESTANTE });
+        let fim = calcular(1440.0, 900.0, Pedido { larga: true, larga_em: 0.75, ..ESTANTE });
+        assert!(comeco.visual.h < lado.visual.h && comeco.visual.w == lado.visual.w, "primeiro baixa");
+        assert!(fim.visual.h == a.visual.h && fim.visual.w > lado.visual.w, "depois alarga");
+        assert!(fim.heroi.x < lado.heroi.x && fim.heroi.x > a.heroi.x, "a página desliza");
     }
 
     #[test]
@@ -633,6 +661,9 @@ mod testes {
         assert_eq!(outra.visual.h, TIRA_BAIXA);
         assert!(inicio.visual.h > 180.0 && inicio.visual.base() < inicio.heroi.y, "{:?}", inicio.visual);
         assert_eq!(inicio.interno, outra.interno, "recolher não recria nada");
+        // Expandir (X) também não: a cena já é a da janela inteira, e a forma não salta no começo.
+        let expandindo = calcular(410.0, 844.0, Pedido { expansao: 0.05, ..ESTANTE });
+        assert_eq!((outra.interno, expandindo.interno), (Some((410.0, 844.0)), Some((410.0, 844.0))));
         assert!(outra.heroi.h > 350.0);
         // Janela baixa: a tira sai, para a página (opaca) não cobrir o visual.
         let baixa = conferir(600.0, 420.0, Pedido { alta: 1.0, ..ESTANTE });

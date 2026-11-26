@@ -107,6 +107,8 @@ pub struct JanelaPlaylist {
     pub nome: String,
     /// Só criar (sem músicas) e abrir a playlist nova.
     pub so_criar: bool,
+    /// Renomear esta playlist (o nome começa com o de agora).
+    pub renomear: Option<i64>,
 }
 
 /// O botão em que o mouse está parado, para a dica (nome e atalho) dele.
@@ -173,7 +175,8 @@ pub struct Player {
     /// As capas das páginas dos serviços (baixadas e guardadas em disco).
     pub(crate) capas: crate::capas::Capas,
     /// Curtidas e salvos que a biblioteca ainda não confirmou (para dois cliques rápidos ficarem no último).
-    pub(crate) salvos_pendentes: std::collections::HashMap<salvos::ChaveDoSalvo, bool>,
+    /// O que a pessoa clicou no coração e a biblioteca ainda não mostra: o estado pedido e o número do pedido.
+    pub(crate) salvos_pendentes: std::collections::HashMap<salvos::ChaveDoSalvo, (bool, u64)>,
     /// As faixas e os álbuns da página de detalhe aberta, já separados (uma playlist longa não é copiada a cada quadro).
     pub(crate) detalhe_lido: RefCell<Option<salvos::DetalheLido>>,
     /// Já disse, nesta abertura, por onde as músicas de um serviço sem áudio tocam.
@@ -382,6 +385,12 @@ pub struct Player {
     recolhido: bool,
     /// A pessoa anda pela tela com o Tab: o anel de foco aparece, e espaço e Enter são do elemento focado.
     pub(crate) foco_pelo_teclado: bool,
+    /// Os focos dos elementos que o Tab alcança (um por elemento, para saber onde está o focado).
+    pub(crate) focos: RefCell<crate::focos::Focos>,
+    /// Depois de um Tab: o elemento focado rola a página até aparecer.
+    pub(crate) rolar_ao_foco: Rc<Cell<bool>>,
+    /// Os fundos grandes desenhados, para soltar da placa os que saíram da tela.
+    pub(crate) fundos_na_tela: RefCell<crate::capas::FundosNaTela>,
     /// Quando o estado (som, mídia, threads) foi atualizado pela última vez: a Ilha também atualiza, e a guarda
     /// evita rodar duas vezes no mesmo quadro.
     estado_em: Instant,
@@ -574,6 +583,9 @@ impl Player {
             arrastando_divisao: false,
             recolhido: false,
             foco_pelo_teclado: false,
+            focos: RefCell::default(),
+            rolar_ao_foco: Rc::default(),
+            fundos_na_tela: RefCell::default(),
             estado_em: agora,
             ilha: None,
             abrindo_ilha: false,
@@ -615,6 +627,10 @@ impl Player {
                 let controle = self.sessao.controlador();
                 let local = self.local.controle();
                 let origem_local = self.origem_local_fora.clone();
+                // Outra cópia aberta com a mesma pasta de dados chama esta para a frente e fecha.
+                if let Ok(pasta) = nucleo::caminhos::pasta_dados() {
+                    integracao::atender_quem_abrir_de_novo(nucleo::caminhos::chave_da_pasta(&pasta) as usize);
+                }
                 // Os botões agem no que a tela mostra: a música local ou o app que está tocando.
                 let sistema = integracao::Integracao::instalar(hw.hwnd.get(), move |acao| {
                     if origem_local.load(std::sync::atomic::Ordering::Acquire) {
@@ -1503,6 +1519,7 @@ impl Player {
         if tecla == "tab" && !m.control && !m.alt && !m.platform && !janela_por_cima {
             self.largar_campo();
             self.foco_pelo_teclado = true;
+            self.rolar_ao_foco.set(true);
             if m.shift {
                 window.focus_prev();
             } else {
@@ -1523,6 +1540,18 @@ impl Player {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Solta da placa de vídeo (e do cache de imagens do GPUI) os fundos grandes que saíram da tela.
+    fn soltar_fundos(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let vencidos = self.fundos_na_tela.borrow_mut().vencidos(Instant::now());
+        for arquivo in vencidos {
+            let recurso = gpui::Resource::from(arquivo);
+            if let Some(Ok(imagem)) = window.get_asset::<gpui::ImgResourceLoader>(&recurso, cx) {
+                cx.drop_image(imagem, Some(window));
+            }
+            cx.remove_asset::<gpui::ImgResourceLoader>(&recurso);
         }
     }
 
@@ -1754,6 +1783,8 @@ pub(crate) fn hora_local() -> (u8, u8) {
 impl Render for Player {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.quadro(window);
+        self.focos.borrow_mut().preparar(cx);
+        self.soltar_fundos(window, cx);
         self.sincronizar_ilha(window, cx);
         let c = self.cores();
         let a = self.arranjo;

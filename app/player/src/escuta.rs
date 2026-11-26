@@ -257,8 +257,9 @@ fn rodar(l: &Ligacao) {
                 Fonte::App(_) | Fonte::Proprio | Fonte::DoPlayer(_) => {
                     let alvo = match &fonte {
                         Fonte::App(exe) => panorama.alvo(exe),
-                        // (O do Player, e não o de outro programa que esteja aberto com o mesmo nome.)
-                        Fonte::DoPlayer(exe) => panorama.do_player(exe).first().copied().or_else(|| panorama.alvo(exe)),
+                        // Só o que o Player abriu: o Spotifast tem um `soloist.exe` com o mesmo nome, e pegar o dele
+                        // mostraria a música errada no visual (enquanto o nosso não aparece, a escuta espera).
+                        Fonte::DoPlayer(exe) => panorama.do_player(exe).first().copied(),
                         _ => Some(panorama.raiz_propria()),
                     };
                     let ganho = match (&fonte, l.do_player.get()) {

@@ -1,0 +1,71 @@
+# Confere o app a cada envio ao main e a cada pedido de mudança: formatação, clippy sem aviso, testes e licenças.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Sem placa de vídeo no servidor: o teste que desenha os visuais termina sem falhar.
+  TCCPLAYER_SEM_GPU: "1"
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  windows:
+    name: Windows (fmt, clippy, testes)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # A mesma versão usada no PC do Rafael.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+
+      # O GPUI compila os shaders com o fxc do Windows SDK; o caminho do .cargo/config.toml é o do 10.0.22621.
+      - name: Conferir o fxc
+        shell: pwsh
+        run: |
+          $fxc = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\fxc.exe'
+          if (-not (Test-Path $fxc)) {
+            $outro = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\fxc.exe' | Sort-Object FullName | Select-Object -Last 1
+            if (-not $outro) { throw 'fxc.exe não encontrado' }
+            "GPUI_FXC_PATH=$($outro.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "Usando $($outro.FullName)"
+          }
+
+      - name: Formatação
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Testes
+        run: cargo test --workspace --locked --no-fail-fast
+
+  licencas:
+    name: Licenças e fontes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: app/Cargo.toml
+          command: check licenses sources

@@ -325,7 +325,7 @@ impl Player {
     /// estado do último).
     pub(crate) fn item_salvo(&self, item: &Item) -> bool {
         let chave = crate::paginas::chave_do_salvo(item);
-        self.salvos_pendentes.get(&chave).copied().unwrap_or_else(|| self.local.salvo(item).is_some())
+        self.salvos_pendentes.get(&chave).map(|(quer, _)| *quer).unwrap_or_else(|| self.local.salvo(item).is_some())
     }
 
     /// Curte ou tira dos salvos; o coração pulsa.
@@ -336,7 +336,7 @@ impl Player {
         } else {
             self.local.tirar_salvo(item);
         }
-        self.salvos_pendentes.insert(crate::paginas::chave_do_salvo(item), salvar);
+        self.salvos_pendentes.insert(crate::paginas::chave_do_salvo(item), (salvar, self.local.enviados()));
         self.anim.definir(("coracao", pulso), 1.35);
     }
 
@@ -385,11 +385,10 @@ impl Player {
 
     /// Esquece os cliques que a biblioteca já confirmou.
     pub(super) fn conferir_salvos_pendentes(&mut self) {
-        let salvos = self.local.lista.salvos.clone();
-        self.salvos_pendentes.retain(|(servico, tipo, id), quer| {
-            let esta = salvos.iter().any(|(s, _)| &s.servico == servico && s.tipo == *tipo && &s.id == id);
-            esta != *quer
-        });
+        // Só quando a biblioteca atendeu o último clique: com cliques rápidos, uma lista do meio do caminho
+        // mostraria o estado de antes, e o coração piscava.
+        let atendidos = self.local.lista.atendidos;
+        self.salvos_pendentes.retain(|_, (_, pedido)| atendidos < *pedido);
     }
 
     /// Toca em ordem aleatória: o aleatório liga antes (a fila embaralha todas as outras, nenhuma fica para trás).

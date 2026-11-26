@@ -14,10 +14,17 @@ impl Player {
         self.marcado = None;
     }
 
-    /// Cria a playlist com o nome escrito (e as músicas da janela).
+    /// Cria a playlist com o nome escrito (e as músicas da janela), ou troca o nome de uma.
     fn criar_playlist_da_janela(&mut self) {
         let Some(j) = self.janela_playlist.take() else { return };
         self.marcado = None;
+        if let Some(id) = j.renomear {
+            let nome = j.nome.trim().to_string();
+            let mostrado = if nome.is_empty() { "Nova playlist".to_string() } else { nome.clone() };
+            self.local.renomear_playlist(id, nome);
+            self.avisar(format!("Playlist renomeada para \"{mostrado}\""));
+            return;
+        }
         let nome = j.nome.trim().to_string();
         let quantas = j.musicas.len();
         self.local.criar_playlist(nome.clone(), j.musicas, j.so_criar);
@@ -48,8 +55,13 @@ impl Player {
         let c = self.cores();
         let a = &self.arranjo;
         let quantas = j.musicas.len();
-        let titulo_janela = if j.so_criar { "Nova playlist" } else { "Pôr numa playlist" };
+        let titulo_janela = match (j.renomear, j.so_criar) {
+            (Some(_), _) => "Renomear playlist",
+            (None, true) => "Nova playlist",
+            (None, false) => "Pôr numa playlist",
+        };
         let frase: SharedString = match quantas {
+            _ if j.renomear.is_some() => "Escreva o nome novo e aperte Enter.".into(),
             0 => "Escreva o nome e aperte Enter.".into(),
             1 => "1 música vai entrar.".into(),
             n => format!("{n} músicas vão entrar.").into(),
@@ -105,9 +117,20 @@ impl Player {
             .border_1()
             .border_color(c.texto)
             .cursor_text()
-            .child(icone("icones/plus.svg", medidas::ICONE_LINHA, c.texto))
+            .child(icone(
+                if j.renomear.is_some() { "icones/playlist.svg" } else { "icones/plus.svg" },
+                medidas::ICONE_LINHA,
+                c.texto,
+            ))
             .child(self.receber_texto(cx))
-            .child(Self::conteudo_do_campo(&c, &j.nome, "Nome da playlist nova", medidas::CORPO, true, false));
+            .child(Self::conteudo_do_campo(
+                &c,
+                &j.nome,
+                if j.renomear.is_some() { "Nome da playlist" } else { "Nome da playlist nova" },
+                medidas::CORPO,
+                true,
+                false,
+            ));
         let criar = medidas::corpo()
             .id("janela-playlist-criar")
             .h(px(medidas::BOTAO))
@@ -121,7 +144,7 @@ impl Player {
             .font_weight(FontWeight::SEMIBOLD)
             .cursor_pointer()
             .hover(|s| s.opacity(0.9))
-            .child("Criar")
+            .child(if j.renomear.is_some() { "Renomear" } else { "Criar" })
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.criar_playlist_da_janela();
                 cx.notify();

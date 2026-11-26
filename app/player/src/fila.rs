@@ -145,6 +145,13 @@ impl Fila {
         self.original.insert(lugar_original.min(self.original.len()), musica);
     }
 
+    /// Põe a música logo depois da de agora e diz o lugar dela, para ela tocar já (o resto da fila continua depois).
+    pub fn tocar_agora(&mut self, musica: Musica) -> usize {
+        let lugar = self.atual.map_or(self.itens.len(), |i| i + 1);
+        self.tocar_a_seguir(musica);
+        lugar
+    }
+
     /// Põe as músicas no fim da fila.
     pub fn adicionar(&mut self, musicas: impl IntoIterator<Item = Musica>) {
         for m in musicas {
@@ -245,6 +252,16 @@ mod testes {
         assert_eq!(f.indice_seguinte(true), None);
         assert_eq!(f.indice_anterior(), Some(1));
         assert!(f.tocar(Vec::new(), 0).is_none());
+    }
+
+    #[test]
+    fn tocar_agora_mantem_o_resto_da_fila() {
+        let mut f = Fila::nova(false, Repetir::Nada);
+        f.tocar(lista(3), 1);
+        let i = f.tocar_agora(m("nova"));
+        f.ir_para(i);
+        assert_eq!(f.musica_atual().map(|m| m.titulo.as_str()), Some("nova"));
+        assert_eq!(nomes(&f), ["0", "1", "nova", "2"], "a fila de antes continua depois dela");
     }
 
     #[test]

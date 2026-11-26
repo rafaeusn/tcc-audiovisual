@@ -7,6 +7,8 @@ use crate::Acao;
 use crate::desenho::{Forma, desenhar};
 use std::cell::RefCell;
 use std::ffi::c_void;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CreateBitmap, DeleteObject, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
@@ -20,9 +22,9 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu, GA_ROOT, GetAncestor, GetCursorPos,
-    GetSystemMetrics, GetWindowPlacement, HICON, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IsIconic, MF_SEPARATOR,
-    MF_STRING, MINMAXINFO, PostMessageW, RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_MAXIMIZE, SW_RESTORE,
-    SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPlacement, SetWindowPos, ShowWindow,
+    GetSystemMetrics, GetWindowPlacement, HICON, HWND_BROADCAST, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IsIconic,
+    MF_SEPARATOR, MF_STRING, MINMAXINFO, PostMessageW, RegisterWindowMessageW, SM_CXSMICON, SW_HIDE, SW_MAXIMIZE,
+    SW_RESTORE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPlacement, SetWindowPos, ShowWindow,
     TPM_BOTTOMALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_COMMAND,
     WM_GETMINMAXINFO, WM_LBUTTONUP, WM_NCDESTROY, WM_RBUTTONUP, WindowFromPoint,
 };
@@ -279,6 +281,26 @@ pub fn ponteiro_dentro() -> bool {
     }
 }
 
+/// A chave da pasta de dados desta cópia (0 = não atende): outra cópia aberta com a mesma pasta pede para ela aparecer.
+static CHAVE: AtomicUsize = AtomicUsize::new(0);
+
+/// A mensagem "apareça", registrada no Windows (o mesmo número em todos os programas que a registram).
+fn msg_aparecer() -> u32 {
+    static MSG: OnceLock<u32> = OnceLock::new();
+    // SAFETY: chamada simples do Windows com um nome constante terminado em nulo.
+    *MSG.get_or_init(|| unsafe { RegisterWindowMessageW(w!("TccPlayer.aparecer")) })
+}
+
+pub fn atender_quem_abrir_de_novo(chave: usize) {
+    CHAVE.store(chave, Ordering::Relaxed);
+}
+
+pub fn pedir_que_apareca(chave: usize) -> bool {
+    let msg = msg_aparecer();
+    // SAFETY: põe a mensagem na fila das janelas de cima; só a cópia com a mesma chave responde.
+    msg != 0 && unsafe { PostMessageW(Some(HWND_BROADCAST), msg, WPARAM(chave), LPARAM(0)) }.is_ok()
+}
+
 pub fn trazer() {
     if let Some(hwnd) = com_estado(|e| e.hwnd) {
         mostrar(hwnd);
@@ -384,6 +406,11 @@ unsafe extern "system" fn ao_receber(
 ) -> LRESULT {
     let (botao_criado, barra_criada) =
         com_estado(|e| (e.msg_botao_criado, e.msg_barra_criada)).unwrap_or((u32::MAX, u32::MAX));
+    let chave = CHAVE.load(Ordering::Relaxed);
+    if chave != 0 && wparam.0 == chave && msg == msg_aparecer() {
+        mostrar(hwnd);
+        return LRESULT(0);
+    }
     match msg {
         WM_COMMAND if (wparam.0 >> 16) & 0xFFFF == THBN_CLICKED => {
             pedir(wparam.0 & 0xFFFF);

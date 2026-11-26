@@ -85,7 +85,8 @@ impl Player {
             return;
         }
         let pos = f32::from(x - pista.origin.x);
-        let sobra = if pos < 0.0 { pos } else { (pos - largura).max(0.0) };
+        // Em medida das telas: o dock desenha o esticão pelo `px` delas (que multiplica pelo tamanho da interface).
+        let sobra = (if pos < 0.0 { pos } else { (pos - largura).max(0.0) }) / crate::ui::medidas::escala();
         // O esticão cabe na margem do controle (8 px à direita, 4 à esquerda): nunca passa da borda do dock.
         self.volume_esticado = elastico(sobra, ESTICA_VOLUME).clamp(-4.0, ESTICA_VOLUME);
         self.mudar_volume(pos / largura);

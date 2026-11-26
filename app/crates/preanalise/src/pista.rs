@@ -310,6 +310,14 @@ fn ataques(q: &Quadros) -> (Vec<Ataque>, Vec<f32>) {
 }
 
 /// 3a. Andamento: autocorrelação do fluxo, com preferência log-normal por volta de 120 BPM.
+/// Se a curva de ataques varia alguma coisa. Sem variação (silêncio, um tom parado) não há andamento a medir.
+fn tem_pulso(odf: &[f32]) -> bool {
+    let n = odf.len().max(1) as f64;
+    let media = odf.iter().map(|&v| f64::from(v)).sum::<f64>() / n;
+    let variancia = odf.iter().map(|&v| (f64::from(v) - media).powi(2)).sum::<f64>() / n;
+    variancia > 1e-12
+}
+
 fn andamento(odf: &[f32], fps: f32) -> f32 {
     let n = odf.len();
     if n < 10 {
@@ -505,7 +513,9 @@ pub fn analisar_pcm(pcm: &[f32], taxa: u32, parar: &dyn Fn() -> bool) -> Option<
     if parar() {
         return None;
     }
-    let bpm = andamento(&odf, fps);
+    let pulso = tem_pulso(&odf);
+    // Sem pulso, as contas abaixo seguem com 120 e o BPM publicado fica 0 ("—" nas telas).
+    let bpm = if pulso { andamento(&odf, fps) } else { 120.0 };
     let idx_batidas = batidas_dp(&odf, fps, bpm);
     if parar() {
         return None;
@@ -814,7 +824,7 @@ pub fn analisar_pcm(pcm: &[f32], taxa: u32, parar: &dyn Fn() -> bool) -> Option<
 
     Some(Linha {
         duracao_s: duracao,
-        bpm,
+        bpm: if pulso { bpm } else { 0.0 },
         clareza_da_batida,
         energia,
         volume,
@@ -864,6 +874,17 @@ mod testes {
         assert_eq!(percentil([], 0.5), 0.0);
         let s = suavizar(&[0.0, 0.0, 10.0, 0.0, 0.0], 1.0);
         assert!(s[2] < 10.0 && s[1] > 0.0 && (s[1] - s[3]).abs() < 1e-6);
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn silencio_nao_tem_andamento() {
+        // Antes, a curva sem variação nenhuma dava o primeiro atraso possível: 240 BPM.
+        assert!(!tem_pulso(&vec![0.0; 3000]));
+        assert!(!tem_pulso(&vec![0.3; 3000]));
+        let silencio = vec![0.0f32; 44100 * 20];
+        let linha = analisar_pcm(&silencio, 44100, &|| false).expect("analisa");
+        assert_eq!(linha.bpm, 0.0, "sem pulso o BPM fica vazio");
     }
 
     #[test]

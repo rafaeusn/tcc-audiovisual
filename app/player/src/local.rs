@@ -72,6 +72,8 @@ pub struct Lista {
     /// O que a pessoa curtiu e salvou dos serviços (os fixados primeiro), com o item já lido (a tela não lê JSON a
     /// cada quadro; `None` quando os dados estragaram).
     pub salvos: Arc<Vec<(biblioteca::Salvo, Option<provedores::Item>)>>,
+    /// Quantos pedidos a thread já atendeu quando publicou esta lista (eles chegam em ordem: [`Local::enviados`]).
+    pub atendidos: u64,
 }
 
 enum Pedido {
@@ -94,6 +96,7 @@ enum Pedido {
         abrir: bool,
     },
     ApagarPlaylist(i64),
+    RenomearPlaylist(i64, String),
     /// As músicas entram no fim (as de serviço também: o que mostrar delas fica guardado no acervo).
     AdicionarAPlaylist(i64, Vec<Musica>),
     TirarDaPlaylist(i64, PathBuf),
@@ -138,6 +141,7 @@ struct Biblio<'a> {
     parar: &'a AtomicBool,
     /// O último apagar/tirar, para o "Desfazer" do aviso.
     volta: Option<Volta>,
+    atendidos: u64,
 }
 
 impl Biblio<'_> {
@@ -180,6 +184,7 @@ impl Biblio<'_> {
                     })
                     .collect(),
             ),
+            atendidos: self.atendidos,
         };
         trocar(self.lista, nova);
         self.versao.fetch_add(1, Ordering::Release);
@@ -252,6 +257,9 @@ impl Biblio<'_> {
                 for pasta in self.acervo.pastas().unwrap_or_default() {
                     self.varrer(&pasta);
                 }
+            }
+            Pedido::RenomearPlaylist(id, nome) => {
+                avisar(self.acervo.renomear_playlist(id, &nome), "renomear a playlist")
             }
             Pedido::CriarPlaylist { nome, musicas, abrir } => match self.acervo.criar_playlist(&nome) {
                 Ok(id) => {
@@ -332,6 +340,7 @@ fn rodar_biblioteca(
         versao,
         parar,
         volta: None,
+        atendidos: 0,
     };
     b.publicar(None);
     // Pastas sem nada guardado (acabaram de entrar, ou o acervo veio de uma versão anterior): varre já.
@@ -345,6 +354,7 @@ fn rodar_biblioteca(
         pedidos.extend(fila.try_iter());
         for pedido in pedidos {
             b.atender(pedido);
+            b.atendidos += 1;
         }
         b.publicar(None);
     }
@@ -471,6 +481,8 @@ pub struct Local {
     tocador: Tocador,
     preanalista: crate::preanalista::Preanalista,
     pedidos: Option<Sender<Pedido>>,
+    /// Quantos pedidos foram mandados à thread da biblioteca.
+    enviados: std::cell::Cell<u64>,
     lista_viva: Arc<Mutex<Lista>>,
     versao_viva: Arc<AtomicU64>,
     versao_vista: u64,
@@ -488,6 +500,8 @@ pub struct Local {
     pub remoto: crate::remoto::Remoto,
     /// A música de agora é de um provedor e o endereço dela ainda não chegou (a chave).
     esperando_endereco: Option<PathBuf>,
+    /// A música que trocou de tocador no meio (o do serviço caiu) continua daqui, e não do começo.
+    comecar_em: Option<(PathBuf, f64)>,
     /// A de agora falhou por algo passageiro: quantas vezes já foi tentada de novo, e quando é a próxima.
     tentativas: usize,
     nova_tentativa: Option<Instant>,
@@ -564,6 +578,7 @@ impl Local {
             tocador: Tocador::iniciar(mudo),
             preanalista,
             pedidos,
+            enviados: std::cell::Cell::new(0),
             lista_viva,
             versao_viva,
             versao_vista: u64::MAX,
@@ -576,6 +591,7 @@ impl Local {
             seguinte_pedida: None,
             remoto,
             esperando_endereco: None,
+            comecar_em: None,
             tentativas: 0,
             nova_tentativa: None,
             parada: false,
@@ -599,9 +615,16 @@ impl Local {
     }
 
     fn pedir(&self, pedido: Pedido) {
-        if let Some(p) = &self.pedidos {
-            let _ = p.send(pedido);
+        if let Some(p) = &self.pedidos
+            && p.send(pedido).is_ok()
+        {
+            self.enviados.set(self.enviados.get() + 1);
         }
+    }
+
+    /// Quantos pedidos já foram mandados à biblioteca: a lista com `atendidos` igual ou maior já os mostra.
+    pub fn enviados(&self) -> u64 {
+        self.enviados.get()
     }
 
     // ------------------------------------------------------------------ a lista
@@ -659,6 +682,10 @@ impl Local {
 
     pub fn criar_playlist(&self, nome: String, musicas: Vec<Musica>, abrir: bool) {
         self.pedir(Pedido::CriarPlaylist { nome, musicas, abrir });
+    }
+
+    pub fn renomear_playlist(&self, id: i64, nome: String) {
+        self.pedir(Pedido::RenomearPlaylist(id, nome));
     }
 
     pub fn apagar_playlist(&self, id: i64) {
@@ -839,6 +866,12 @@ impl Local {
         self.tentativas = 0;
         let ganho = self.ganho(&musica);
         self.tocador.mandar(Comando::Tocar { origem, ganho });
+        if let Some((caminho, segundos)) = self.comecar_em.take()
+            && caminho == musica.caminho
+            && segundos >= 1.0
+        {
+            self.tocador.mandar(Comando::Ir(segundos));
+        }
         self.carregar_capa(&musica);
         self.publicado = None;
         // A seguinte é pedida de novo no próximo quadro (o tocador esquece a anterior ao trocar de música).
@@ -880,6 +913,16 @@ impl Local {
     pub fn tocar_a_seguir(&mut self, musica: Musica) {
         if self.ativo() {
             self.fila.tocar_a_seguir(musica);
+        } else {
+            self.tocar_lista(vec![musica], 0);
+        }
+    }
+
+    /// Toca a música já, sem trocar a fila: ela entra depois da de agora, e o resto continua depois dela.
+    pub fn tocar_agora(&mut self, musica: Musica) {
+        if self.ativo() {
+            let i = self.fila.tocar_agora(musica);
+            self.ir_para_na_fila(i);
         } else {
             self.tocar_lista(vec![musica], 0);
         }
@@ -1112,6 +1155,7 @@ impl Local {
                 let nome = m.remota.as_ref().map(|r| r.fonte.clone()).unwrap_or_default();
                 log::warn!("\"{}\" não tocou no tocador do {nome}: {motivo}", m.titulo);
                 self.remoto.mandar_pelo_match(&m);
+                self.comecar_em = Some((m.caminho.clone(), self.situacao.posicao_s));
                 // Sem outro serviço, quem avisa é a falha da própria faixa.
                 if matches!(self.remoto.quem_toca_esta(&m), QuemToca::Outro(_)) {
                     self.aviso = Some(format!("O player do {nome} não tocou ({motivo}): tocando por outro serviço"));
@@ -1340,13 +1384,20 @@ impl Local {
     /// A música de agora ainda não toca (a rede caiu): o Windows mostra ela, pausada, em vez da anterior tocando.
     fn publicar_pausada(&mut self, musica: &Musica) {
         self.publicado = None;
+        // A capa já lida desta música vai junto (o controle de mídia do Windows lê o arquivo).
+        let capa_url = match ler(&self.capa) {
+            Some((arquivo, _, Some(imagem))) if arquivo == musica.caminho => {
+                Some(format!("file://{}", imagem.display()))
+            }
+            _ => None,
+        };
         let Some(controles) = self.controles.as_mut() else { return };
         let _ = controles.set_metadata(MediaMetadata {
             title: Some(&musica.titulo),
             artist: Some(&musica.artista).filter(|a| !a.is_empty()).map(String::as_str),
             album: Some(&musica.album).filter(|a| !a.is_empty()).map(String::as_str),
             duration: None,
-            cover_url: None,
+            cover_url: capa_url.as_deref(),
         });
         let _ = controles.set_playback(MediaPlayback::Paused { progress: None });
     }
@@ -1455,6 +1506,7 @@ mod testes {
             versao: &versao,
             parar: &parar,
             volta: None,
+            atendidos: 0,
         };
         b.atender(Pedido::Procurar("lume".into()));
         b.publicar(None);

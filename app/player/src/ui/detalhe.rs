@@ -121,7 +121,11 @@ impl Player {
 
     /// O fundo pronto de um endereço (pede e segue: a imagem chega num dos próximos quadros).
     fn fundo_de(&self, url: Option<&str>, tipo: TipoDeFundo) -> Option<Fundo> {
-        url.filter(|u| !u.is_empty()).and_then(|u| self.capas.fundo(u, tipo))
+        let fundo = url.filter(|u| !u.is_empty()).and_then(|u| self.capas.fundo(u, tipo));
+        if let Some(f) = &fundo {
+            self.fundos_na_tela.borrow_mut().visto(&f.arquivo, std::time::Instant::now());
+        }
+        fundo
     }
 
     /// Álbum, playlist ou artista.
@@ -467,6 +471,9 @@ impl Player {
         let album = matches!(rota, Rota::Album(_));
         let como = LinhaDeFaixa { numero: album, sem_capa: album, ouvidas: album, album: !album, ..Default::default() };
         let mut lista = div().flex().flex_col().child(self.linhas_de_faixas(faixas, faixas.len(), como, cx));
+        if let Some(aviso) = detalhes::aviso_de_corte(faixas.len(), detalhe.and_then(|d| d.total)) {
+            lista = lista.child(medidas::apoio().mt(px(16.0)).text_color(c.texto_2).child(aviso));
+        }
         let rodape: Vec<String> = detalhe
             .map(|d| d.data.as_deref().map(detalhes::data_longa).into_iter().chain(d.gravadora.clone()).collect())
             .unwrap_or_default();

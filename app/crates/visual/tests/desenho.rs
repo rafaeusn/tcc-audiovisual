@@ -1,7 +1,7 @@
 //! Desenha os três visuais sem janela, lê os pixels de volta e confere que saiu imagem.
 //!
 //! Também salva um PNG por visual em `target/visuais/`, para comparar a olho com a prévia.
-//! Em máquina sem GPU (CI) o teste termina sem falhar.
+//! Em máquina sem GPU, ou com `TCCPLAYER_SEM_GPU` (o CI), o teste termina sem falhar. Travado, sai com erro em 3 min.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -13,7 +13,27 @@ const W: u32 = 960;
 const H: u32 = 540;
 const FORMATO: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
+/// Quanto o teste pode levar antes de ser dado por travado (uma vez travou 50 min com um jogo aberto).
+const PRAZO: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Sai do processo com erro se os testes passarem do prazo: travado, o `cargo test` nunca acabaria.
+fn vigiar() {
+    static VIGIA: std::sync::Once = std::sync::Once::new();
+    VIGIA.call_once(|| {
+        std::thread::spawn(|| {
+            std::thread::sleep(PRAZO);
+            eprintln!("desenho: passou de {} s, dado por travado", PRAZO.as_secs());
+            std::process::exit(2);
+        });
+    });
+}
+
 fn dispositivo() -> Option<(wgpu::Device, wgpu::Queue)> {
+    // No CI não há placa de vídeo, e o adaptador por software (WARP) é lento demais para estes testes.
+    if std::env::var_os("TCCPLAYER_SEM_GPU").is_some() {
+        return None;
+    }
+    vigiar();
     let instancia = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adaptador = pollster::block_on(instancia.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,

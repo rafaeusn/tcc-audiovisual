@@ -32,6 +32,9 @@ pub struct Faixa {
     /// Quantas vezes foi ouvida no serviço.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ouvidas: Option<u64>,
+    /// O número da faixa no álbum (só nas faixas de um álbum).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numero: Option<u32>,
 }
 
 impl Faixa {
