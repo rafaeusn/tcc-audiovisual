@@ -1,0 +1,121 @@
+<title>Remodelagem da Estante</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&amp;family=Doto:wght@500..800&amp;family=Fragment+Mono&amp;display=swap">
+<link rel="stylesheet" href="estilo.css">
+
+<main class="pg">
+  <header>
+    <h1 class="cond">Remodelagem da Estante</h1>
+    <p>O protótipo abaixo é clicável: troque a opção de layout, o tamanho da janela e a energia da música, navegue pelas páginas, role a lista, passe o mouse nas capas e filtre por serviço. Os nomes e as capas são inventados. No app, entram os seus.</p>
+    <nav class="ancoras" aria-label="Partes da página"><a href="#achados">O que a auditoria achou</a><a href="#pecas">Peças lado a lado</a><a href="#fluxo">O fluxo novo</a><a href="#plano">O plano</a><a href="#decidido">O que ficou decidido</a></nav>
+  </header>
+
+  <section class="sec" aria-label="Protótipo">
+    <div class="ctl">
+      <fieldset><legend>Onde fica o visual</legend><div class="seg">
+        <button type="button" data-set="op=B" aria-pressed="true">B. Lado a lado</button><button type="button" data-set="op=A" aria-pressed="false">A. Palco vivo</button><button type="button" data-set="op=C" aria-pressed="false">C. Vidro</button><button type="button" data-set="op=hoje" aria-pressed="false">Como é hoje</button>
+      </div></fieldset>
+      <fieldset><legend>Tamanho da janela</legend><div class="seg">
+        <button type="button" data-set="tam=1920x1010" aria-pressed="false">1920</button><button type="button" data-set="tam=1440x900" aria-pressed="true">1440</button><button type="button" data-set="tam=958x560" aria-pressed="false">958 × 560 (a sua)</button><button type="button" data-set="tam=410x800" aria-pressed="false">410</button>
+      </div></fieldset>
+      <fieldset><legend>Música</legend><div class="seg">
+        <button type="button" data-set="en=calma" aria-pressed="false">Calma</button><button type="button" data-set="en=agitada" aria-pressed="true">Agitada</button><button type="button" data-set="en=intensa" aria-pressed="false">Intensa</button>
+      </div></fieldset>
+    </div>
+    <div class="mold" id="mold"><div class="mk" id="mk"><canvas id="vis" aria-label="O visual reagindo à música"></canvas><div id="ui"></div></div></div>
+    <div class="explica" id="explica" aria-live="polite"></div>
+  </section>
+
+  <section class="sec" id="achados">
+    <h2 class="cond">O que a auditoria achou</h2>
+    <div class="placar">
+      <div>
+        <h3>Qualidade técnica</h3>
+        <div class="total">10<small>de 20: dá para usar, com trabalho importante pela frente</small></div>
+        <table><tbody>
+          <tr><td><b>Acessibilidade</b></td><td><span class="nota" role="img" aria-label="2 de 4"><i class="f"></i><i class="f"></i><i></i><i></i></span></td><td>Contraste e movimento reduzido bons. Nenhum botão recebe o Tab, e as ações das linhas só aparecem com o mouse.</td></tr>
+          <tr><td><b>Desempenho</b></td><td><span class="nota" role="img" aria-label="3 de 4"><i class="f"></i><i class="f"></i><i class="f"></i><i></i></span></td><td>Nada trava a tela. A busca é reagrupada a cada quadro, e capas de 640 px são abertas para mostrar 36.</td></tr>
+          <tr><td><b>Aparência</b></td><td><span class="nota" role="img" aria-label="1 de 4"><i class="f"></i><i></i><i></i><i></i></span></td><td>9 tamanhos de texto, 11 raios, 10 tamanhos de ícone e 16 espaços, contra 7, 5, 1 e 7 do nosso sistema.</td></tr>
+          <tr><td><b>Padrões do Windows</b></td><td><span class="nota" role="img" aria-label="2 de 4"><i class="f"></i><i class="f"></i><i></i><i></i></span></td><td>Nenhum menu de botão direito. Clicar no título da barra não abre nada.</td></tr>
+          <tr><td><b>Adaptação</b></td><td><span class="nota" role="img" aria-label="2 de 4"><i class="f"></i><i class="f"></i><i></i><i></i></span></td><td>Três modos testados, mas cartões de largura fixa, e o visual some entre 761 e 1060 px.</td></tr>
+        </tbody></table>
+      </div>
+      <div>
+        <h3>Facilidade de uso (heurísticas de Nielsen)</h3>
+        <div class="total">21<small>de 40: as piores notas são consistência e reconhecimento</small></div>
+        <table><tbody>
+          <tr><td><b>Consistência</b></td><td><span class="nota" role="img" aria-label="1 de 4"><i class="f"></i><i></i><i></i><i></i></span></td><td>Três buscas, “Para você” três vezes, × numa página que não é janela.</td></tr>
+          <tr><td><b>Reconhecer em vez de lembrar</b></td><td><span class="nota" role="img" aria-label="1 de 4"><i class="f"></i><i></i><i></i><i></i></span></td><td>Os serviços são bolinhas sem nome; Fila e Histórico ficam escondidos.</td></tr>
+          <tr><td><b>Estado visível</b></td><td><span class="nota" role="img" aria-label="2 de 4"><i class="f"></i><i class="f"></i><i></i><i></i></span></td><td>Nada diz de que serviço é a música que está tocando.</td></tr>
+          <tr><td><b>Linguagem</b></td><td><span class="nota" role="img" aria-label="2 de 4"><i class="f"></i><i class="f"></i><i></i><i></i></span></td><td>“Espaço”, “Tudo” como ícone de grade, biblioteca que muda de sentido.</td></tr>
+          <tr><td><b>Controle e desfazer</b></td><td><span class="nota" role="img" aria-label="3 de 4"><i class="f"></i><i class="f"></i><i class="f"></i><i></i></span></td><td>Voltar, avançar e “Desfazer” já funcionam bem.</td></tr>
+        </tbody></table>
+      </div>
+    </div>
+    <div class="rol-x"><table>
+      <thead><tr><th>Peso</th><th>Achado</th><th>A prova</th><th>Some na parte</th></tr></thead>
+      <tbody>
+        <tr><td><span class="gr p1">P1</span></td><td><b>O visual perdeu o centro na Estante</b></td><td>340 × 255 px numa janela de 1440 × 900 (6,7%). Zero na sua janela de 958 px.</td><td>5</td></tr>
+        <tr><td><span class="gr p1">P1</span></td><td><b>A navegação se repete</b></td><td>“Para você” na lateral, no topo da folha e no título; três buscas; no Palco o streaming fica atrás de “Biblioteca”.</td><td>2</td></tr>
+        <tr><td><span class="gr p1">P1</span></td><td><b>“Tudo” não mistura nem marca</b></td><td>Todas as prateleiras do YouTube e, depois de várias telas, as do Spotify. Nenhum item e nem a barra dizem o serviço.</td><td>3 e 4</td></tr>
+        <tr><td><span class="gr p1">P1</span></td><td><b>Letras e símbolos pequenos e fora do padrão</b></td><td>92% dos textos com 14 px ou menos; 74% dos ícones com 18 px ou menos.</td><td>1</td></tr>
+        <tr><td><span class="gr p1">P1</span></td><td><b>Capas e fotos quadradas</b></td><td>É um erro: o canto arredondado está na caixa, e o GPUI só recorta em retângulo. Nem a foto do artista fica redonda.</td><td>1</td></tr>
+        <tr><td><span class="gr p1">P1</span></td><td><b>Serviços fora de alcance a 410 px</b></td><td>No Palco, a fileira de serviços é cortada e não dá para chegar no YouTube nem no Spotify.</td><td>2</td></tr>
+        <tr><td><span class="gr p1">P1</span></td><td><b>A busca vaza entre páginas</b></td><td>Buscar no Spotify e abrir Tudo › Biblioteca mostra “0 músicas encontradas”.</td><td>1</td></tr>
+        <tr><td><span class="gr p2">P2</span></td><td><b>A barra de baixo está torta</b></td><td>O play encosta na borda, os ícones da direita estão em outro eixo, o tempo fica embaixo de um botão e capa de vídeo sai achatada. Sem coração e sem links.</td><td>4</td></tr>
+        <tr><td><span class="gr p2">P2</span></td><td><b>Artista e álbum sem imagem</b></td><td>O Spotify manda a foto larga (1920 × 1080), ouvintes do mês, biografia e álbuns separados de singles; o YouTube Music, uma de 2880 × 1200. O Player joga tudo fora.</td><td>6</td></tr>
+        <tr><td><span class="gr p2">P2</span></td><td><b>Duas cores grandes brigando</b></td><td>A folha inteira fica vermelha ou verde ao lado da barra azul da energia, que é a nossa identidade.</td><td>3</td></tr>
+        <tr><td><span class="gr p2">P2</span></td><td><b>Cartões de tamanho fixo</b></td><td>156 px em qualquer janela: minúsculos em 1920, uma fileira e meia em 1280 × 720.</td><td>7</td></tr>
+        <tr><td><span class="gr p2">P2</span></td><td><b>Texto cortado sem reticências</b></td><td>Cartões, lateral, o módulo Energia (“Energ”) e o “Ouvindo Alto-falantes (Realtek”.</td><td>1</td></tr>
+        <tr><td><span class="gr">P3</span></td><td><b>Caixa alta e pontos do meio</b></td><td>“SUA BIBLIOTECA”, “ÁLBUM”, “Playlist·Spotify”: contra a nossa própria regra.</td><td>1</td></tr>
+      </tbody></table></div>
+    <p>O relatório completo, com mais achados, o que está bom e o lugar de cada um no código, fica em <b>docs/auditoria-ui-2026-11-25.md</b>.</p>
+  </section>
+
+  <section class="sec" id="pecas">
+    <h2 class="cond">Peças lado a lado</h2>
+    <div class="pecas">
+      <div class="peca"><h3>Cartão</h3><div class="ladolado" id="p-cartao"></div></div>
+      <div class="peca"><h3>Selo do serviço</h3><div id="p-selos"></div></div>
+      <div class="peca"><h3>Barra de baixo</h3><div style="display:grid;gap:24px" id="p-barra"></div></div>
+      <div class="peca"><h3>Linha de música</h3><div class="ladolado" id="p-linha"></div></div>
+      <div class="peca"><h3>Texto</h3><div class="ladolado" id="p-texto"></div></div>
+    </div>
+  </section>
+
+  <section class="sec" id="fluxo">
+    <h2 class="cond">O fluxo novo: três destinos e um filtro</h2>
+    <div class="explica">
+      <div><h3>Três destinos, sempre no mesmo lugar</h3><ul><li><b>Início</b>: o que tocar agora, misturado.</li><li><b>Buscar</b>: um campo só, no alto, com a lupa. Procura música, artista, letra e comando do app (Ctrl K cai nele).</li><li><b>Biblioteca</b>: o que é seu, de todos os serviços e do PC. O Histórico mora nela.</li></ul></div>
+      <div><h3>O serviço vira filtro</h3><ul><li><b>Tudo, YouTube Music, Spotify, Neste PC</b>, com nome e marca, no alto das três páginas. O filtro escolhido vale nas três.</li><li>Em Tudo, as prateleiras do mesmo tipo se juntam, e cada item leva o selo.</li><li>Com um serviço escolhido, os selos saem (são óbvios) e a lateral mostra só o que é dele.</li></ul></div>
+      <div><h3>Tudo leva a algum lugar</h3><ul><li>Na barra, a capa e o título abrem o álbum, e o nome abre o artista.</li><li>A Fila e a Letra abrem ao lado, sem tirar você da página.</li><li>Uma pilha só de voltar e avançar, como num navegador (hoje é uma por serviço).</li></ul></div>
+    </div>
+  </section>
+
+  <section class="sec" id="plano">
+    <h2 class="cond">O plano, em oito partes</h2>
+    <p>Cada parte termina com o app funcionando, testado e conferido numa cópia. A ordem é a do que mais incomoda primeiro.</p>
+    <div>
+      <div class="passo"><span class="n">1</span><h3>Fundação e consertos rápidos</h3><p>Os tamanhos viram papéis num arquivo só, com um teste que não deixa número solto voltar. Tudo cresce: texto de 12 a 14 px vai para 14 e 16, ícones para 24, linhas para 64. Capas arredondadas, fotos de artista redondas, reticências, a busca que vaza, os cantos da folha.</p></div>
+      <div class="passo"><span class="n">2</span><h3>Navegação e busca única</h3><p>Início, Buscar e Biblioteca, com nome embaixo do ícone no trilho; o filtro de serviço; um campo de busca no alto; a Biblioteca de tudo num lugar só. Some a fileira de bolinhas e as abas do topo da folha.</p></div>
+      <div class="passo"><span class="n">3</span><h3>Tudo misturado, com selos</h3><p>Atalhos de “continuar”, prateleiras por tipo juntando os serviços, selo em cartões, linhas, fila, histórico e Ilha. A mesma música em dois serviços vira uma linha com dois selos. A cor do serviço fica só no selo e no filtro.</p></div>
+      <div class="passo"><span class="n">4</span><h3>Barra de baixo, painel e menu</h3><p>96 px, tudo no mesmo eixo, capa de 64 com selo, coração e links. O painel da direita ganha Agora, Fila e Letra. O mesmo menu abre no ⋯ e no botão direito de qualquer capa ou linha.</p></div>
+      <div class="passo"><span class="n">5</span><h3>O visual no centro</h3><p>A opção B em todos os tamanhos de janela: a divisória que o app lembra, a página larga com a tira do visual, X para só o visual, o painel no lugar da página em janelas menores, e a página saindo da frente com o mouse parado por 30 segundos.</p></div>
+      <div class="passo"><span class="n">6</span><h3>Artista, álbum e playlist</h3><p>Foto larga do artista, fundo com a capa desfocada no álbum, ouvintes, anos, quantas músicas e quanto tempo, abas de álbuns e singles, artistas parecidos, e o mesmo artista no outro serviço. O formato dos provedores ganha esses campos.</p></div>
+      <div class="passo"><span class="n">7</span><h3>Todos os tamanhos e o teclado</h3><p>Cartões que preenchem a largura, regras por altura, Tab com anel de foco, estados vazios com ação e o teste dos nomes compridos.</p></div>
+      <div class="passo"><span class="n">8</span><h3>Tamanho da interface</h3><p>90, 100, 110 e 125% em Configurações › Aparência. Fica para o fim, como você pediu, mas a parte 1 já deixa pronto o lugar dele.</p></div>
+    </div>
+  </section>
+
+  <section class="sec" id="decidido">
+    <h2 class="cond">O que ficou decidido</h2>
+    <p>Escolhas de 25 de novembro de 2026. O protótipo continua mostrando as outras opções, para comparar.</p>
+    <div>
+      <div class="perg"><h3>O visual: B, lado a lado</h3><p>Biblioteca à esquerda, visual no meio, página à direita, com a divisória. A página larga e o X continuam à mão, e o Palco segue sendo só o visual.</p></div>
+      <div class="perg"><h3>O serviço: filtro no alto da página</h3><p>Início, Buscar e Biblioteca, com as fichas Tudo, YouTube Music, Spotify e Neste PC.</p></div>
+      <div class="perg"><h3>A cor: só no selo e no filtro</h3><p>A cor grande é a da energia da música. Nas páginas de álbum e artista, a cor vem da imagem.</p></div>
+      <div class="perg"><h3>Os extras: os quatro</h3><p>A mesma música em dois serviços numa linha só (parte 3), o menu do botão direito (parte 4), a página que sai da frente com o mouse parado (parte 5) e o artista no outro serviço (parte 6).</p></div>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>

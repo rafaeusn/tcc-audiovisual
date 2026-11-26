@@ -66,17 +66,24 @@ pub enum Comando {
     AbrirFila,
     /// A letra em tela cheia, sobre o visual.
     LetraTelaCheia,
+    /// A letra no painel, ao lado da página.
+    AbrirLetra,
     /// A página anterior (como no navegador).
     Voltar,
     /// A página seguinte, depois de voltar.
     Avancar,
-    /// O próximo espaço (Tudo, o computador, cada serviço).
+    /// O próximo filtro de serviço (Tudo, cada serviço, o computador).
     ProximoEspaco,
     /// Troca entre os layouts Palco e Estante.
     TrocarLayout,
-    /// Na Estante, o visual do trilho cresce até a janela inteira (e volta).
+    /// Na Estante, o visual cresce até a janela inteira (e volta).
     ExpandirVisual,
-    /// Abre o espaço desta posição na fileira (0 = Tudo, 1 = o computador, depois os serviços). `Ctrl 1` a `Ctrl 9`;
+    /// Na Estante, a página toma o miolo e o visual vira uma tira no alto (e volta).
+    AlternarPaginaLarga,
+    /// O tamanho da interface um passo acima ou abaixo (90, 100, 110, 125%).
+    AumentarInterface,
+    DiminuirInterface,
+    /// Escolhe o filtro desta posição na fileira (0 = Tudo, depois os serviços, por fim o computador). `Ctrl 1` a `Ctrl 9`;
     /// fica fora de `TODOS` (seriam nove linhas iguais na barra de comandos).
     AbrirEspaco(u8),
     /// Curte (ou descurte) a faixa de serviço que está tocando.
@@ -86,7 +93,7 @@ pub enum Comando {
 }
 
 impl Comando {
-    pub const TODOS: [Comando; 56] = [
+    pub const TODOS: [Comando; 60] = [
         Comando::TocarPausar,
         Comando::Proxima,
         Comando::Anterior,
@@ -136,11 +143,15 @@ impl Comando {
         Comando::AlternarRepetir,
         Comando::AbrirFila,
         Comando::LetraTelaCheia,
+        Comando::AbrirLetra,
         Comando::Voltar,
         Comando::Avancar,
         Comando::ProximoEspaco,
         Comando::TrocarLayout,
         Comando::ExpandirVisual,
+        Comando::AlternarPaginaLarga,
+        Comando::AumentarInterface,
+        Comando::DiminuirInterface,
         Comando::CurtirFaixa,
         Comando::FixarPagina,
     ];
@@ -198,11 +209,15 @@ impl Comando {
             Self::AlternarRepetir => "player.repetir",
             Self::AbrirFila => "pagina.fila",
             Self::LetraTelaCheia => "letra.tela-cheia",
+            Self::AbrirLetra => "letra.painel",
             Self::Voltar => "pagina.voltar",
             Self::Avancar => "pagina.avancar",
             Self::ProximoEspaco => "espaco.proximo",
             Self::TrocarLayout => "layout.trocar",
             Self::ExpandirVisual => "visual.expandir",
+            Self::AlternarPaginaLarga => "pagina.larga",
+            Self::AumentarInterface => "aparencia.maior",
+            Self::DiminuirInterface => "aparencia.menor",
             Self::AbrirEspaco(_) => "espaco.abrir",
             Self::CurtirFaixa => "player.curtir",
             Self::FixarPagina => "pagina.fixar",
@@ -262,12 +277,16 @@ impl Comando {
             Self::AlternarRepetir => "Repetir: nada, a fila ou a música",
             Self::AbrirFila => "Ver a fila de músicas",
             Self::LetraTelaCheia => "Letra em tela cheia",
+            Self::AbrirLetra => "Letra no painel",
             Self::Voltar => "Voltar à página anterior",
             Self::Avancar => "Avançar para a página seguinte",
-            Self::ProximoEspaco => "Ir para o próximo espaço",
+            Self::ProximoEspaco => "Filtrar pelo próximo serviço",
             Self::TrocarLayout => "Trocar o layout (Palco ou Estante)",
-            Self::ExpandirVisual => "Expandir o visual (Estante)",
-            Self::AbrirEspaco(_) => "Ir para o espaço da posição",
+            Self::ExpandirVisual => "Só o visual (Estante)",
+            Self::AlternarPaginaLarga => "Página larga (Estante)",
+            Self::AumentarInterface => "Interface maior",
+            Self::DiminuirInterface => "Interface menor",
+            Self::AbrirEspaco(_) => "Filtrar pelo serviço da posição",
             Self::CurtirFaixa => "Curtir a faixa que toca",
             Self::FixarPagina => "Fixar na lateral o que está aberto",
         }
@@ -290,8 +309,14 @@ impl Comando {
             | Self::AlternarCoresReativas
             | Self::AlternarModoSeguro
             | Self::TelaCheia
-            | Self::LetraTelaCheia => "Visual",
-            Self::ProximoTema | Self::TrocarTema(_) | Self::AlternarImersivo | Self::AlternarDicas => "Aparência",
+            | Self::LetraTelaCheia
+            | Self::AbrirLetra => "Visual",
+            Self::ProximoTema
+            | Self::TrocarTema(_)
+            | Self::AlternarImersivo
+            | Self::AlternarDicas
+            | Self::AumentarInterface
+            | Self::DiminuirInterface => "Aparência",
             Self::EditarLayout
             | Self::TrocarLado
             | Self::AlternarPainel
@@ -306,7 +331,8 @@ impl Comando {
             | Self::PrenderIlha(_)
             | Self::IlhaOutroMonitor
             | Self::TrocarLayout
-            | Self::ExpandirVisual => "Layout",
+            | Self::ExpandirVisual
+            | Self::AlternarPaginaLarga => "Layout",
             Self::AbrirAjustes
             | Self::AbrirPagina(_)
             | Self::AbrirPaleta
@@ -348,11 +374,15 @@ impl Comando {
             Self::AlternarRepetir => &["R"],
             Self::AbrirFila => &["Q"],
             Self::LetraTelaCheia => &["Y"],
+            Self::AbrirLetra => &["U"],
             Self::Voltar => &["Alt", "←"],
             Self::Avancar => &["Alt", "→"],
             Self::ProximoEspaco => &["Ctrl", "Tab"],
             Self::TrocarLayout => &["Ctrl", "L"],
             Self::ExpandirVisual => &["X"],
+            Self::AlternarPaginaLarga => &["W"],
+            Self::AumentarInterface => &["Ctrl", "+"],
+            Self::DiminuirInterface => &["Ctrl", "−"],
             Self::CurtirFaixa => &["C"],
             Self::AbrirEspaco(n) => {
                 const NUMEROS: [&[&str]; 9] = [
@@ -396,7 +426,7 @@ impl Comando {
             ("f", false) | ("f11", false) => Self::TelaCheia,
             ("p", false) => Self::AlternarPainel,
             (",", true) => Self::AbrirAjustes,
-            ("k", true) => Self::AbrirPaleta,
+            ("k", true) | ("/", false) => Self::AbrirPaleta,
             ("escape", false) => Self::Fechar,
             ("1", false) => Self::TrocarVisual(Modelo::Spectral),
             ("2", false) => Self::TrocarVisual(Modelo::Fluxo),
@@ -411,9 +441,13 @@ impl Comando {
             ("r", false) => Self::AlternarRepetir,
             ("q", false) => Self::AbrirFila,
             ("y", false) => Self::LetraTelaCheia,
+            ("u", false) => Self::AbrirLetra,
             ("tab", true) => Self::ProximoEspaco,
             ("l", true) => Self::TrocarLayout,
             ("x", false) => Self::ExpandirVisual,
+            ("w", false) => Self::AlternarPaginaLarga,
+            ("=", true) | ("+", true) => Self::AumentarInterface,
+            ("-", true) => Self::DiminuirInterface,
             ("c", false) => Self::CurtirFaixa,
             (n, true) if n.len() == 1 && ("1"..="9").contains(&n) => Self::AbrirEspaco(n.as_bytes()[0] - b'1'),
             ("h", false) => Self::AbrirPagina(Pagina::Inicio),
@@ -440,6 +474,7 @@ mod testes {
         assert_eq!(Comando::AbrirEspaco(3).teclas(), ["Ctrl", "4"]);
         assert_eq!(Comando::do_atalho("c", false), Some(Comando::CurtirFaixa));
         assert_eq!(Comando::do_atalho("k", true), Some(Comando::AbrirPaleta));
+        assert_eq!(Comando::do_atalho("/", false), Some(Comando::AbrirPaleta));
         assert_eq!(Comando::do_atalho("q", false), Some(Comando::AbrirFila));
         assert_eq!(Comando::do_atalho("z", false), None);
         assert_eq!(Comando::do_atalho_alt("left"), Some(Comando::Voltar));
@@ -487,12 +522,16 @@ mod testes {
             ("r", false),
             ("q", false),
             ("y", false),
+            ("u", false),
             ("h", false),
             ("b", false),
             ("l", false),
             ("tab", true),
             ("l", true),
             ("x", false),
+            ("w", false),
+            ("=", true),
+            ("-", true),
             ("c", false),
         ]
         .into_iter()

@@ -210,7 +210,8 @@ impl Player {
             if self.camada.is_none() && Instant::now() >= self.proxima_camada {
                 self.criar_camada(window);
             }
-            let escala = window.scale_factor();
+            // Os pixels da tela: o fator do Windows vezes o tamanho da interface.
+            let escala = window.scale_factor() * crate::ui::medidas::escala();
             let a = &self.arranjo;
             let cores = self.cores();
             let fundo = tema::tripla(cores.parede);
@@ -227,14 +228,13 @@ impl Player {
                 cinza: self.ajustes.tema == Tema::Mono,
                 dt,
             };
-            // Enquanto o visual da Estante cresce (ou encolhe), ele é desenhado no tamanho da janela e esticado no
-            // retângulo: recriar os alvos a cada quadro engasgava e apagava o rastro do visual.
-            let animando = self.expansao > 0.0 && self.expansao < 0.999;
-            let interno = animando.then_some((a.janela.w * escala, a.janela.h * escala));
+            // Enquanto o retângulo do visual muda (cresce, a divisória anda, vira tira), ele é desenhado num tamanho só e o
+            // meio aparece no retângulo: recriar os alvos a cada quadro engasgava e apagava o rastro do visual.
+            let interno = a.interno.map(|(w, h)| (w * escala, h * escala));
             if let Some(c) = self.camada.as_mut() {
                 c.redimensionar((a.janela.w * escala) as u32, (a.janela.h * escala) as u32);
                 let r = (v.x * escala, v.y * escala, v.w * escala, v.h * escala);
-                c.desenhar_esticado(fundo, r, interno, raio, &quadro);
+                c.desenhar_recortado(fundo, r, interno, raio, &quadro);
             }
         }
         #[cfg(not(windows))]

@@ -27,6 +27,8 @@ use tocador::{Comando, Situacao, Tocador};
 
 /// Quantas músicas a lista mostra de uma vez (a busca estreita o resto).
 const MAXIMO_NA_LISTA: u32 = 5000;
+/// Quantas músicas do computador a busca do topo mostra.
+const MAXIMO_DE_ACHADAS: u32 = 50;
 /// "Anterior" volta ao começo da música se ela já passou disto; antes disso, vai para a música anterior.
 const VOLTA_AO_COMECO_S: f64 = 3.0;
 /// De quanto em quanto tempo a posição é repassada ao Windows enquanto toca.
@@ -51,6 +53,11 @@ pub struct Lista {
     pub musicas: Arc<Vec<Musica>>,
     /// Os álbuns ou artistas, quando a visão é uma dessas.
     pub grupos: Arc<Vec<Grupo>>,
+    /// O que foi aberto e tocado dos serviços, do mais novo ao mais antigo.
+    pub recentes: Arc<Vec<provedores::Item>>,
+    /// O que a busca do topo achou no computador, e o texto dela (o filtro da Biblioteca é outro).
+    pub achadas: Arc<Vec<Musica>>,
+    pub procura: String,
     /// Todos os arquivos do acervo (a pré-análise percorre).
     pub caminhos: Arc<Vec<PathBuf>>,
     /// Quantas músicas há em "Todas", sem repetir.
@@ -73,6 +80,8 @@ enum Pedido {
     /// Varre de novo todas as pastas (arquivos novos entram, os que sumiram saem).
     Atualizar,
     Buscar(String),
+    /// A busca do topo: acha músicas sem mexer no que a Biblioteca mostra.
+    Procurar(String),
     /// Muda de onde vêm as músicas (tira os filtros de álbum e artista).
     Origem(Origem),
     Album(Option<String>),
@@ -93,6 +102,8 @@ enum Pedido {
     Salvar(biblioteca::Salvo),
     TirarSalvo(String, biblioteca::TipoSalvo, String),
     Fixar(String, biblioteca::TipoSalvo, String, bool),
+    /// Entra nos recentes.
+    Recente(biblioteca::Salvo),
 }
 
 /// O que a thread da biblioteca sabe desfazer.
@@ -120,6 +131,8 @@ struct Biblio<'a> {
     acervo: Acervo,
     filtro: Filtro,
     visao: Visao,
+    /// O texto da busca do topo.
+    procura: String,
     lista: &'a Mutex<Lista>,
     versao: &'a AtomicU64,
     parar: &'a AtomicBool,
@@ -134,11 +147,22 @@ impl Biblio<'_> {
             Visao::Albuns => self.acervo.albuns(&self.filtro).unwrap_or_default(),
             Visao::Artistas => self.acervo.artistas(&self.filtro).unwrap_or_default(),
         };
+        let achadas = if self.procura.is_empty() {
+            Vec::new()
+        } else {
+            let filtro = Filtro { consulta: self.procura.clone(), ..Filtro::default() };
+            self.acervo.buscar(&filtro, MAXIMO_DE_ACHADAS).unwrap_or_default()
+        };
         let nova = Lista {
             filtro: self.filtro.clone(),
             visao: self.visao,
             musicas: Arc::new(self.acervo.buscar(&self.filtro, MAXIMO_NA_LISTA).unwrap_or_default()),
             grupos: Arc::new(grupos),
+            achadas: Arc::new(achadas),
+            recentes: Arc::new(
+                self.acervo.recentes().unwrap_or_default().iter().filter_map(crate::paginas::item_do_salvo).collect(),
+            ),
+            procura: self.procura.clone(),
             total: self.acervo.total().unwrap_or(0),
             pastas: self.acervo.contagens().unwrap_or_default(),
             playlists: self.acervo.playlists().unwrap_or_default(),
@@ -207,6 +231,7 @@ impl Biblio<'_> {
         };
         match pedido {
             Pedido::Buscar(nova) => self.filtro.consulta = nova,
+            Pedido::Procurar(texto) => self.procura = texto,
             Pedido::Origem(origem) => self.mostrar(origem),
             Pedido::Album(album) => self.filtro.album = album,
             Pedido::Artista(artista) => self.filtro.artista = artista,
@@ -254,6 +279,7 @@ impl Biblio<'_> {
                 Err(e) => log::warn!("não foi possível tirar a música da playlist: {e}"),
             },
             Pedido::Salvar(s) => avisar(self.acervo.salvar(&s), "salvar"),
+            Pedido::Recente(s) => avisar(self.acervo.registrar_recente(&s), "guardar nos recentes"),
             Pedido::TirarSalvo(servico, tipo, id) => {
                 avisar(self.acervo.tirar_salvo(&servico, tipo, &id).map(|_| ()), "tirar dos salvos");
             }
@@ -297,8 +323,16 @@ fn rodar_biblioteca(
             return;
         }
     };
-    let mut b =
-        Biblio { acervo, filtro: Filtro::default(), visao: Visao::default(), lista, versao, parar, volta: None };
+    let mut b = Biblio {
+        acervo,
+        filtro: Filtro::default(),
+        visao: Visao::default(),
+        procura: String::new(),
+        lista,
+        versao,
+        parar,
+        volta: None,
+    };
     b.publicar(None);
     // Pastas sem nada guardado (acabaram de entrar, ou o acervo veio de uma versão anterior): varre já.
     for pasta in b.acervo.pastas_vazias().unwrap_or_default() {
@@ -576,6 +610,11 @@ impl Local {
         self.pedir(Pedido::Buscar(consulta.to_string()));
     }
 
+    /// A busca do topo, nas músicas do computador ([`Lista::achadas`]).
+    pub fn procurar(&self, texto: &str) {
+        self.pedir(Pedido::Procurar(texto.to_string()));
+    }
+
     /// Mostra as músicas de uma origem: todas, uma pasta ou uma playlist.
     pub fn mostrar(&mut self, origem: Origem) {
         // A escolha aparece na hora; a lista chega logo depois, da thread da biblioteca.
@@ -632,6 +671,14 @@ impl Local {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         self.pedir(Pedido::Salvar(crate::paginas::salvo_de(item, agora)));
+    }
+
+    /// O item acabou de ser aberto ou tocado.
+    pub fn recente(&self, item: &provedores::Item) {
+        let agora = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        self.pedir(Pedido::Recente(crate::paginas::salvo_de(item, agora)));
     }
 
     pub fn tirar_salvo(&self, item: &provedores::Item) {
@@ -1390,6 +1437,36 @@ impl Drop for Local {
 mod testes {
     use super::*;
     use provedores::Tocando;
+
+    #[test]
+    fn a_busca_do_topo_nao_mexe_no_que_a_biblioteca_mostra() {
+        let mut acervo = Acervo::em_memoria().expect("acervo");
+        let pasta = Path::new("C:/musicas");
+        acervo.adicionar_pasta(pasta).expect("pasta");
+        let musica = |t: &str| Musica { caminho: pasta.join(t), titulo: t.into(), ..Default::default() };
+        acervo.guardar_varredura(pasta, &[musica("Lume"), musica("Farol"), musica("Lume baixo")]).expect("guardar");
+        let (lista, versao, parar) = (Mutex::default(), AtomicU64::new(0), AtomicBool::new(false));
+        let mut b = Biblio {
+            acervo,
+            filtro: Filtro::default(),
+            visao: Visao::default(),
+            procura: String::new(),
+            lista: &lista,
+            versao: &versao,
+            parar: &parar,
+            volta: None,
+        };
+        b.atender(Pedido::Procurar("lume".into()));
+        b.publicar(None);
+        let l: Lista = ler(&lista);
+        assert_eq!((l.achadas.len(), l.procura.as_str()), (2, "lume"));
+        assert_eq!(l.musicas.len(), 3, "a Biblioteca continua inteira");
+        b.atender(Pedido::Buscar("farol".into()));
+        b.atender(Pedido::Procurar(String::new()));
+        b.publicar(None);
+        let l: Lista = ler(&lista);
+        assert_eq!((l.achadas.len(), l.musicas.len()), (0, 1), "vazia não traz o acervo inteiro");
+    }
 
     #[test]
     fn o_estado_do_tocador_diz_o_que_fazer_com_a_faixa() {

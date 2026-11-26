@@ -1,7 +1,7 @@
 //! Do JSON do Pathfinder (o `data` de cada consulta) para os modelos do Player. Só lógica, testada. Um item que não dá
 //! para ler é pulado (um tipo novo, um campo nulo); um nó que a página precisa e não veio é erro, nunca lista vazia.
 
-use provedores::{Album, Artista, Faixa, Item, Playlist, Prateleira};
+use provedores::{Album, Artista, Detalhe, Faixa, Item, Playlist, Prateleira, TipoDaPrateleira, TipoDeAlbum};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -86,8 +86,94 @@ fn faixa(v: &Value, endereco: &Value) -> Option<Faixa> {
         album_id: id(&disco["uri"], "album"),
         duracao_s: ms.map(|ms| ms / 1000.0).filter(|s| *s > 0.0),
         capa: capa(&disco["coverArt"]),
+        ouvidas: numero(&v["playcount"]),
         ..Default::default()
     })
+}
+
+/// Um número, que o Spotify às vezes manda como texto.
+fn numero(v: &Value) -> Option<u64> {
+    v.as_u64().or_else(|| v.as_str()?.parse().ok())
+}
+
+/// A data do lançamento, só com o que se sabe dela (`2001`, `2001-03-12`).
+fn data_de(v: &Value) -> Option<String> {
+    let iso = v["isoString"]
+        .as_str()
+        .and_then(|t| t.get(..10))
+        .filter(|t| t.bytes().all(|b| b.is_ascii_digit() || b == b'-'));
+    match (iso, v["precision"].as_str()) {
+        (Some(t), Some("DAY")) => Some(t.to_string()),
+        (Some(t), Some("MONTH")) => Some(t[..7].to_string()),
+        (Some(t), _) => Some(t[..4].to_string()),
+        (None, _) => v["year"].as_u64().map(|a| a.to_string()),
+    }
+}
+
+fn tipo_de_album(v: &Value) -> Option<TipoDeAlbum> {
+    Some(match v.as_str()? {
+        "ALBUM" => TipoDeAlbum::Album,
+        "SINGLE" => TipoDeAlbum::Single,
+        "EP" => TipoDeAlbum::Ep,
+        "COMPILATION" => TipoDeAlbum::Coletanea,
+        _ => TipoDeAlbum::Outro,
+    })
+}
+
+/// A cor `#RRGGBB`, se for uma.
+fn cor(v: &Value) -> Option<String> {
+    let t = v["hex"].as_str()?;
+    (t.len() == 7 && t.starts_with('#') && t[1..].bytes().all(|b| b.is_ascii_hexdigit())).then(|| t.to_string())
+}
+
+/// O texto sem HTML (as biografias e as descrições vêm com links).
+pub fn sem_html(texto: &str) -> String {
+    let mut saida = String::with_capacity(texto.len());
+    let mut resto = texto;
+    while let Some(i) = resto.find('<') {
+        saida.push_str(&resto[..i]);
+        // Um "<" solto (sem letra nem barra depois) é texto.
+        let marca = resto[i + 1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '/');
+        match resto[i..].find('>').filter(|_| marca) {
+            Some(f) => resto = &resto[i + f + 1..],
+            None => {
+                saida.push('<');
+                resto = &resto[i + 1..];
+            }
+        }
+    }
+    saida.push_str(resto);
+    [
+        ("&quot;", "\""),
+        ("&#34;", "\""),
+        ("&#39;", "'"),
+        ("&#x27;", "'"),
+        ("&#x2F;", "/"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&nbsp;", " "),
+        ("&amp;", "&"),
+    ]
+    .into_iter()
+    .fold(saida, |s, (de, para)| s.replace(de, para))
+    .trim()
+    .to_string()
+}
+
+fn texto_puro(v: &Value) -> Option<String> {
+    texto(v).map(|t| sem_html(&t)).filter(|t| !t.is_empty())
+}
+
+/// A imagem larga: a menor com 1280 px ou mais; sem nenhuma, a maior.
+fn larga(imagem: &Value) -> Option<String> {
+    let fontes = lista(imagem, "sources");
+    let largura = |f: &Value| f["maxWidth"].as_u64().or_else(|| f["width"].as_u64()).unwrap_or(0);
+    let serve = fontes.iter().filter(|f| largura(f) >= 1280).min_by_key(|f| largura(f));
+    texto(&serve.or_else(|| fontes.iter().max_by_key(|f| largura(f)))?["url"])
+}
+
+fn secao(titulo: &str, tipo: TipoDaPrateleira, itens: Vec<Item>) -> Option<Prateleira> {
+    (!itens.is_empty()).then(|| Prateleira { titulo: titulo.into(), tipo, itens })
 }
 
 fn album_de(v: &Value) -> Option<Album> {
@@ -98,8 +184,9 @@ fn album_de(v: &Value) -> Option<Album> {
         titulo: texto(&v["name"])?,
         artistas,
         artistas_ids,
-        ano: v["date"]["year"].as_u64().and_then(|a| u16::try_from(a).ok()),
+        ano: data_de(&v["date"]).and_then(|d| d.get(..4)?.parse().ok()),
         capa: capa(&v["coverArt"]),
+        tipo: tipo_de_album(&v["type"]),
     })
 }
 
@@ -190,17 +277,64 @@ pub fn inicio(data: &Value) -> Resultado<Vec<Prateleira>> {
             sugestoes.append(&mut itens);
         } else if !itens.is_empty() {
             let titulo = texto(&s["data"]["title"]["transformedLabel"]).unwrap_or_else(|| "Para começar".into());
-            prateleiras.push(Prateleira { titulo, itens });
+            let tipo = tipo_da_secao(s["data"]["__typename"].as_str().unwrap_or_default(), &titulo, &itens);
+            prateleiras.push(Prateleira { titulo, tipo, itens });
         }
     }
     sem_repetir(&mut sugestoes);
     if !sugestoes.is_empty() {
-        prateleiras.push(Prateleira { titulo: "Sugestões para você".into(), itens: sugestoes });
+        let tipo = TipoDaPrateleira::ParaVoce;
+        prateleiras.push(Prateleira { titulo: "Sugestões para você".into(), tipo, itens: sugestoes });
     }
     if prateleiras.is_empty() {
         return Err("o início veio sem nada que o Player mostre".into());
     }
     Ok(prateleiras)
+}
+
+/// O tipo de uma seção do início: pelo nome dela na API e, nas genéricas, pelo título (em português e em inglês) e pelo que traz.
+fn tipo_da_secao(nome: &str, titulo: &str, itens: &[Item]) -> TipoDaPrateleira {
+    use TipoDaPrateleira as T;
+    match nome {
+        "HomeShortsSectionData" => return T::Atalhos,
+        "HomeRecentlyPlayedSectionData" => return T::Recentes,
+        _ => {}
+    }
+    let titulo = provedores::casador::limpar_titulo(titulo);
+    let tem = |palavras: &[&str]| palavras.iter().any(|p| titulo.contains(p));
+    if tem(&["recente", "recently", "ouvidas ha pouco", "ouvir de novo", "jump back"]) {
+        T::Recentes
+    } else if tem(&["lancamento", "novidade", "novos lanc", "new release", "estreia"]) {
+        T::Lancamentos
+    } else if tem(&[
+        "parada",
+        "chart",
+        "top 50",
+        "mais tocad",
+        "em alta",
+        "populares",
+        "sucessos",
+        "maiores hits",
+        "trending",
+    ]) {
+        T::Paradas
+    } else if !itens.is_empty() && itens.iter().all(|i| matches!(i, Item::Artista(_))) {
+        T::Artistas
+    } else if tem(&[
+        "para voce",
+        "pra voce",
+        "feito para",
+        "feito pra",
+        "made for",
+        "for you",
+        "seus mix",
+        "sua cara",
+        "recomend",
+    ]) {
+        T::ParaVoce
+    } else {
+        T::Outras
+    }
 }
 
 fn sem_repetir(itens: &mut Vec<Item>) {
@@ -216,6 +350,73 @@ pub fn album(data: &Value) -> Resultado<Pagina<Faixa>> {
         let f = faixa(&i["track"], &Value::Null)?;
         Some(Faixa { album: nome.clone(), album_id: id.clone(), capa: capa.clone(), ..f })
     })
+}
+
+/// O que mais se sabe de um álbum.
+pub fn detalhe_do_album(data: &Value) -> Detalhe {
+    let a = &data["albumUnion"];
+    let este = id(&a["uri"], "album");
+    let outros = lista(&a["moreAlbumsByArtist"], "items")
+        .iter()
+        .flat_map(|i| lista(&i["discography"]["popularReleasesAlbums"], "items"))
+        .filter_map(album_de)
+        .filter(|x| Some(&x.id) != este.as_ref())
+        .map(Item::Album)
+        .collect();
+    Detalhe {
+        item: album_de(a).map(Item::Album),
+        cor: cor(&a["coverArt"]["extractedColors"]["colorDark"]),
+        total: a["tracksV2"]["totalCount"].as_u64().and_then(|n| u32::try_from(n).ok()),
+        data: data_de(&a["date"]),
+        gravadora: texto(&a["label"]),
+        tipo: tipo_de_album(&a["type"]),
+        secoes: secao("Mais do artista", TipoDaPrateleira::MaisDoArtista, outros).into_iter().collect(),
+        ..Default::default()
+    }
+}
+
+/// O que mais se sabe de um artista.
+pub fn detalhe_do_artista(data: &Value) -> Detalhe {
+    let a = &data["artistUnion"];
+    let relacionados = &a["relatedContent"];
+    let ultimo = album_de(&a["discography"]["latest"]).map(Item::Album).into_iter().collect();
+    let parecidos =
+        lista(&relacionados["relatedArtists"], "items").iter().filter_map(artista_de).map(Item::Artista).collect();
+    let playlists = lista(&relacionados["featuringV2"], "items").iter().filter_map(item).collect();
+    Detalhe {
+        item: artista_de(a).map(Item::Artista),
+        imagem: larga(&a["headerImage"]["data"]),
+        cor: cor(&a["visuals"]["avatarImage"]["extractedColors"]["colorRaw"]),
+        descricao: texto_puro(&a["profile"]["biography"]["text"]),
+        fotos: lista(&a["visuals"]["gallery"], "items").iter().filter_map(capa).take(8).collect(),
+        seguidores: numero(&a["stats"]["followers"]),
+        ouvintes: numero(&a["stats"]["monthlyListeners"]),
+        secoes: [
+            secao("Último lançamento", TipoDaPrateleira::UltimoLancamento, ultimo),
+            secao("Quem ouve também curte", TipoDaPrateleira::Parecidos, parecidos),
+            secao("Em playlists", TipoDaPrateleira::Outras, playlists),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        ..Default::default()
+    }
+}
+
+/// O que mais se sabe de uma playlist.
+pub fn detalhe_da_playlist(data: &Value) -> Detalhe {
+    let p = &data["playlistV2"];
+    let total = p["content"]["totalCount"].as_u64().and_then(|n| u32::try_from(n).ok());
+    let capa = lista(&p["images"], "items").first();
+    Detalhe {
+        item: playlist_de(p).map(|x| Item::Playlist(Playlist { quantas: total, ..x })),
+        cor: capa.and_then(|c| cor(&c["extractedColors"]["colorRaw"])),
+        descricao: texto_puro(&p["description"]),
+        seguidores: numero(&p["followers"]).or_else(|| numero(&p["followers"]["totalCount"])).filter(|n| *n > 0),
+        total,
+        dono: texto(&p["ownerV2"]["data"]["name"]),
+        ..Default::default()
+    }
 }
 
 /// As faixas populares de um artista (um artista pode não ter nenhuma).
@@ -394,6 +595,13 @@ mod testes {
         let p = inicio(&data).expect("início");
         let titulos: Vec<&str> = p.iter().map(|p| p.titulo.as_str()).collect();
         assert_eq!(titulos, ["Para começar", "Feito para você", "Discos", "Sugestões para você"]);
+        use TipoDaPrateleira as T;
+        let tipos: Vec<T> = p.iter().map(|p| p.tipo).collect();
+        assert_eq!(tipos, [T::Atalhos, T::ParaVoce, T::Outras, T::ParaVoce]);
+        assert_eq!(tipo_da_secao("HomeGenericSectionData", "Lançamentos pra você", &[]), T::Lancamentos);
+        assert_eq!(tipo_da_secao("HomeGenericSectionData", "Paradas em destaque", &[]), T::Paradas);
+        assert_eq!(tipo_da_secao("HomeGenericSectionData", "Tocados recentemente", &[]), T::Recentes);
+        assert_eq!(tipo_da_secao("HomeGenericSectionData", "Seus artistas favoritos", &p[3].itens[..0]), T::Outras);
         assert_eq!(p[0].itens.len(), 1, "o tipo desconhecido é pulado");
         assert_eq!(p[2].itens.len(), 2);
         assert_eq!(p[3].itens.len(), 2, "as sugestões de um item só ficam juntas, sem repetir");
@@ -432,6 +640,59 @@ mod testes {
             (albuns[0].id.as_str(), albuns[0].ano, albuns[0].capa.as_deref()),
             ("al1", Some(2023), Some("c300"))
         );
+    }
+
+    #[test]
+    fn detalhe_do_artista_do_album_e_da_playlist() {
+        let data = json!({"artistUnion": {
+            "uri": "spotify:artist:a1", "profile": {"name": "Lume", "biography": {"text": "De <a href=\"x\">São Paulo</a> &amp; região."}},
+            "headerImage": {"data": {"sources": [
+                {"maxWidth": 640, "url": "p"}, {"maxWidth": 2660, "url": "g"}, {"maxWidth": 1494, "url": "m"}]}},
+            "visuals": {"avatarImage": {"sources": [{"height": 320, "url": "foto"}], "extractedColors": {"colorRaw": {"hex": "#B0A840"}}},
+                "gallery": {"items": [{"sources": [{"height": 640, "url": "g1"}]}]}},
+            "stats": {"followers": 12, "monthlyListeners": 28289213},
+            "discography": {"latest": album_json("al9", "Novo")},
+            "relatedContent": {"relatedArtists": {"items": [artista_json("r1", "Parecido")]}, "featuringV2": {"items": [null]}},
+        }});
+        let d = detalhe_do_artista(&data);
+        assert_eq!(d.imagem.as_deref(), Some("m"), "a menor que serve");
+        assert_eq!(d.descricao.as_deref(), Some("De São Paulo & região."));
+        assert_eq!((d.seguidores, d.ouvintes, d.cor.as_deref()), (Some(12), Some(28_289_213), Some("#B0A840")));
+        assert!(matches!(&d.item, Some(Item::Artista(a)) if a.foto.as_deref() == Some("foto")));
+        let tipos: Vec<_> = d.secoes.iter().map(|s| s.tipo).collect();
+        assert_eq!(tipos, [TipoDaPrateleira::UltimoLancamento, TipoDaPrateleira::Parecidos], "a vazia não vem");
+        // Um artista sem nada disso não quebra.
+        assert_eq!(
+            detalhe_do_artista(&json!({"artistUnion": {"headerImage": null, "discography": {"latest": null}}})),
+            Detalhe::default()
+        );
+
+        let data = json!({"albumUnion": {
+            "uri": "spotify:album:d1", "name": "Disco", "type": "EP", "label": "Selo",
+            "date": {"isoString": "2001-03-12T00:00:00Z", "precision": "DAY"},
+            "coverArt": {"sources": [{"height": 300, "url": "c"}], "extractedColors": {"colorDark": {"hex": "#302040"}}},
+            "tracksV2": {"totalCount": 14},
+            "moreAlbumsByArtist": {"items": [{"discography": {"popularReleasesAlbums": {"items": [
+                album_json("d1", "Disco"), album_json("d2", "Outro")]}}}]},
+        }});
+        let d = detalhe_do_album(&data);
+        assert_eq!((d.data.as_deref(), d.gravadora.as_deref(), d.total), (Some("2001-03-12"), Some("Selo"), Some(14)));
+        assert_eq!(d.tipo, Some(TipoDeAlbum::Ep));
+        assert!(matches!(&d.item, Some(Item::Album(a)) if a.ano == Some(2001) && a.tipo == Some(TipoDeAlbum::Ep)));
+        assert_eq!(d.secoes[0].itens.len(), 1, "sem ele mesmo");
+
+        let data = json!({"playlistV2": {"uri": "spotify:playlist:p1", "name": "Lista", "description": "", "followers": "169",
+            "ownerV2": {"data": {"name": "Ana"}}, "content": {"totalCount": 50}}});
+        let d = detalhe_da_playlist(&data);
+        assert_eq!((d.seguidores, d.total, d.dono.as_deref(), d.descricao), (Some(169), Some(50), Some("Ana"), None));
+    }
+
+    #[test]
+    fn html_vira_texto_puro() {
+        assert_eq!(sem_html("a <b>b</b> &lt;3 e 2 < 3"), "a b <3 e 2 < 3");
+        assert_eq!(sem_html("<a href='x'>sem fim"), "sem fim");
+        assert_eq!(sem_html("quebrado <a href"), "quebrado <a href");
+        assert_eq!(sem_html("&amp;lt;"), "&lt;", "uma vez só");
     }
 
     #[test]

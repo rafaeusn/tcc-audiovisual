@@ -39,6 +39,17 @@ impl VistaIlha {
         }
     }
 
+    /// A capa grande com o selo de onde a música toca, embaixo à direita.
+    pub(super) fn capa_com_selo(dados: &Dados, lado: f32, raio: f32, s: f32) -> Div {
+        let selo = (26.0 * s).round();
+        let canto = (8.0 * s).round();
+        div().relative().flex_none().child(Self::capa(dados, lado, raio)).when(!dados.marcas.is_empty(), |d| {
+            d.child(
+                div().absolute().right(px(canto)).bottom(px(canto)).child(crate::ui::selo::discos(&dados.marcas, selo)),
+            )
+        })
+    }
+
     /// As barras do espectro, movidas pelo som na cor do visual (baixas e apagadas na pausa).
     pub(super) fn barras(&self, dados: &Dados, largura: f32, altura: f32) -> impl IntoElement {
         let mut linha = div().flex().flex_none().items_center().gap(px(largura * 0.65)).h(px(altura));
@@ -269,7 +280,7 @@ impl VistaIlha {
             .flex()
             .items_center()
             .gap(px(18.0 * s))
-            .child(Self::capa(dados, 124.0 * s, 18.0 * s))
+            .child(Self::capa_com_selo(dados, 124.0 * s, 18.0 * s, s))
             .child(
                 div()
                     .flex_1()
@@ -395,7 +406,7 @@ impl VistaIlha {
             .flex()
             .flex_col()
             .justify_between()
-            .child(div().flex().justify_center().child(Self::capa(dados, capa, 20.0 * s)))
+            .child(div().flex().justify_center().child(Self::capa_com_selo(dados, capa, 20.0 * s, s)))
             .child(nome)
             .child(Self::progresso(dados, s))
             .child(controles)

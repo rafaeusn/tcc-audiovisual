@@ -2,7 +2,7 @@
 //! provedor e respostas na saída, cada resposta com o `id` do pedido. A descrição completa, para quem escreve um
 //! provedor em outra linguagem, está em `docs/f1-provedores.md`.
 
-use crate::modelo::{Capacidade, Item, Prateleira};
+use crate::modelo::{Capacidade, Detalhe, Item, Prateleira};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// A versão do protocolo que este Player fala.
@@ -194,6 +194,9 @@ pub enum CorpoDaResposta {
     Apresentacao(Apresentacao),
     Itens {
         itens: Vec<Item>,
+        /// O que mais se sabe da página (só nas de álbum, artista e playlist). Um que não se lê é ignorado.
+        #[serde(default, deserialize_with = "detalhe_que_se_le", skip_serializing_if = "Option::is_none")]
+        detalhe: Option<Box<Detalhe>>,
     },
     Prateleiras {
         prateleiras: Vec<Prateleira>,
@@ -212,6 +215,11 @@ pub enum CorpoDaResposta {
 }
 
 impl CorpoDaResposta {
+    /// Uma lista, sem mais nada.
+    pub fn itens(itens: Vec<Item>) -> Self {
+        Self::Itens { itens, detalhe: None }
+    }
+
     /// Um erro sem causa (o que todo provedor antigo manda).
     pub fn erro(mensagem: impl Into<String>) -> Self {
         Self::Erro { mensagem: mensagem.into(), causa: None }
@@ -247,6 +255,11 @@ pub enum Causa {
 
 /// Lê a causa sem derrubar a resposta: um provedor mais novo pode mandar uma que este Player não conhece, e ela vale
 /// como "sem causa" (o erro continua chegando com a mensagem).
+fn detalhe_que_se_le<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Box<Detalhe>>, D::Error> {
+    let valor = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(valor.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 fn causa_conhecida<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Causa>, D::Error> {
     let valor = Option::<String>::deserialize(d)?;
     Ok(valor.and_then(|v| serde_json::from_value(serde_json::Value::String(v)).ok()))
@@ -525,8 +538,14 @@ mod testes {
                 identidade: None,
                 conta: None,
             }),
-            CorpoDaResposta::Itens { itens: vec![faixa.clone()] },
-            CorpoDaResposta::Prateleiras { prateleiras: vec![Prateleira { titulo: "P".into(), itens: vec![faixa] }] },
+            CorpoDaResposta::itens(vec![faixa.clone()]),
+            CorpoDaResposta::Itens {
+                itens: vec![faixa.clone()],
+                detalhe: Some(Box::new(Detalhe { ouvintes: Some(3), ..Default::default() })),
+            },
+            CorpoDaResposta::Prateleiras {
+                prateleiras: vec![Prateleira { titulo: "P".into(), itens: vec![faixa], ..Default::default() }],
+            },
             CorpoDaResposta::Fonte(Fonte::Endereco {
                 url: "https://x/y".into(),
                 cabecalhos: vec![("User-Agent".into(), "z".into())],
@@ -545,6 +564,9 @@ mod testes {
 
     #[test]
     fn resposta_estragada_vira_erro_para_quem_pediu() {
+        // Um detalhe estragado não derruba a lista.
+        let r = ler_resposta(r#"{"id":5,"resposta":"itens","itens":[],"detalhe":{"ouvintes":"muitos"}}"#).expect("lê");
+        assert_eq!(r.corpo, CorpoDaResposta::itens(Vec::new()));
         let r = ler_resposta(r#"{"id":5,"resposta":"itens","itens":"não é lista"}"#).expect("tem id");
         assert_eq!(r.id, 5);
         assert!(matches!(r.corpo, CorpoDaResposta::Erro { .. }));

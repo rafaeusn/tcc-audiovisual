@@ -123,13 +123,17 @@ fn erro(mensagem: String) -> CorpoDaResposta {
 }
 
 fn itens(resultado: Result<Vec<provedores::Item>, String>) -> CorpoDaResposta {
-    resultado.map_or_else(erro, |itens| CorpoDaResposta::Itens { itens })
+    resultado.map_or_else(erro, CorpoDaResposta::itens)
+}
+
+fn com_detalhe(resultado: Result<dados::ComDetalhe, String>) -> CorpoDaResposta {
+    resultado.map_or_else(erro, |(itens, detalhe)| CorpoDaResposta::Itens { itens, detalhe: Some(Box::new(detalhe)) })
 }
 
 fn buscar(login: &Login, dados: &dados::Dados, texto: &str, limite: u32) -> CorpoDaResposta {
     // Fora da conta, o convite para entrar já está na tela: um erro na busca só atrapalharia.
     if login.estado().situacao != SituacaoDaConta::Dentro {
-        return CorpoDaResposta::Itens { itens: Vec::new() };
+        return CorpoDaResposta::itens(Vec::new());
     }
     itens(dados.buscar(texto, limite))
 }
@@ -146,9 +150,9 @@ fn pagina(login: &Login, dados: &dados::Dados, pedido: CorpoDoPedido) -> CorpoDa
         CorpoDoPedido::Inicio => {
             dados.inicio().map_or_else(erro, |prateleiras| CorpoDaResposta::Prateleiras { prateleiras })
         }
-        CorpoDoPedido::Album { album } => itens(dados.album(&album)),
-        CorpoDoPedido::Artista { artista } => itens(dados.artista(&artista)),
-        CorpoDoPedido::Playlist { playlist } => itens(dados.playlist(&playlist)),
+        CorpoDoPedido::Album { album } => com_detalhe(dados.album(&album)),
+        CorpoDoPedido::Artista { artista } => com_detalhe(dados.artista(&artista)),
+        CorpoDoPedido::Playlist { playlist } => com_detalhe(dados.playlist(&playlist)),
         CorpoDoPedido::Biblioteca => itens(dados.biblioteca()),
         outro => erro(format!("o provedor do Spotify não sabe responder {outro:?}")),
     }
@@ -226,11 +230,7 @@ mod testes {
     fn fora_da_conta_a_busca_vem_vazia_e_a_pagina_diz_para_entrar() {
         let mut s = spotify_de_teste("fora");
         let buscar = CorpoDoPedido::Buscar { texto: "x".into(), limite: 20 };
-        assert_eq!(
-            s.atender(buscar.clone()),
-            CorpoDaResposta::Itens { itens: Vec::new() },
-            "o convite já está na tela"
-        );
+        assert_eq!(s.atender(buscar.clone()), CorpoDaResposta::itens(Vec::new()), "o convite já está na tela");
         let CorpoDaResposta::Erro { mensagem, .. } = s.atender(CorpoDoPedido::Inicio) else { panic!("devia ser erro") };
         assert!(mensagem.contains("Entre na sua conta"), "{mensagem}");
         let sem_conta =

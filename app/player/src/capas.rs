@@ -14,6 +14,57 @@ const MAXIMO: u64 = 8 * 1024 * 1024;
 /// Uma capa que não veio é pedida de novo depois disso.
 const NOVA_TENTATIVA: Duration = Duration::from_secs(60);
 
+/// O lado da miniatura (o dobro de 64, para telas com escala), e até que lado de desenho ela serve.
+const MINIATURA: u32 = 128;
+const ATE: f32 = 64.0;
+/// O maior lado de uma capa recortada.
+const MAIOR_LADO: u32 = 640;
+/// O fundo desfocado (a capa atrás do cabeçalho do álbum) e a largura máxima da foto larga do artista: maior que a
+/// página não aparece, e pesa na placa de vídeo.
+const DESFOCADO: (u32, u32) = (480, 270);
+const LARGA: u32 = 1280;
+
+/// O fundo do cabeçalho de uma página.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TipoDeFundo {
+    /// A capa desfocada (álbum, playlist, faixa, artista sem foto larga).
+    Desfocado,
+    /// A foto larga do artista, como veio.
+    Largo,
+}
+
+/// Um fundo pronto: o arquivo e o brilho da imagem onde fica o texto (os percentis 95 e 5, de 0 a 1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Fundo {
+    pub arquivo: PathBuf,
+    pub claro: f32,
+    pub escuro: f32,
+}
+
+/// Os percentis 95 e 5 do brilho (o `luma` de cada pixel, de 0 a 1). Sem pixel, o pior caso: (1, 0).
+pub fn brilho(pixels: impl Iterator<Item = [u8; 3]>) -> (f32, f32) {
+    let mut contagem = [0u32; 256];
+    let mut total = 0u32;
+    for [r, g, b] in pixels {
+        let luma = (2126 * u32::from(r) + 7152 * u32::from(g) + 722 * u32::from(b)) / 10_000;
+        contagem[luma.min(255) as usize] += 1;
+        total += 1;
+    }
+    if total == 0 {
+        return (1.0, 0.0);
+    }
+    let percentil = |p: f32| {
+        let alvo = ((total as f32) * p).ceil().max(1.0) as u32;
+        let mut soma = 0;
+        contagem.iter().position(|c| {
+            soma += c;
+            soma >= alvo
+        })
+    };
+    let em = |i: Option<usize>| i.unwrap_or(255) as f32 / 255.0;
+    (em(percentil(0.95)), em(percentil(0.05)))
+}
+
 /// O nome do arquivo de uma capa: o FNV-1a de 64 bits do endereço (nada do endereço vira caminho).
 pub fn nome_do_arquivo(url: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -42,11 +93,29 @@ pub fn pode_tentar_de_novo(desde: Instant, agora: Instant) -> bool {
 struct Estado {
     prontas: HashMap<String, PathBuf>,
     pedidas: HashMap<String, Instant>,
+    /// As versões para desenhar: `None` foi pedida e ainda não ficou pronta.
+    versoes: HashMap<String, Option<Versoes>>,
+    /// Os fundos: `None` foi pedido; `Some(None)`, não deu.
+    fundos: HashMap<(String, TipoDeFundo), Option<Option<Fundo>>>,
+}
+
+/// O que se desenha de uma capa, além dela mesma.
+#[derive(Clone, Default)]
+struct Versoes {
+    /// Recortada, quando ela não era quadrada.
+    quadrada: Option<PathBuf>,
+    miniatura: Option<PathBuf>,
+}
+
+enum Tarefa {
+    Baixar(String),
+    Versoes(String, PathBuf),
+    Fundo(String, TipoDeFundo, PathBuf),
 }
 
 pub struct Capas {
     pasta: Option<PathBuf>,
-    pedidos: Option<Sender<String>>,
+    pedidos: Option<Sender<Tarefa>>,
     estado: Arc<Mutex<Estado>>,
 }
 
@@ -55,7 +124,7 @@ impl Capas {
     pub fn iniciar(pasta: Option<PathBuf>) -> Self {
         let estado = Arc::new(Mutex::new(Estado::default()));
         let pedidos = pasta.as_ref().map(|pasta| {
-            let (envio, chegada) = channel::<String>();
+            let (envio, chegada) = channel::<Tarefa>();
             let chegada = Arc::new(Mutex::new(chegada));
             for n in 0..AO_MESMO_TEMPO {
                 let (chegada, pasta, estado) = (chegada.clone(), pasta.clone(), estado.clone());
@@ -63,10 +132,22 @@ impl Capas {
                     loop {
                         // Uma thread por vez espera o próximo pedido; a trava sai antes de baixar.
                         let pedido = chegada.lock().unwrap_or_else(PoisonError::into_inner).recv();
-                        let Ok(url) = pedido else { break };
                         // A tela redesenha a cada quadro: a capa aparece assim que fica pronta.
-                        if let Some(arquivo) = baixar(&url, &pasta) {
-                            estado.lock().unwrap_or_else(PoisonError::into_inner).prontas.insert(url, arquivo);
+                        match pedido {
+                            Ok(Tarefa::Baixar(url)) => {
+                                if let Some(arquivo) = baixar(&url, &pasta) {
+                                    estado.lock().unwrap_or_else(PoisonError::into_inner).prontas.insert(url, arquivo);
+                                }
+                            }
+                            Ok(Tarefa::Versoes(url, capa)) => {
+                                let prontas = Some(Versoes::fazer(&capa));
+                                estado.lock().unwrap_or_else(PoisonError::into_inner).versoes.insert(url, prontas);
+                            }
+                            Ok(Tarefa::Fundo(url, tipo, capa)) => {
+                                let feito = Some(fazer_fundo(&capa, tipo));
+                                estado.lock().unwrap_or_else(PoisonError::into_inner).fundos.insert((url, tipo), feito);
+                            }
+                            Err(_) => break,
                         }
                     }
                 });
@@ -103,10 +184,144 @@ impl Capas {
         e.pedidas.insert(url.to_string(), agora);
         drop(e);
         if let Some(p) = &self.pedidos {
-            let _ = p.send(url.to_string());
+            let _ = p.send(Tarefa::Baixar(url.to_string()));
         }
         None
     }
+
+    /// O arquivo para desenhar a capa num quadrado deste lado: nas linhas, a miniatura (uma capa de 640 px aberta para
+    /// mostrar 48 ocupa a placa de vídeo à toa); no resto, a capa, recortada se era larga (o GPUI desenha a imagem
+    /// inteira para fora do quadrado, e o canto arredondado sai errado). `None` enquanto não fica pronta.
+    pub fn arquivo_para(&self, url: &str, lado: f32) -> Option<PathBuf> {
+        let inteira = self.arquivo(url)?;
+        let mut e = self.estado.lock().unwrap_or_else(PoisonError::into_inner);
+        let versoes = match e.versoes.get(url) {
+            Some(v) => v.clone()?,
+            None => match Versoes::em_disco(&inteira) {
+                Some(v) => {
+                    e.versoes.insert(url.to_string(), Some(v.clone()));
+                    v
+                }
+                None => {
+                    e.versoes.insert(url.to_string(), None);
+                    drop(e);
+                    if let Some(p) = &self.pedidos {
+                        let _ = p.send(Tarefa::Versoes(url.to_string(), inteira));
+                    }
+                    return None;
+                }
+            },
+        };
+        let grande = versoes.quadrada.unwrap_or(inteira);
+        Some(if lado <= ATE { versoes.miniatura.unwrap_or(grande) } else { grande })
+    }
+}
+
+impl Capas {
+    /// O fundo de um cabeçalho, quando pronto (a imagem baixa e é preparada em segundo plano; a tela pede a cada quadro).
+    pub fn fundo(&self, url: &str, tipo: TipoDeFundo) -> Option<Fundo> {
+        let inteira = self.arquivo(url)?;
+        let chave = (url.to_string(), tipo);
+        let mut e = self.estado.lock().unwrap_or_else(PoisonError::into_inner);
+        match e.fundos.get(&chave) {
+            Some(pronto) => pronto.clone().flatten(),
+            None => {
+                e.fundos.insert(chave, None);
+                drop(e);
+                if let Some(p) = &self.pedidos {
+                    let _ = p.send(Tarefa::Fundo(url.to_string(), tipo, inteira));
+                }
+                None
+            }
+        }
+    }
+}
+
+/// Prepara o fundo ao lado da capa (de outra abertura, ele já está lá: só mede o brilho).
+fn fazer_fundo(capa: &std::path::Path, tipo: TipoDeFundo) -> Option<Fundo> {
+    let destino = capa.with_extension(match tipo {
+        TipoDeFundo::Desfocado => "fundo",
+        TipoDeFundo::Largo => "larga",
+    });
+    let ler = |a: &std::path::Path| std::fs::read(a).ok().and_then(|b| image::load_from_memory(&b).ok());
+    let imagem = match ler(&destino) {
+        Some(pronta) => pronta,
+        None => {
+            let original = ler(capa)?;
+            let feita = match tipo {
+                TipoDeFundo::Desfocado => {
+                    // Desfocar pequeno e aumentar: o mesmo efeito, uma fração da conta.
+                    let filtro = image::imageops::FilterType::Triangle;
+                    let (l, a) = DESFOCADO;
+                    original.resize_to_fill(l / 3, a / 3, filtro).fast_blur(6.0).resize_exact(l, a, filtro)
+                }
+                TipoDeFundo::Largo if original.width() > LARGA => {
+                    let altura = (u64::from(original.height()) * u64::from(LARGA) / u64::from(original.width())) as u32;
+                    original.resize_exact(LARGA, altura.max(1), image::imageops::FilterType::Triangle)
+                }
+                TipoDeFundo::Largo => original,
+            };
+            gravar(&feita, &destino)?;
+            feita
+        }
+    };
+    let rgb = imagem.to_rgb8();
+    let (largura, altura) = rgb.dimensions();
+    // Na foto larga o texto fica embaixo, à esquerda; no desfocado, em qualquer lugar.
+    let (x_fim, y_inicio) = match tipo {
+        TipoDeFundo::Largo => (largura * 7 / 10, altura * 45 / 100),
+        TipoDeFundo::Desfocado => (largura, 0),
+    };
+    let (claro, escuro) =
+        brilho(rgb.enumerate_pixels().filter(|(x, y, _)| *x < x_fim && *y >= y_inicio).map(|(_, _, p)| p.0));
+    Some(Fundo { arquivo: destino, claro, escuro })
+}
+
+impl Versoes {
+    /// As versões já gravadas (a miniatura é a última a ser gravada: com ela, as outras estão prontas).
+    fn em_disco(capa: &std::path::Path) -> Option<Self> {
+        let miniatura = capa.with_extension("mini");
+        miniatura.is_file().then(|| {
+            let quadrada = capa.with_extension("quad");
+            Self { quadrada: quadrada.is_file().then_some(quadrada), miniatura: Some(miniatura) }
+        })
+    }
+
+    /// Grava as versões da capa. Uma que não se decodifica aqui fica só com a inteira.
+    fn fazer(capa: &std::path::Path) -> Self {
+        let lida = std::fs::read(capa).ok().and_then(|b| image::load_from_memory(&b).ok());
+        let Some(imagem) = lida else { return Self::default() };
+        let (largura, altura) = (imagem.width(), imagem.height());
+        let recorte = recorte_quadrado(largura, altura);
+        let quadrada = recorte.and_then(|(x, y, lado)| {
+            let mut q = imagem.crop_imm(x, y, lado, lado);
+            if lado > MAIOR_LADO {
+                q = q.resize(MAIOR_LADO, MAIOR_LADO, image::imageops::FilterType::Triangle);
+            }
+            gravar(&q, &capa.with_extension("quad"))
+        });
+        // Larga e sem a quadrada (disco cheio): sem miniatura também, para tentar de novo na próxima abertura.
+        if recorte.is_some() && quadrada.is_none() {
+            return Self::default();
+        }
+        let pequena = imagem.resize_to_fill(MINIATURA, MINIATURA, image::imageops::FilterType::Triangle);
+        Self { quadrada, miniatura: gravar(&pequena, &capa.with_extension("mini")) }
+    }
+}
+
+/// O quadrado do meio (x, y, lado) de uma imagem que não é quadrada (2% de folga).
+pub fn recorte_quadrado(largura: u32, altura: u32) -> Option<(u32, u32, u32)> {
+    let (menor, maior) = (largura.min(altura), largura.max(altura));
+    let quase = u64::from(maior - menor) * 50 <= u64::from(maior);
+    (menor > 0 && !quase).then(|| ((largura - menor) / 2, (altura - menor) / 2, menor))
+}
+
+fn gravar(imagem: &image::DynamicImage, destino: &std::path::Path) -> Option<PathBuf> {
+    let mut bytes = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90).encode_image(&imagem.to_rgb8()).ok()?;
+    let temporario = destino.with_extension(format!("{}-parcial", destino.extension()?.to_str()?));
+    std::fs::write(&temporario, &bytes).and_then(|()| std::fs::rename(&temporario, destino)).ok()?;
+    Some(destino.to_path_buf())
 }
 
 /// Baixa uma capa para a pasta, por um arquivo temporário (a tela nunca vê um arquivo pela metade). Só guarda o
@@ -147,6 +362,41 @@ mod testes {
     use super::*;
 
     #[test]
+    fn o_brilho_de_onde_fica_o_texto() {
+        let (claro, escuro) = brilho((0..100u8).map(|i| [i * 2, i * 2, i * 2]));
+        assert!((claro - 190.0 / 255.0).abs() < 0.01 && (escuro - 8.0 / 255.0).abs() < 0.01, "{claro} {escuro}");
+        assert_eq!(brilho(std::iter::repeat_n([255, 255, 255], 10)), (1.0, 1.0));
+        assert_eq!(brilho(std::iter::empty()), (1.0, 0.0), "sem pixel, o pior caso");
+    }
+
+    #[test]
+    fn o_fundo_fica_pronto_ao_lado_da_capa() {
+        let pasta = std::env::temp_dir().join(format!("tccplayer-fundos-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).expect("pasta");
+        let url = "https://exemplo.invalido/larga.jpg";
+        image::RgbImage::from_pixel(2000, 800, image::Rgb([250, 250, 250]))
+            .save_with_format(pasta.join(nome_do_arquivo(url)), image::ImageFormat::Png)
+            .expect("capa");
+        let capas = Capas::iniciar(Some(pasta.clone()));
+        for tipo in [TipoDeFundo::Largo, TipoDeFundo::Desfocado] {
+            let limite = Instant::now() + Duration::from_secs(10);
+            let fundo = loop {
+                match capas.fundo(url, tipo) {
+                    None if Instant::now() < limite => std::thread::sleep(Duration::from_millis(20)),
+                    f => break f.expect("o fundo ficou pronto"),
+                }
+            };
+            let m = image::load_from_memory(&std::fs::read(&fundo.arquivo).expect("lê")).expect("imagem");
+            let esperado = if tipo == TipoDeFundo::Largo { (LARGA, 512) } else { DESFOCADO };
+            assert_eq!((m.width(), m.height()), esperado);
+            assert!(fundo.claro > 0.95, "imagem clara: {fundo:?}");
+        }
+        drop(capas);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
     fn nome_do_arquivo_estavel_e_seguro() {
         let a = nome_do_arquivo("https://i.ytimg.com/vi/abc/hq.jpg");
         assert_eq!(a, nome_do_arquivo("https://i.ytimg.com/vi/abc/hq.jpg"));
@@ -168,6 +418,65 @@ mod testes {
         assert_eq!(Capas::iniciar(None).arquivo(url), None, "sem pasta de dados, nada");
         drop(capas);
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
+    fn linha_usa_a_miniatura_e_a_capa_larga_e_recortada() {
+        let pasta = std::env::temp_dir().join(format!("tccplayer-miniaturas-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).expect("pasta");
+        let capas = Capas::iniciar(Some(pasta.clone()));
+        let esperar = |url: &str, lado: f32| {
+            let limite = Instant::now() + Duration::from_secs(10);
+            loop {
+                match capas.arquivo_para(url, lado) {
+                    None if Instant::now() < limite => std::thread::sleep(Duration::from_millis(20)),
+                    a => return a.expect("a capa ficou pronta"),
+                }
+            }
+        };
+        let medidas = |a: &std::path::Path| {
+            let m = image::load_from_memory(&std::fs::read(a).expect("lê")).expect("imagem");
+            (m.width(), m.height())
+        };
+        let gravar = |url: &str, l: u32, a: u32| {
+            let arquivo = pasta.join(nome_do_arquivo(url));
+            image::RgbImage::from_pixel(l, a, image::Rgb([200, 40, 40]))
+                .save_with_format(&arquivo, image::ImageFormat::Png)
+                .expect("capa");
+            arquivo
+        };
+        // Larga, como a capa de um vídeo: recortada no cartão, quadrada na linha.
+        let larga = "https://exemplo.invalido/larga.png";
+        let inteira = gravar(larga, 640, 360);
+        assert_eq!(medidas(&esperar(larga, 176.0)), (360, 360));
+        assert_eq!(medidas(&esperar(larga, 48.0)), (MINIATURA, MINIATURA));
+        assert_ne!(esperar(larga, 176.0), inteira);
+        // Quadrada: o cartão usa a própria capa.
+        let quadrada = "https://exemplo.invalido/quadrada.png";
+        let capa = gravar(quadrada, 300, 300);
+        assert_eq!(esperar(quadrada, 176.0), capa);
+        assert_eq!(medidas(&esperar(quadrada, 48.0)), (MINIATURA, MINIATURA));
+        // O que não se decodifica fica com o arquivo como veio.
+        let ruim = "https://exemplo.invalido/ruim.gif";
+        std::fs::write(pasta.join(nome_do_arquivo(ruim)), b"GIF89a").expect("arquivo");
+        assert_eq!(esperar(ruim, 48.0), pasta.join(nome_do_arquivo(ruim)));
+        // Na próxima abertura, as versões já estão em disco.
+        drop(capas);
+        let outra = Capas::iniciar(Some(pasta.clone()));
+        assert!(outra.arquivo_para(larga, 48.0).is_some_and(|a| a.extension().is_some_and(|x| x == "mini")));
+        drop(outra);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
+    fn recorte_e_o_quadrado_do_meio() {
+        assert_eq!(recorte_quadrado(640, 360), Some((140, 0, 360)));
+        assert_eq!(recorte_quadrado(100, 300), Some((0, 100, 100)));
+        assert_eq!(
+            (recorte_quadrado(640, 640), recorte_quadrado(640, 635), recorte_quadrado(0, 9)),
+            (None, None, None)
+        );
     }
 
     #[test]

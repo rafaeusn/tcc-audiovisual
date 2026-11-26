@@ -147,7 +147,8 @@ impl Player {
         let (kx, ky) = (("modulo-x", m as u32), ("modulo-y", m as u32));
         match &self.arrasto {
             Some(a) if a.modulo == m => {
-                let (dx, dy) = (f32::from(a.atual.x - a.inicio.x), f32::from(a.atual.y - a.inicio.y));
+                let real = crate::ui::medidas::logico;
+                let (dx, dy) = (real(a.atual.x - a.inicio.x), real(a.atual.y - a.inicio.y));
                 self.anim.definir(kx, dx);
                 self.anim.definir(ky, dy);
                 (dx, dy)
@@ -168,8 +169,10 @@ impl Player {
         {
             let limites = self.limites.borrow();
             if let (Some(la), Some(lb)) = (limites.get(&a.modulo), limites.get(&alvo)) {
-                let arrastado = (f32::from(a.atual.x - a.inicio.x), f32::from(a.atual.y - a.inicio.y));
-                let entre = (f32::from(la.origin.x - lb.origin.x), f32::from(la.origin.y - lb.origin.y));
+                // O ponteiro e as áreas estão em pixels de verdade; o deslocamento é desenhado na medida das telas.
+                let real = crate::ui::medidas::logico;
+                let arrastado = (real(a.atual.x - a.inicio.x), real(a.atual.y - a.inicio.y));
+                let entre = (real(la.origin.x - lb.origin.x), real(la.origin.y - lb.origin.y));
                 self.anim.definir(("modulo-x", a.modulo as u32), entre.0);
                 self.anim.definir(("modulo-y", a.modulo as u32), entre.1);
                 self.anim.definir(("modulo-x", alvo as u32), arrastado.0 - entre.0);

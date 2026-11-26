@@ -261,6 +261,9 @@ pub struct Paleta {
     pub b: [u8; 3],
 }
 
+/// Quantas buscas recentes ficam guardadas.
+pub const MAXIMO_DE_BUSCAS_RECENTES: usize = 8;
+
 pub const PALETAS: [Paleta; 6] = [
     Paleta { nome: "Gelo", a: [0xff, 0xff, 0xff], b: [0xdf, 0xe6, 0xff] },
     Paleta { nome: "Neon", a: [0xff, 0x2d, 0x55], b: [0x3d, 0xf2, 0xff] },
@@ -329,8 +332,12 @@ pub struct Ajustes {
     pub letra_idioma: String,
     /// Mostrar, embaixo de cada linha, a letra em letras latinas (coreano, japonês, chinês, russo, grego...).
     pub letra_romanizar: bool,
-    /// O espaço aberto da última vez (`tudo`, `computador` ou `servico:<nome>`).
+    /// O filtro de serviço da última vez (`tudo`, `computador` ou `servico:<nome>`).
     pub espaco: String,
+    /// Por qual serviço tocar a música que está em mais de um (vazio = o primeiro que toca por ele mesmo).
+    pub servico_preferido: String,
+    /// As últimas buscas, a mais nova primeiro (até [`MAXIMO_DE_BUSCAS_RECENTES`]).
+    pub buscas_recentes: Vec<String>,
     /// Músicas do computador: segundos de crossfade entre uma e outra (0 = sem; a troca continua sem intervalo).
     pub crossfade_s: f32,
     /// O volume da música que o Player toca (0 a 1). O do PC não é daqui.
@@ -348,7 +355,21 @@ pub struct Ajustes {
     pub modulos: Vec<Modulo>,
     pub janela_largura: f32,
     pub janela_altura: f32,
+    /// Na Estante, quanto da largura fica com o visual (`None` = o padrão de cada largura de janela).
+    pub divisao: Option<f32>,
+    /// Na Estante, a página toma o miolo e o visual vira uma tira no alto.
+    pub pagina_larga: bool,
+    /// Segundos sem mexer para a página sair da frente do visual (0 = nunca).
+    pub descanso_s: u32,
+    /// O tamanho da interface, em porcento (um de [`TAMANHOS`]).
+    pub tamanho: u16,
 }
+
+/// Os tamanhos da interface.
+pub const TAMANHOS: [u16; 4] = [90, 100, 110, 125];
+
+/// Os limites da divisória da Estante.
+pub const DIVISAO: (f32, f32) = (0.28, 0.68);
 
 impl Default for Ajustes {
     fn default() -> Self {
@@ -382,6 +403,8 @@ impl Default for Ajustes {
             letra_idioma: "pt".into(),
             letra_romanizar: false,
             espaco: "tudo".into(),
+            servico_preferido: String::new(),
+            buscas_recentes: Vec::new(),
             crossfade_s: 0.0,
             volume_musica: 1.0,
             volume_igualado: true,
@@ -393,6 +416,10 @@ impl Default for Ajustes {
             modulos: vec![Modulo::Ritmo, Modulo::Energia, Modulo::Estrutura, Modulo::Sessao, Modulo::Visual],
             janela_largura: 1440.0,
             janela_altura: 900.0,
+            divisao: None,
+            pagina_larga: false,
+            descanso_s: 30,
+            tamanho: 100,
         }
     }
 }
@@ -437,6 +464,17 @@ impl Ajustes {
         } else {
             "tudo".into()
         };
+        let preferido = self.servico_preferido.trim();
+        self.servico_preferido = if preferido.len() <= 80 && !preferido.chars().any(char::is_control) {
+            preferido.to_string()
+        } else {
+            String::new()
+        };
+        self.buscas_recentes.retain(|b| {
+            let n = b.trim().chars().count();
+            (2..=64).contains(&n) && !b.chars().any(char::is_control)
+        });
+        self.buscas_recentes.truncate(MAXIMO_DE_BUSCAS_RECENTES);
         if self.paleta >= PALETAS.len() {
             self.paleta = Self::default().paleta;
         }
@@ -461,7 +499,12 @@ impl Ajustes {
         }
         let faixa = |v: f32, min: f32, max: f32, padrao: f32| if v.is_finite() { v.clamp(min, max) } else { padrao };
         self.janela_largura = faixa(self.janela_largura, 360.0, 7680.0, 1440.0);
-        self.janela_altura = faixa(self.janela_altura, 560.0, 4320.0, 900.0);
+        self.janela_altura = faixa(self.janela_altura, 400.0, 4320.0, 900.0);
+        self.divisao = self.divisao.filter(|d| d.is_finite()).map(|d| d.clamp(DIVISAO.0, DIVISAO.1));
+        self.descanso_s = if self.descanso_s == 0 { 0 } else { self.descanso_s.clamp(5, 600) };
+        // Um tamanho de fora da lista vai para o mais perto dela.
+        let pedido = self.tamanho;
+        self.tamanho = TAMANHOS.into_iter().min_by_key(|t| t.abs_diff(pedido)).unwrap_or(100);
         self
     }
 
@@ -512,6 +555,22 @@ impl Ajustes {
 mod testes {
     use super::*;
 
+    #[test]
+    fn o_tamanho_fica_na_lista() {
+        let com = |tamanho| Ajustes { tamanho, ..Default::default() }.validar().tamanho;
+        assert_eq!((com(100), com(125), com(0), com(117), com(104), com(999)), (100, 125, 90, 110, 100, 125));
+        assert_eq!(Ajustes::default().tamanho, 100);
+    }
+
+    #[test]
+    fn a_divisoria_e_o_descanso_ficam_nos_limites() {
+        let com = |divisao, descanso_s| Ajustes { divisao, descanso_s, ..Default::default() }.validar();
+        assert_eq!(com(Some(0.05), 1).divisao, Some(DIVISAO.0));
+        assert_eq!(com(Some(9.0), 1).divisao, Some(DIVISAO.1));
+        assert_eq!(com(Some(f32::NAN), 1).divisao, None);
+        assert_eq!((com(None, 0).descanso_s, com(None, 1).descanso_s, com(None, 9999).descanso_s), (0, 5, 600));
+    }
+
     fn pasta_temp(nome: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir().join(format!("tccplayer-teste-{nome}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
@@ -561,7 +620,7 @@ mod testes {
         let a = Ajustes { paleta: 99, janela_largura: f32::NAN, janela_altura: 10.0, ..Default::default() }.validar();
         assert_eq!(a.paleta, 1);
         assert_eq!(a.janela_largura, 1440.0);
-        assert_eq!(a.janela_altura, 560.0);
+        assert_eq!(a.janela_altura, 400.0);
         let fora = Ajustes { ilha_posicao: 3.0, ..Default::default() }.validar();
         assert_eq!(fora.ilha_posicao, 1.0);
         let nan = Ajustes { ilha_posicao: f32::NAN, ..Default::default() }.validar();
@@ -595,6 +654,13 @@ mod testes {
         assert_eq!(espaco.espaco, "servico:youtube-music");
         let comprido = Ajustes { espaco: "x".repeat(500), ..Default::default() }.validar();
         assert_eq!(comprido.espaco, "tudo", "chave estragada volta a Tudo");
+        let mut buscas: Vec<String> = (0..20).map(|i| format!("busca {i}")).collect();
+        buscas.insert(0, "a\nb".into());
+        buscas.insert(0, "x".repeat(90));
+        buscas.insert(0, " ".into());
+        let lidas = Ajustes { buscas_recentes: buscas, ..Default::default() }.validar().buscas_recentes;
+        assert_eq!(lidas.len(), MAXIMO_DE_BUSCAS_RECENTES);
+        assert_eq!(lidas[0], "busca 0", "vazia, comprida demais ou com quebra de linha sai");
     }
 
     #[test]

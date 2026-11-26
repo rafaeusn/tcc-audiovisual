@@ -97,12 +97,13 @@ impl Servico for Exemplo {
                     .cloned()
                     .map(Item::Faixa)
                     .collect();
-                CorpoDaResposta::Itens { itens }
+                CorpoDaResposta::itens(itens)
             }
             CorpoDoPedido::Inicio => CorpoDaResposta::Prateleiras {
                 prateleiras: vec![Prateleira {
                     titulo: "Para testar".into(),
                     itens: self.catalogo.iter().cloned().map(Item::Faixa).collect(),
+                    ..Default::default()
                 }],
             },
             CorpoDoPedido::Resolver { .. } if self.falhas_de_rede > 0 => {
@@ -127,14 +128,14 @@ impl Servico for Exemplo {
                 self.conta = Some(Conta { erro: Some("o login foi revogado".into()), ..Conta::default() });
                 CorpoDaResposta::erro("o login foi revogado")
             }
-            CorpoDoPedido::Biblioteca if self.conta.is_some() => CorpoDaResposta::Itens {
-                itens: vec![Item::Playlist(Playlist {
+            CorpoDoPedido::Biblioteca if self.conta.is_some() => {
+                CorpoDaResposta::itens(vec![Item::Playlist(Playlist {
                     servico: "exemplo".into(),
                     id: "p1".into(),
                     titulo: "Lista de exemplo".into(),
                     ..Default::default()
-                })],
-            },
+                })])
+            }
             CorpoDoPedido::Entrar | CorpoDoPedido::Sair | CorpoDoPedido::Conta if self.conta.is_some() => {
                 self.atender_conta(&pedido)
             }

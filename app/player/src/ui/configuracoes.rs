@@ -6,10 +6,11 @@
 //! a seção da Ilha é montada aqui.
 
 use super::painel::{bloco_ajuste, interruptor, linha_ajuste};
-use super::{icone, texto, titulo};
+use super::{icone, medidas};
 use crate::app::Player;
 use crate::arranjo::Modo;
-use gpui::{ClickEvent, Context, Div, FontWeight, SharedString, Stateful, div, prelude::*, px};
+use crate::ui::medidas::px;
+use gpui::{ClickEvent, Context, Div, FontWeight, SharedString, Stateful, div, prelude::*};
 use nucleo::{BordaIlha, Comando, Pagina, TamanhoIlha};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -75,15 +76,16 @@ impl Player {
         for (i, (secao, nome, caminho, _)) in SECOES.into_iter().enumerate() {
             let ativa = secao == self.secao_config;
             fileira = fileira.child(
-                texto(14.0)
+                medidas::apoio()
                     .id(("cfg-ficha", i))
-                    .h(px(36.0))
+                    .map(|d| self.focavel(d, medidas::PILULA))
+                    .h(px(medidas::FICHA))
                     .px(px(14.0))
                     .flex()
                     .flex_none()
                     .items_center()
                     .gap(px(8.0))
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .border_1()
                     .border_color(if ativa { c.texto } else { c.linha_2 })
                     .cursor_pointer()
@@ -91,7 +93,7 @@ impl Player {
                     .text_color(if ativa { c.texto } else { c.texto_2 })
                     .when(ativa, |d| d.bg(c.sel))
                     .hover(|s| s.bg(c.hover))
-                    .child(icone(caminho, 16.0, if ativa { c.texto } else { c.texto_2 }))
+                    .child(icone(caminho, medidas::ICONE_LINHA, if ativa { c.texto } else { c.texto_2 }))
                     .child(nome)
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.secao_config = secao;
@@ -119,8 +121,10 @@ impl Player {
                     .flex()
                     .flex_col()
                     .gap(px(4.0))
-                    .child(titulo(if grande { 40.0 } else { 28.0 }).child("Configurações"))
-                    .child(texto(14.0).text_color(c.texto_2).child("As mudanças valem na hora e ficam guardadas.")),
+                    .child(medidas::pagina(grande).child("Configurações"))
+                    .child(
+                        medidas::apoio().text_color(c.texto_2).child("As mudanças valem na hora e ficam guardadas."),
+                    ),
             )
             .child(self.botao_icone("cfg-fechar", "icones/x.svg", false, Comando::AbrirAjustes, cx))
     }
@@ -133,8 +137,8 @@ impl Player {
             .flex()
             .flex_col()
             .gap(px(4.0))
-            .child(texto(20.0).font_weight(FontWeight::SEMIBOLD).child(nome))
-            .child(texto(14.0).text_color(c.texto_2).child(frase))
+            .child(medidas::destaque().font_weight(FontWeight::SEMIBOLD).child(nome))
+            .child(medidas::apoio().text_color(c.texto_2).child(frase))
     }
 
     /// A página como folha por cima do visual (janela larga ou média).
@@ -144,8 +148,10 @@ impl Player {
         let largo = a.heroi.w >= 760.0;
         let lado = if a.heroi.w >= 640.0 { 32.0 } else { 16.0 };
         let largura_nav = 220.0;
+        // A borda da folha (1 px de cada lado) fica de fora da conta.
+        let dentro = a.heroi.w - 4.0;
         let largura_conteudo =
-            if largo { (a.heroi.w - largura_nav - 3.0 * lado).min(760.0) } else { (a.heroi.w - 2.0 * lado).max(200.0) };
+            if largo { (dentro - largura_nav - 3.0 * lado).min(760.0) } else { (dentro - 2.0 * lado).max(200.0) };
         let blocos = self.blocos_da_secao(largura_conteudo, cx);
         let cabeca = self.cabeca_das_configuracoes(a.heroi.w >= 640.0, lado, cx);
         let conteudo = div()
@@ -153,6 +159,7 @@ impl Player {
             .flex_1()
             .min_w(px(0.0))
             .overflow_y_scroll()
+            .track_scroll(&self.rolagem_da_pagina())
             .pb(px(24.0))
             .child(div().w(px(largura_conteudo)).flex().flex_col().child(self.titulo_da_secao()).children(blocos));
 
@@ -163,18 +170,19 @@ impl Player {
                 nav = nav.child(
                     div()
                         .id(("cfg-secao", i))
-                        .h(px(40.0))
+                        .map(|d| self.focavel(d, medidas::RAIO_CARTAO))
+                        .h(px(48.0))
                         .px(px(12.0))
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .rounded(px(10.0))
+                        .rounded(px(medidas::RAIO_CARTAO))
                         .cursor_pointer()
                         .when(ativa, |d| d.bg(c.sel))
                         .hover(|s| s.bg(c.hover))
-                        .child(icone(caminho, 18.0, if ativa { c.texto } else { c.texto_2 }))
+                        .child(icone(caminho, medidas::ICONE_LINHA, if ativa { c.texto } else { c.texto_2 }))
                         .child(
-                            texto(14.0)
+                            medidas::corpo()
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(if ativa { c.texto } else { c.texto_2 })
                                 .child(nome),
@@ -251,14 +259,14 @@ impl Player {
             let seta = |id: &'static str, icone_: &'static str, ativa: bool| {
                 div()
                     .id((id, i))
-                    .size(px(32.0))
+                    .size(px(36.0))
                     .flex()
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .when(ativa, |d| d.cursor_pointer().hover(|s| s.bg(c.hover)))
-                    .child(icone(icone_, 16.0, if ativa { c.texto_2 } else { c.linha_2 }))
+                    .child(icone(icone_, medidas::ICONE_LINHA, if ativa { c.texto_2 } else { c.linha_2 }))
             };
             let (subir, descer, alternar) = (chave.clone(), chave.clone(), chave.clone());
             bloco = bloco.child(
@@ -274,12 +282,12 @@ impl Player {
                             .flex()
                             .flex_col()
                             .child(
-                                texto(14.0)
+                                medidas::corpo()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(if ligada { c.texto } else { c.texto_3 })
                                     .child(format!("{}. {}", i + 1, fonte.nome())),
                             )
-                            .child(texto(12.0).text_color(c.texto_2).child(descricao)),
+                            .child(medidas::apoio().text_color(c.texto_2).child(descricao)),
                     )
                     .child(seta("letra-fonte-subir", "icones/chev-u.svg", i > 0).on_click(cx.listener(
                         move |this, _: &ClickEvent, _, cx| {
@@ -550,25 +558,25 @@ impl Player {
             })
             .child(
                 div().pl(px(recuo)).flex().child(
-                    texto(14.0)
+                    medidas::corpo()
                         .id("cfg-ilha-centro")
-                        .h(px(40.0))
+                        .h(px(medidas::BOTAO))
                         .px(px(16.0))
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .border_1()
                         .border_color(c.linha_2)
                         .font_weight(FontWeight::SEMIBOLD)
                         .cursor_pointer()
                         .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/ilha.svg", 18.0, c.texto))
+                        .child(icone("icones/ilha.svg", medidas::ICONE_LINHA, c.texto))
                         .child("Voltar ao centro do topo")
                         .on_click(self.ao_clicar(Comando::CentralizarIlha, cx)),
                 ),
             )
-            .child(texto(12.0).text_color(c.texto_3).child(
+            .child(medidas::apoio().text_color(c.texto_3).child(
                 "Aberta, a Ilha tem páginas: Tocando, Letra, Visual (o visual de verdade, reagindo ao som), Ritmo e Ajustes. Troque pelas abas, arrastando o conteúdo para o lado ou com a roda do mouse.",
             ))
     }

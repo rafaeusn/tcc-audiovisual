@@ -64,7 +64,7 @@ O primeiro pedido é sempre `ola`. O provedor se apresenta e diz o que sabe faze
 | --- | --- | --- |
 | `ola` | `protocolo` | `apresentacao` (`nome`, `servico`, `versao`, `protocolo`, `capacidades`) |
 | `buscar` | `texto`, `limite` | `itens` (`itens`: faixas, álbuns, artistas, playlists; o primeiro é o melhor resultado, que o Player mostra em destaque; `limite` vale para cada tipo) |
-| `inicio` | — | `prateleiras` (`prateleiras`: `titulo` e `itens`) |
+| `inicio` | — | `prateleiras` (`prateleiras`: `titulo`, `itens` e, opcional, `tipo`: `atalhos`, `para-voce`, `lancamentos`, `recentes`, `artistas`, `clipes`, `paradas` ou `outras`; em Tudo, as do mesmo tipo de serviços diferentes se juntam, e um tipo desconhecido vale `outras`) |
 | `album`, `artista`, `playlist` | `album`, `artista` ou `playlist` (o id dele) | `itens` (as faixas, ou os álbuns do artista) |
 | `biblioteca` (só com a capacidade `biblioteca`) | — | `itens` (as playlists, os álbuns e os artistas que a conta tem salvos, na ordem do serviço) |
 | `resolver` | `faixa` (o id dela) | `fonte` |

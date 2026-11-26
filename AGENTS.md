@@ -65,7 +65,7 @@ Dentro de `app/`:
 ```bash
 cargo run -p player                      # abre o app (debug)
 cargo build --release -p player          # release (D:/Rust/target/release/player.exe)
-cargo test --workspace                   # 526 testes em 25/11/2026 (fora o `visual --test desenho`), todos passando
+cargo test --workspace                   # 583 testes em 25/11/2026 (fora o `visual --test desenho`), todos passando
 cargo clippy --workspace --all-targets   # tem que sair sem aviso
 cargo fmt --all
 cargo deny check licenses sources        # licenças e fontes (app/deny.toml)
@@ -144,6 +144,8 @@ thread.** Pedidos seguem por canal (`mpsc`).
 - `preanalista.rs`: thread da pré-análise (prioridade: a de agora e as duas seguintes; depois a biblioteca, em
   prioridade baixa; análise da biblioteca interrompida quando chega prioridade).
 - `cadeia.rs`: o que fazer quando uma faixa de serviço não toca, pela causa do erro (tentar de novo, esperar ou pular).
+- `menu.rs`: o menu do botão direito e do ⋯, só lógica e testada (`Alvo`, `Acao`, `entradas`, `lugar`); `app/menu.rs` abre e executa (e as abas do
+  painel, `AbaDoPainel`), `ui/menu.rs` desenha (`ao_menu`, `botao_mais`).
 - `fila.rs`: a fila (aleatório que guarda a ordem original, repetir, a seguir, mover, tirar), só lógica e testada.
 - `ilha.rs`: a lógica da Ilha (formas, esperas para abrir e fechar, fila de avisos, medidas), testada; a vista é
   `ui/ilha.rs`, numa segunda janela GPUI (`WindowKind::PopUp`, fundo transparente, tamanho fixo da maior forma)
@@ -163,13 +165,17 @@ thread.** Pedidos seguem por canal (`mpsc`).
   cada linha (tradução, letras latinas) sai de `Player::extra_da_linha`; a letra em tela cheia é `ui/letra_cheia.rs`
   (`Player::letra_cheia`, comando `LetraTelaCheia`, tecla Y), que pede ao arranjo o visual na janela inteira.
 - `arranjo.rs`: layout responsivo (largo, gaveta, empilhado, mini), no Palco e na Estante (`Pedido.estante`,
-  `Pedido.expansao`; `Arranjo.lateral` e `Arranjo.tocando`).
+  `Pedido.expansao`; `Arranjo.miolo`, `divisoria`, `painel_na_pagina` e `interno`, o tamanho em que o visual é desenhado).
+- `detalhes.rs`: as contas das páginas de artista, álbum e playlist (abas do artista, números, datas, o véu sobre a imagem, `mesmo_nome`);
+  a tela é `ui/detalhe.rs` (o cabeçalho com imagem, `fundo_do_cabecalho`, `cantos_da_folha`).
+- `descanso.rs`: a página da Estante que sai da frente quando ninguém mexe (só a lógica; `Player::descansar` e `so_visual_na_estante`).
 - `ui/`: `casca` (topo e trilho), `heroi`, `painel` (módulos e Ajustes), `reproducao` (crossfade, volume
   igualado e equalizador nos Ajustes), `dock`, `paleta` (Ctrl K), `busca_letra`, `campo` (campo de texto),
   `biblioteca`, `musicas` (categorias, visões, ações da linha, `campo_de_busca`), `fila`, `playlist` (janela), `loja`,
-  `modulo` (ficha), `espacos` (topo da folha: espaços e abas), `paginas` (Para você, álbum, playlist, artista,
-  Biblioteca do serviço), `busca` (página Busca), `faixa` (página da faixa), `estante` (lateral, barra de ícones da gaveta, o quadro do
-  visual no trilho Tocando e a navegação de baixo da Estante), `mod.rs` (botões, dicas e ajudantes).
+  `modulo` (ficha), `destinos` (lateral, trilho e barra de baixo, e as abas sublinhadas), `espacos` (o filtro de serviço), `paginas` (Início, álbum,
+  playlist, artista e as peças), `biblioteca` (a Biblioteca única; as abas Pastas e Histórico são `musicas` e `historico`), `busca` (página
+  Buscar), `faixa` (página da faixa), `estante` (a lateral, o visual no centro e a divisória), `selo` (a marca dos serviços, o disco e o botão de tocar), `linha` (texto com "…"), `mod.rs`
+  (botões, dicas e ajudantes).
 - `recursos/`: fontes, ícones SVG e os manifestos dos módulos (`recursos/modulos/*.toml`).
 
 ### Convenções
@@ -180,6 +186,15 @@ thread.** Pedidos seguem por canal (`mpsc`).
   comandos.
 - Botões passam por `self.botao(...)` e `self.botao_icone(...)`; as animações por `self.anim.seguir(chave, alvo,
   tempo)`; as dicas por `marca(id)` e `ao_pairar(...)`.
+- **Medidas:** todo tamanho de texto, ícone e raio sai de `ui/medidas.rs` (`medidas::corpo()`, `ICONE`, `raio_da_capa`...). O teste
+  `sem_numero_solto` falha com número solto nas telas (a Ilha tem escala própria). Texto com "…" usa `ui::linha(texto)`
+  (ou `linhas(texto, n)`), nunca o do GPUI: o `truncate` corta sem "…", e o `text_ellipsis` fecha o app em texto com acento
+  (`ui/linha.rs`; um teste confere). Sem caixa alta e sem " · " separando dados.
+- **Tamanho da interface:** nas telas, o `px` é o de `ui/medidas.rs` (multiplica pela escala do ajuste `tamanho`), e o arranjo é calculado
+  na janela dividida por ela. O que vem do mouse, das áreas medidas e da rolagem está em pixels de verdade: converta com `medidas::logico`
+  (e use `gpui::px` para escrever um valor real, como dentro de um `canvas`). A Ilha desenha em escala 1 e devolve a de antes.
+- **Imagem de canto redondo:** o raio vai no `img`, e a imagem precisa ser quadrada (`capas::arquivo_para` recorta): o GPUI só recorta
+  filhos em retângulo, e `ObjectFit::Cover` desenha a imagem para fora do quadrado.
 - Ajustes novos: um campo em `Ajustes` com `#[serde(default)]` e correção em `validar()`.
 - Edições de texto: um campo novo usa `ui/campo.rs` (`receber_texto`, `conteudo_do_campo`, `EntityInputHandler`).
   Não trate letras pela tecla (`key_char`), porque acento com tecla morta deixa de funcionar.
@@ -466,6 +481,121 @@ continua "Intensa" 0,84 com a barra em 100, em 9 e no mudo; no Soloist do Rafael
 em 100%, 25%, 1%, 0,01% e 0,001% e o ganho da conta é igual. O Rafael testou no Player dele, no Spotify: ficou bom.
 Não conferido: a barra seguindo o misturador do Windows, e a Ilha.
 
+**Remodelagem, parte 1 (25/11/2026)**, medidas e consertos ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte1.md)):
+`ui/medidas.rs` com os sete papéis de texto (16 de base, 14 de apoio), ícones de 24 (traço 1,8), linhas de 64, fichas de 40, botões de 44;
+topo 64, dock 96 (88 em janela baixa), navegação 72, lateral 264. Capas arredondadas (e redondas as de artista), recortadas e com miniatura
+de 128 px (`capas::Versoes`: `.quad` e `.mini` ao lado da capa). A busca dos serviços e a da Biblioteca têm textos separados
+(`navegacao::Buscas`). No dock, o meio fica com o que sobra dos lados (o tempo não fica mais embaixo de um botão); Ilha e mini saem abaixo
+de 860 px, aleatório e repetir abaixo de 440. Na folha estreita os espaços e as abas viram só ícones e cabem dois cartões por linha.
+Conferido na cópia muda com o YouTube Music e o Spotify: Estante em 1920, 1440, 958 × 560, 700, 410 e 400 × 420, Palco em 1440, 958 × 560 e
+410, Loja, Configurações, busca, playlist, uma faixa de vídeo tocando, a busca que não vaza mais, Fila vazia, Histórico, modo edição, o tema Papel e a barra de
+comandos. Não conferido: a janela mini, a letra em tela cheia com uma letra, a ficha de um módulo na Loja, as janelas de playlist e de
+letra, uma pasta de músicas do computador e a Ilha (a capa dela agora é recortada). Ficou: na linha, as ações escondidas ainda ocupam lugar e a lista de artistas é cortada sem "…" (parte 4).
+
+**Remodelagem, parte 2 (25/11/2026)**, navegação e busca única ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte2.md)):
+`navegacao.rs` refeito: uma pilha só de passos (`id`, rota, filtro); `Espaco` virou o filtro de serviço (`trocar_filtro` não cria passo;
+numa página sem filtro abre o Início); `Rota::Inicio`, `Rota::Biblioteca(AbaDaBiblioteca)`, sem `Historico`; `esquecer_servico` limpa a pilha;
+a rolagem é um `ScrollHandle` por passo (`rolagem_da_pagina`: o GPUI esquece a de um elemento que sai da tela). O campo com o teclado é
+`Player::campo` (`Campo::{Busca, Biblioteca}`, `campo_no_teclado`), com seleção total (`campo_selecionado`). A busca do topo procura também
+no computador por `Pedido::Procurar` (`Lista::achadas`), sem mexer no filtro da Biblioteca; `ajustes.buscas_recentes`. Os comandos moram na
+busca (`>`, aba Comandos, `executar_da_busca` volta à página de antes se `busca_de_passagem`); a barra por cima só com `so_visual`. A tinta do
+serviço saiu das telas (era da parte 3), os cartões preenchem a largura (`lado_do_cartao_em`, da parte 7) e as ações da linha ficam por cima
+(`acoes_por_cima`, da parte 4). A busca
+é agrupada uma vez por resposta (`grupos_da_busca`) e a lateral só monta as linhas à vista. **Queda achada e corrigida**: o `uma_linha` da parte 1 (`line_clamp` + `text_ellipsis`) fechava o app em texto
+com acento medido em duas larguras (`direct_write.rs`, "not a char boundary"); agora é o elemento `ui/linha.rs`. Conferido na cópia muda com o
+YouTube Music e o Spotify: Estante em 1920, 1440, 958 × 560, 700 e 410, Palco em 1440, tema Papel; busca, `>` com setas e Enter (volta à página
+de antes), a barra `/` do teclado, buscas recentes, o texto selecionado, trocar o filtro, voltar com a rolagem, as abas da Biblioteca, ordem por
+nome, Histórico, Fila, uma pasta de músicas (WAVs de teste) na busca e na Biblioteca, e um álbum do YouTube Music tocando. Não conferido:
+`Ctrl Tab`, `Ctrl 1..9` e `Alt ←/→` (as mensagens de teste não levam Ctrl nem Alt), a Biblioteca em linhas, Curtidas com faixas, uma playlist do
+Player nos cartões, a skin imersiva, a barra de comandos na tela cheia, um provedor que sai no meio (só os testes). No primeiro teste o YouTube
+respondeu 403 a todas as faixas por um instante e depois voltou sozinho (a fila acabou vazia): não é da navegação, e não foi investigado.
+Ficou: Principais em blocos por serviço (parte 3 mistura), "Abertos há pouco" só desta abertura (parte 3 guarda).
+
+**Remodelagem, parte 3 (25/11/2026)**, Tudo misturado e selos ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte3.md)):
+`juntar.rs` (lógica): `juntar_inicio` (a k-ésima prateleira de um tipo com a k-ésima do outro serviço; as sem tipo intercaladas), `intercalar` (a
+mesma música, por ISRC ou nota a partir de 0,9 no `casador`, vira um `Junto` com `tambem`), `juntar_busca`, `saudacao`, `servico_do_app`. O protocolo
+ganhou `Prateleira.tipo` (`TipoDaPrateleira`, desconhecido vira `Outras`); o Spotify adivinha o tipo pelo nome da seção, pelo título e pelos itens
+(`tipo_da_secao`). `biblioteca.db` ganhou `recentes` (até 60: `registrar_recente`, `Local::recente`), escrito ao abrir álbum, playlist ou artista e
+quando uma música de serviço começa a tocar. `ui/selo.rs`: `Marca`, `disco`, `discos`, `com_selo`, `selo_do_cartao` (o selo que vira tocar);
+`Player::tocar_item` espera a página e toca (`tocar_ao_chegar`, 25 s). `ajustes.servico_preferido`. O Histórico não ganhou coluna: o serviço sai do
+nome do app de cada execução. Conferido na cópia muda com o YouTube Music e o Spotify: Início em Tudo (atalhos, prateleiras, "Lançamentos" juntos),
+tocar uma playlist do Spotify pelo cartão (pelo Match, com os dois selos na barra e na Fila), a busca com a mesma música em dois selos, "Abertos há
+pouco", Configurações › Serviços, a Ilha aberta com o selo, em 1920, 1440, 958 × 560 e 410. Não conferido: escolher o serviço preferido na tela (só a
+lógica), tocar um álbum ou artista pelo cartão (só playlist), "Tocadas há pouco" com três músicas, um provedor sem marca própria, o selo no Histórico e o tema Mono.
+
+**Remodelagem, parte 4 (25/11/2026)**, barra, painel e menu ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte4.md)): na barra, a capa e o
+título levam ao álbum (sem o id dele, à página da faixa) e o artista à página dele (`paginas::destino_do_titulo`, `destino_do_artista`; `Remota` ganhou
+`album_id`, `artistas` e `artistas_ids`, só na memória), o coração, e à direita letra, fila, painel, volume e ⋯; abaixo de 1100 px a coluna do nome fica
+com pelo menos 264, e abaixo de 800 (`barra_apertada`) a letra, o coração e o mudo vão para o ⋯. O painel tem as abas Agora, Fila e Letra
+(`aba_do_painel`, só na memória; `alternar_no_painel`): `Q` e `U` (comando novo `AbrirLetra`) abrem a aba, e sem lugar (Estante com menos de 660 px de
+altura, janela estreita) a página da Fila e a letra em tela cheia. O menu: cartões, linhas, fila, barra, melhor resultado e visual; "Não são a mesma
+música" grava em `<dados>/separadas.json` (`juntar::Separadas`, `Regras`). O cabeçalho do álbum, do artista e da faixa põe os botões numa linha própria
+em folha com menos de 640 px. Conferido na cópia muda com o YouTube Music e o Spotify: o menu no cartão, na linha, na fila, na barra e no visual (setas,
+Enter, Esc), tocar em seguida, separar (o arquivo e as duas linhas), os links da barra (faixa, álbum, artista), as abas Fila (abre na de agora) e Letra
+(com letra de verdade), `Q` e `U`, em Estante 1920, 1440, 958 × 560 e 410 e em Palco 1440 e 958 × 560. Não conferido: pôr na playlist, tocar em ordem aleatória e pôr
+um álbum na fila pelo menu, fixar pelo menu, "Tocar pelo outro", o menu de uma música do computador (só os testes da lógica), o ⋯ com o mouse de
+verdade, "Saída de som do Windows", o tema Mono. Ficou: a aba Fila não arrasta para reordenar (subir e descer estão no menu).
+
+**Remodelagem, parte 5 (25/11/2026)**, o visual no centro ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte5.md)): na Estante, `[navegação]
+[visual] [divisória] [página]` a partir de 761 px (lateral a partir de 1200, trilho abaixo), 52 : 48 a partir de 1680, 46 : 54 a partir de 1200 e 48 : 52
+abaixo; `ajustes.divisao` (dois cliques na divisória voltam ao padrão), `ajustes.pagina_larga` (comando `AlternarPaginaLarga`, tecla W: o visual vira
+uma tira de 96 ou 72). O painel da Estante é `gaveta_aberta` em toda janela (vem fechado): ao lado a partir de 1680 (`arranjo::PAINEL_AO_LADO`), senão no
+lugar da página, e abrir uma página o fecha (`tirar_o_painel_da_frente`); `P`, `Q` e `U` valem em qualquer altura. Até 760 px o visual fica no alto: 40% no
+Início (vira tira ao rolar, `arranjo::recolhe`), tira de 72 nas outras. `Destino.interno` agora **recorta** em vez de esticar (`motor::recorte`,
+`U.v[3]` do `saida.wgsl`); o Spectral passeia menos e encolhe em visual estreito (`passeio_que_cabe`, `escala_que_cabe`; em 16:9 nada muda). A página sai
+da frente (`descanso.rs`, `ajustes.descanso_s`, 30 s): só com música tocando, a janela na frente, sem painel, campo, menu ou edição; o ponteiro precisa
+andar mais de 3 px, e o clique que acorda não vale como clique. Loja: as abas viraram sublinhadas. Conferido na cópia muda com o YouTube Music: Estante em
+1920, 1440, 958 × 560, 800, 410 e 410 × 560 (lado a lado, larga, painel ao lado e no lugar da página, Loja, Configurações, Biblioteca, busca, álbum, edição),
+arrastar a divisória e o ajuste gravado, dois cliques, X no meio e no fim, dormir, mouse parado, acordar com o mouse e com o clique, rolar o Início em 410,
+os três visuais, o menu do visual e o Palco em 1440 e 958 × 560. Não conferido: a fluidez de arrastar e das transições na tela de verdade (só fotos), o cursor sumindo,
+o descanso com o foco de verdade (a mensagem de ativar foi simulada), o custo do recorte em quadros, o tema Papel e o Mono. Ficou: no empilhado, X a partir
+do visual baixo dá um salto de tamanho na forma; a página larga não anima a largura da página (só o visual anda).
+
+**Remodelagem, parte 6 (25/11/2026)**, artista, álbum e playlist ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte6.md)): o protocolo ganhou
+`Detalhe` (opcional, em `CorpoDaResposta::Itens { itens, detalhe }`; um estragado vira `None`): o item completo, a imagem larga, a cor, a descrição, as
+fotos, seguidores, ouvintes, total, duração, data, gravadora, tipo, dono e prateleiras (`TipoDaPrateleira::{UltimoLancamento, Parecidos,
+MaisDoArtista}`); `Album.tipo` (`TipoDeAlbum`, no JSON `tipo_de_album`: a divisão em álbuns, singles e coletâneas é feita no Player, sem repetir a
+lista) e `Faixa.ouvidas`. O Spotify tira tudo do que já pedia (`detalhe_do_artista`, `_do_album`, `_da_playlist`; biografia sem HTML, `sem_html`); o
+YouTube Music, do `rustypipe`. `PaginaRemota::Itens(itens, detalhe)`. `capas.rs` faz os fundos (`TipoDeFundo::{Desfocado, Largo}`: 480 × 270 desfocado,
+ou a foto até 1280 de largura) e mede o brilho de onde fica o texto (percentis 95 e 5); o véu da folha por cima sai de `detalhes::veu`, para o texto do
+tema ler com 4,5:1 nos dois tipos de tema. A folha ganhou os cantos por cima (`cantos_da_folha`: o GPUI só recorta em retângulo). Linhas: o álbum sem
+a capa repetida e com o número; as ouvidas a partir de 640 px; o álbum de cada faixa da playlist a partir de 760; abaixo de 480, número e coração saem.
+"Ver no YouTube Music" e "Ver no Spotify": `Remoto::artista_em` busca o nome no outro serviço, `pares::mesmo_artista` só aceita o primeiro resultado
+sendo um artista com o mesmo nome, e o par fica em `pares.json` (`artista:<serviço>:<id>:<destino>`). O artista aberto por um link entra nos recentes
+com a foto quando ela chega (`completar_o_recente`). Conferido na cópia muda com o YouTube Music e o Spotify (conta do Rafael, só dados): o artista
+nos dois serviços (foto larga, ouvintes ou seguidores, o link de um para o outro e de volta, Populares, Coletâneas, Sobre com os números e a
+biografia, rolar), o álbum do YouTube Music, a faixa com a capa desfocada atrás e uma playlist do Spotify (245 músicas, 9 h 47 min, 5 seguidores), em
+1440 e 958 × 560. Não conferido: o tema Papel, um álbum do Spotify (a gravadora no rodapé), as fotos do Sobre, um artista sem foto nenhuma, um provedor
+antigo na tela (só os testes), a memória da placa com muitas fotos largas abertas. Ficou: a biografia vem no idioma que o Spotify manda (inglês), o
+número da faixa (`numero`) não entrou no protocolo, e as fotos largas não são soltas da placa ao sair da página.
+
+**Remodelagem, parte 7 (25/11/2026)**, tamanhos e teclado ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte7.md)): o Tab anda pela tela
+(`Player::focavel`: `tab_index(0)` e um anel de 2 px, uma borda no foco; a sombra do GPUI pinta por baixo de quem não tem fundo, e sem desfoque nem é
+desenhada) nos botões, pílulas, opções, destinos, abas, fichas do filtro, cartões, atalhos, linhas, corações, ⋯ e nas seções das Configurações; a ordem é a
+do desenho (na Estante: navegação, topo, página e painel, barra, visual). O GPUI clica no Enter e no espaço (ao soltar) e foca no clique do mouse: o anel só
+aparece depois de um Tab (`foco_pelo_teclado`), o clique sai do modo e o foco volta à raiz no quadro seguinte (os atalhos de uma letra seguem valendo), e
+com um elemento focado espaço e Enter são dele (`tecla_de_foco`), `Esc` volta. A Fila vazia (painel e página) e a lateral vazia ganham "Buscar músicas"
+(`buscar_musicas`). A janela vai até 360 × 400 (antes 560 de altura); no empilhado baixo a barra tem uma linha só, de 72 (`DOCK_EMPILHADO_BAIXO`).
+Testes: 10 mil linhas (`janela_de_linhas`), a Biblioteca de 10 mil arrumada em menos de 1,5 s, o título de 200 letras sem espaço, 400 × 400 no arranjo.
+Conferido na cópia muda: o Tab pela Estante em 958 × 560 (o anel no Início, nas fichas), Enter numa ficha, espaço num botão focado sem pausar a música,
+duas músicas de nome enorme (uma sem espaço) na lista, no visual e na barra, e 400 × 400 com a barra de uma linha. Não conferido: `Esc` saindo do modo
+(só a lógica), o Tab entrando numa página longa (o GPUI não rola até o elemento focado: ele pode ficar fora da vista), Shift Tab, um leitor de tela (o
+GPUI 0.2 não publica a árvore de acessibilidade no Windows). Ficou: rolar até o focado, as ações que só aparecem com o mouse em cima continuam fora do Tab
+(estão no ⋯), e o BPM de uma música em silêncio aparece como 240.
+
+**Remodelagem, parte 8 (25/11/2026)**, o tamanho da interface ([plano](docs/superpowers/plans/2026-11-25-remodelagem-parte8.md)): `Ajustes.tamanho` (90, 100,
+110 ou 125; um número de fora vai para o mais perto), Configurações › Aparência › Tamanho da interface e `Ctrl +`/`Ctrl −` (`Comando::AumentarInterface`,
+`DiminuirInterface`). `medidas::px` multiplica pela escala (em 100% passa como está; nas outras, de 2 px para cima vira pixel inteiro), e todas as telas
+importam esse `px` (fora a Ilha e `ui/linha.rs`, que mede em pixels de verdade); a escala fica num estático, definido no começo do desenho de cada janela
+(a Ilha põe 1 e devolve a de antes). `quadro` calcula o arranjo na janela dividida pela escala, que baixa sozinha numa janela pequena demais
+(`escala_que_cabe`, 320 × 400 lógicos); o visual é desenhado com o fator do Windows vezes ela. Convertem pixels de verdade: a divisória, o menu, as
+dicas, o arrasto dos módulos, as setas das prateleiras, a rolagem até o comando, a lista longa e o recolher do empilhado; dentro dos `canvas` (o tocar, a
+onda, o mapa) as contas são reais e usam `gpui::px`. Testes: o ajuste, o arredondamento e a janela mínima, e cada tamanho em cada modo do arranjo.
+Conferido na cópia: 90% e 125% em 1440 e 958 × 560, 110% em 958 × 560 (o menu do visual abrindo no ponto do clique, o ícone de tocar e a onda no lugar) e a
+Ilha igual com a interface em 125%. Não conferido: `Ctrl +` e `Ctrl −` de verdade (as mensagens de teste não levam o Ctrl; o tamanho foi trocado nos
+ajustes), arrastar a divisória e os módulos fora de 100%, o tema Papel e uma tela com fator do Windows diferente de 100%. Ficou: o esticão da barra de
+volume é medido em pixels de verdade (sai um pouco maior fora de 100%), e em 125% a fileira de filtros de uma folha média rola para o lado.
+
 **F4, Letras 2.0 (22/11/2026)**, em [`docs/f4-letras.md`](docs/f4-letras.md): fontes em cadeia (Better Lyrics, Unison,
 LRCLIB; ordem e liga/desliga em Configurações › Letras; "Preferir palavra por palavra"), TTML convertido em LRC com
 palavras, o rodapé diz a fonte, o acerto de sincronia guardado por música, tradução pela Unison (5 idiomas, guardada
@@ -622,6 +752,13 @@ O plano completo, com o que copiar de cada projeto, está em [`docs/plano-v2.md`
 | F10 | Loja de verdade: registro no GitHub, temas em arquivo, Material dinâmico, plugins | |
 | F11 | Mais provedores: SoundCloud, rádios, podcasts, sem perdas | |
 | F12 | Extras: retrospectiva, backup, atualização automática, atalhos globais, offline, MilkDrop, karaokê, medidor de flashes | |
+
+**Remodelagem das telas de streaming e da Estante** (decidida em 25/11/2026; as 8 partes estão prontas desde 25/11/2026, seção 7): o serviço vira filtro
+(Início, Buscar, Biblioteca), Tudo misturado com selo em cada item, o visual no centro com a página ao lado, medidas num
+arquivo só, barra de baixo nova e artista e álbum com imagem, em 8 partes. Auditoria em
+[`docs/auditoria-ui-2026-11-25.md`](docs/auditoria-ui-2026-11-25.md), desenho em
+[`docs/superpowers/specs/2026-11-25-remodelagem-streaming-design.md`](docs/superpowers/specs/2026-11-25-remodelagem-streaming-design.md),
+protótipo em `mockup/remodelagem/`.
 
 Sobras das fases antigas que continuam valendo: renomear playlist, arrastar para reordenar, capas nos álbuns,
 ReplayGain de álbum, R128 para quem não tem etiqueta, *Beat This!* e compassos que não são 4/4, importar

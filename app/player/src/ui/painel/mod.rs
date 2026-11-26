@@ -5,17 +5,17 @@
 //! No modo edição (E) os módulos podem ser arrastados um sobre o outro para trocar de lugar, removidos e
 //! adicionados. A ordem fica salva nos ajustes.
 
-use super::{
-    RAIO_CONTROLE, RAIO_MODULO, caixa, com_alfa, decimal, ha_quanto, icone, numero, tecla, tempo, texto, titulo,
-};
-use crate::app::{COLUNAS_ENERGIA, PASSO_DA_LETRA, Player};
+use super::{RAIO_CONTROLE, RAIO_MODULO, caixa, com_alfa, decimal, ha_quanto, icone, numero, tecla, tempo};
+use crate::app::{AbaDoPainel, COLUNAS_ENERGIA, PASSO_DA_LETRA, Player};
 use crate::arranjo::{RAIO, Ret};
 use crate::letrista::Situacao;
 use crate::tema::{self, Cores};
+use crate::ui::medidas;
+use crate::ui::medidas::px;
 use analise::Rotulo;
 use gpui::{
     AnyElement, ClickEvent, Context, CursorStyle, Div, FontWeight, Hsla, MouseButton, MouseDownEvent, SharedString,
-    Stateful, canvas, deferred, div, img, linear_color_stop, linear_gradient, prelude::*, px,
+    Stateful, canvas, deferred, div, img, linear_color_stop, linear_gradient, prelude::*,
 };
 use nucleo::ajustes::PALETAS;
 use nucleo::{Comando, Modelo, Modulo, Skin, Tema};
@@ -23,6 +23,7 @@ use nucleo::{Comando, Modelo, Modulo, Skin, Tema};
 mod ajustes;
 mod corpos;
 mod letra;
+pub(crate) use letra::TamanhoDaLetra;
 
 /// Quantas faixas da sessão aparecem no módulo (o histórico guarda mais).
 const VISIVEIS_NA_SESSAO: usize = 6;
@@ -58,7 +59,8 @@ pub fn icone_do_modulo(m: Modulo) -> &'static str {
 
 /// Interruptor (ligado/desligado). A bolinha desliza em 200 ms.
 pub(super) fn interruptor(c: &Cores, id: &'static str, ligado: bool, posicao: f32) -> Stateful<Div> {
-    let trilho = div().id(id).w(px(44.0)).h(px(24.0)).flex_none().relative().rounded(px(999.0)).cursor_pointer();
+    let trilho =
+        div().id(id).w(px(44.0)).h(px(24.0)).flex_none().relative().rounded(px(medidas::PILULA)).cursor_pointer();
     let trilho = if ligado { trilho.bg(c.inv) } else { trilho.border_1().border_color(c.linha_2) };
     trilho.child(
         div()
@@ -66,7 +68,7 @@ pub(super) fn interruptor(c: &Cores, id: &'static str, ligado: bool, posicao: f3
             .top(px(if ligado { 4.0 } else { 3.0 }))
             .left(px(3.0 + 21.0 * posicao))
             .size(px(16.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .bg(if ligado { c.inv_texto } else { c.texto_2 }),
     )
 }
@@ -77,23 +79,19 @@ pub(super) fn linha_ajuste(c: &Cores, caminho: &'static str, nome: &'static str,
         .flex()
         .items_center()
         .gap(px(12.0))
-        .child(
-            div()
-                .size(px(32.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icone(caminho, 20.0, c.texto)),
-        )
+        .child(div().size(px(32.0)).flex_none().flex().items_center().justify_center().child(icone(
+            caminho,
+            medidas::ICONE,
+            c.texto,
+        )))
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.0))
                 .flex()
                 .flex_col()
-                .child(texto(14.0).font_weight(FontWeight::SEMIBOLD).child(nome))
-                .child(texto(14.0).text_color(c.texto_2).child(frase)),
+                .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(nome))
+                .child(medidas::apoio().text_color(c.texto_2).child(frase)),
         )
 }
 
@@ -121,16 +119,18 @@ pub(crate) struct BlocosDeAjuste {
 }
 
 fn titulo_secao(c: &Cores, nome: &'static str) -> Div {
-    texto(12.0).text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child(nome)
+    medidas::apoio().text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child(nome)
 }
 
 impl Player {
     pub(crate) fn ver_painel(&self, r: Ret, gaveta: bool, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let c = self.cores();
         let corpo = if self.configuracoes_no_painel() {
-            self.ver_configuracoes_no_painel(r.w, cx)
+            self.ver_configuracoes_no_painel(r.w, cx).into_any_element()
+        } else if self.edicao {
+            self.ver_modulos(r.w, cx).into_any_element()
         } else {
-            self.ver_modulos(r.w, cx)
+            self.abas_do_painel(r, cx).into_any_element()
         };
         // O alto do painel ganha a cor do momento (a mesma do dock), que some em 220 px.
         let tom = tema::cor_de(self.tom);
@@ -181,6 +181,50 @@ impl Player {
             .on_click(self.ao_clicar(Comando::AlternarPainel, cx))
     }
 
+    /// O painel em abas: os módulos, a fila e a letra.
+    fn abas_do_painel(&self, r: Ret, cx: &mut Context<Self>) -> Div {
+        let c = self.cores();
+        let lado = if self.arranjo.compacto || r.w < 300.0 { 16.0 } else { 24.0 };
+        let mut abas =
+            div().relative().flex().flex_none().gap(px(24.0)).px(px(lado)).border_b_1().border_color(c.linha);
+        for (i, aba) in AbaDoPainel::TODAS.into_iter().enumerate() {
+            abas = abas.child(self.aba_sublinhada(("painel-aba", i), aba.nome(), self.aba_do_painel == aba).on_click(
+                cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    this.mostrar_aba(aba);
+                    cx.notify();
+                }),
+            ));
+        }
+        // Na Estante o painel se fecha nele mesmo: ele pode estar no lugar da página.
+        if self.estante() {
+            abas = abas.child(div().flex_1()).child(self.botao_icone(
+                "painel-fechar",
+                "icones/x.svg",
+                false,
+                Comando::AlternarPainel,
+                cx,
+            ));
+        }
+        let altura = (r.h - medidas::ALVO - 3.0).max(0.0);
+        let corpo: AnyElement = match self.aba_do_painel {
+            AbaDoPainel::Agora => self.ver_modulos(r.w, cx).into_any_element(),
+            AbaDoPainel::Fila => self.aba_da_fila(cx).into_any_element(),
+            AbaDoPainel::Letra => div()
+                .relative()
+                .px(px(lado))
+                .py(px(12.0))
+                .child(self.aba_da_letra(altura - 24.0, cx))
+                .into_any_element(),
+        };
+        div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(abas)
+            .child(div().flex_1().min_h(px(0.0)).overflow_hidden().child(corpo))
+    }
+
     // ---------------------------------------------------------------------------------------- módulos
 
     fn ver_modulos(&self, largura: f32, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -205,7 +249,7 @@ impl Player {
         }
         if self.ajustes.modulos.is_empty() && !self.edicao {
             grade = grade.child(
-                texto(14.0)
+                medidas::apoio()
                     .p(px(BORDA_DO_MODULO))
                     .text_color(c.texto_2)
                     .child("Nenhum módulo no painel. Aperte E para adicionar."),
@@ -218,27 +262,27 @@ impl Player {
                 div().w(px(interno)).flex_none().p(px(BORDA_DO_MODULO)).flex().flex_wrap().items_center().gap(px(8.0));
             linha =
                 linha.child(
-                    texto(12.0).w_full().text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child(
+                    medidas::apoio().w_full().text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child(
                         if fora.is_empty() { "Todos os módulos estão no painel" } else { "Adicionar ao painel" },
                     ),
                 );
             for m in fora {
                 linha = linha.child(
-                    texto(14.0)
+                    medidas::corpo()
                         .id(("adicionar-modulo", m as usize))
-                        .h(px(40.0))
+                        .h(px(medidas::BOTAO))
                         .px(px(14.0))
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .border_1()
                         .border_color(c.linha_2)
                         .text_color(c.texto_2)
                         .font_weight(FontWeight::SEMIBOLD)
                         .cursor_pointer()
                         .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/plus.svg", 16.0, c.texto_2))
+                        .child(icone("icones/plus.svg", medidas::ICONE_LINHA, c.texto_2))
                         .child(m.nome())
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.adicionar_modulo(m);
@@ -264,27 +308,28 @@ impl Player {
             Modulo::Sessao => self.corpo_sessao(),
             Modulo::Visual => self.corpo_visual(cx),
             Modulo::Relogio => (None, self.corpo_relogio()),
-            Modulo::Letra => (None, self.corpo_letra(cx)),
+            Modulo::Letra => (None, self.corpo_letra(TamanhoDaLetra::MODULO, cx)),
         };
 
+        // Num módulo de meia largura com algo à direita, o nome fica e o ícone sai.
+        let aperta = largura < 200.0 && (direita.is_some() || self.edicao);
         let mut cabecalho = div()
             .h(px(24.0))
             .flex()
             .flex_none()
             .items_center()
             .gap(px(8.0))
-            .child(icone(icone_do_modulo(m), 18.0, c.texto_2))
+            .when(!aperta, |d| d.child(icone(icone_do_modulo(m), medidas::ICONE_LINHA, c.texto_2)))
             .child(
-                texto(14.0)
+                if aperta && self.edicao { medidas::apoio() } else { medidas::corpo() }
                     .min_w(px(0.0))
-                    .truncate()
                     .text_color(c.texto_2)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(m.nome()),
+                    .child(crate::ui::linha(m.nome())),
             )
             .child(div().flex_1());
         if self.edicao {
-            cabecalho = cabecalho.child(icone("icones/grip.svg", 18.0, c.texto_2)).child(
+            cabecalho = cabecalho.child(icone("icones/grip.svg", medidas::ICONE_LINHA, c.texto_2)).child(
                 div()
                     .id(("tirar-modulo", m as usize))
                     .size(px(24.0))
@@ -292,10 +337,10 @@ impl Player {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .cursor_pointer()
                     .hover(|s| s.bg(c.sel))
-                    .child(icone("icones/x.svg", 14.0, c.texto_2))
+                    .child(icone("icones/x.svg", medidas::ICONE_MIUDO, c.texto_2))
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                         this.remover_modulo(m);
                         cx.notify();

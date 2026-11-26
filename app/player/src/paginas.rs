@@ -2,6 +2,7 @@
 
 use crate::navegacao::Rota;
 use crate::remoto::PedidoDePagina;
+use crate::ui::normalizar;
 use biblioteca::TipoSalvo;
 use provedores::{Faixa, Item};
 
@@ -14,6 +15,8 @@ pub struct Cartao {
     /// Artista: capa redonda.
     pub redondo: bool,
     pub tipo: TipoSalvo,
+    /// As Músicas Curtidas do Spotify: não têm capa, e ganham um coração.
+    pub curtidas: bool,
 }
 
 pub fn cartao(item: &Item) -> Cartao {
@@ -24,6 +27,7 @@ pub fn cartao(item: &Item) -> Cartao {
             capa: f.capa.clone(),
             redondo: false,
             tipo: TipoSalvo::Faixa,
+            curtidas: false,
         },
         Item::Album(a) => Cartao {
             titulo: a.titulo.clone(),
@@ -31,10 +35,11 @@ pub fn cartao(item: &Item) -> Cartao {
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
-                .join(" · "),
+                .join(", "),
             capa: a.capa.clone(),
             redondo: false,
             tipo: TipoSalvo::Album,
+            curtidas: false,
         },
         Item::Artista(a) => Cartao {
             titulo: a.nome.clone(),
@@ -42,6 +47,7 @@ pub fn cartao(item: &Item) -> Cartao {
             capa: a.foto.clone(),
             redondo: true,
             tipo: TipoSalvo::Artista,
+            curtidas: false,
         },
         Item::Playlist(p) => Cartao {
             titulo: p.titulo.clone(),
@@ -49,10 +55,11 @@ pub fn cartao(item: &Item) -> Cartao {
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
-                .join(" · "),
+                .join(", "),
             capa: p.capa.clone(),
             redondo: false,
             tipo: TipoSalvo::Playlist,
+            curtidas: p.capa.is_none() && p.servico == "spotify" && p.id == "curtidas",
         },
     }
 }
@@ -87,20 +94,18 @@ pub fn faixa_da_musica(m: &biblioteca::Musica) -> Option<Faixa> {
         id: r.id.clone(),
         isrc: r.isrc.clone(),
         titulo: m.titulo.clone(),
-        artistas: if m.artista.is_empty() { Vec::new() } else { vec![m.artista.clone()] },
+        artistas: match (r.artistas.is_empty(), m.artista.is_empty()) {
+            (false, _) => r.artistas.clone(),
+            (true, false) => vec![m.artista.clone()],
+            (true, true) => Vec::new(),
+        },
+        artistas_ids: r.artistas_ids.clone(),
         album: Some(m.album.clone()).filter(|a| !a.is_empty()),
+        album_id: r.album_id.clone(),
         duracao_s: Some(m.duracao_s).filter(|d| *d > 0.0),
         capa: r.capa.clone(),
         ..Default::default()
     })
-}
-
-/// O item da página aberta (o que dá para salvar e fixar): álbum, playlist, artista ou faixa.
-pub fn item_da_rota(rota: &Rota) -> Option<&Item> {
-    match rota {
-        Rota::Album(i) | Rota::Playlist(i) | Rota::Artista(i) | Rota::Faixa(i) => Some(i),
-        _ => None,
-    }
 }
 
 /// Serviço, tipo e id do item, como ele fica nos salvos.
@@ -110,20 +115,6 @@ pub fn chave_do_salvo(item: &Item) -> (String, TipoSalvo, String) {
         Item::Album(a) => (a.servico.clone(), TipoSalvo::Album, a.id.clone()),
         Item::Artista(a) => (a.servico.clone(), TipoSalvo::Artista, a.id.clone()),
         Item::Playlist(p) => (p.servico.clone(), TipoSalvo::Playlist, p.id.clone()),
-    }
-}
-
-/// O título da página (o cabeçalho da folha na Estante): o nome da página, ou o do item nas de detalhe.
-pub fn titulo_da_rota(rota: &Rota) -> String {
-    match rota {
-        Rota::ParaVoce => "Para você".into(),
-        Rota::Busca => "Busca".into(),
-        Rota::Biblioteca => "Biblioteca".into(),
-        Rota::Album(i) | Rota::Playlist(i) | Rota::Artista(i) | Rota::Faixa(i) => cartao(i).titulo,
-        Rota::Fila => "Fila".into(),
-        Rota::Historico => "Histórico".into(),
-        Rota::Loja => "Loja".into(),
-        Rota::Configuracoes => "Configurações".into(),
     }
 }
 
@@ -149,9 +140,43 @@ pub fn rota_do_album(faixa: &Faixa, sabe_album: bool) -> Option<Rota> {
         titulo: faixa.album.clone().unwrap_or_default(),
         artistas: faixa.artistas.clone(),
         artistas_ids: faixa.artistas_ids.clone(),
-        ano: None,
         capa: faixa.capa.clone(),
+        ..Default::default()
     })))
+}
+
+/// Para onde leva um clique no nome da música que toca (ou no do artista).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Destino {
+    Rota(Box<Rota>),
+    /// O álbum ou o artista das músicas do computador.
+    AlbumLocal(String),
+    ArtistaLocal(String),
+    /// Sem o id: a busca pelo nome.
+    Buscar(String),
+}
+
+/// A capa e o título: o álbum; sem o id dele, a página da faixa. Do computador, o álbum na Biblioteca.
+pub fn destino_do_titulo(m: &biblioteca::Musica, sabe_album: bool) -> Option<Destino> {
+    match faixa_da_musica(m) {
+        Some(f) => {
+            let rota = rota_do_album(&f, sabe_album).unwrap_or(Rota::Faixa(Item::Faixa(f)));
+            Some(Destino::Rota(Box::new(rota)))
+        }
+        None => Some(m.album.clone()).filter(|a| !a.is_empty()).map(Destino::AlbumLocal),
+    }
+}
+
+/// O artista: a página do primeiro que tem id; sem id, a busca pelo nome. Do computador, o artista na Biblioteca.
+pub fn destino_do_artista(m: &biblioteca::Musica, sabe_artista: bool) -> Option<Destino> {
+    match faixa_da_musica(m) {
+        Some(f) => {
+            let com_id = (0..f.artistas.len()).find_map(|i| rota_do_artista(&f, i, sabe_artista));
+            let nome = f.artistas.first().filter(|a| !a.is_empty()).cloned();
+            com_id.map(|r| Destino::Rota(Box::new(r))).or_else(|| nome.map(Destino::Buscar))
+        }
+        None => Some(m.artista.clone()).filter(|a| !a.is_empty()).map(Destino::ArtistaLocal),
+    }
 }
 
 /// As abas da página da faixa.
@@ -197,23 +222,6 @@ pub fn salvo_de(item: &Item, quando: i64) -> biblioteca::Salvo {
 /// O item de um salvo (`None` se os dados estragaram).
 pub fn item_do_salvo(s: &biblioteca::Salvo) -> Option<Item> {
     serde_json::from_str(&s.dados).ok()
-}
-
-/// Um número para cada página (a rolagem de cada uma fica guardada à parte).
-pub fn chave_da_rota(rota: &Rota) -> usize {
-    let texto = match rota {
-        Rota::Album(i) | Rota::Playlist(i) | Rota::Artista(i) | Rota::Faixa(i) => {
-            let (servico, tipo, id) = chave_do_salvo(i);
-            format!("{servico}|{}|{id}", tipo.chave())
-        }
-        outra => format!("{outra:?}"),
-    };
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in texto.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h as usize
 }
 
 /// A página do artista vem misturada: as faixas mais tocadas e os álbuns, cada um na ordem em que veio.
@@ -292,27 +300,93 @@ pub fn janela_de_linhas(
     de..ate.max(de)
 }
 
-/// O chip escolhido na Busca.
+/// As abas da página Buscar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FiltroDaBusca {
+pub enum AbaDaBusca {
     #[default]
-    Tudo,
-    Faixas,
+    Principais,
+    Musicas,
     Albuns,
     Artistas,
     Playlists,
+    Comandos,
 }
 
-impl FiltroDaBusca {
+impl AbaDaBusca {
+    pub const TODAS: [Self; 6] =
+        [Self::Principais, Self::Musicas, Self::Albuns, Self::Artistas, Self::Playlists, Self::Comandos];
+
     pub fn nome(self) -> &'static str {
         match self {
-            Self::Tudo => "Tudo",
-            Self::Faixas => "Faixas",
+            Self::Principais => "Principais",
+            Self::Musicas => "Músicas",
             Self::Albuns => "Álbuns",
             Self::Artistas => "Artistas",
             Self::Playlists => "Playlists",
+            Self::Comandos => "Comandos",
         }
     }
+}
+
+/// O que a página Buscar mostra para o texto: `>` mostra só comandos, seja qual for a aba escolhida.
+pub fn aba_da_busca(texto: &str, escolhida: AbaDaBusca) -> AbaDaBusca {
+    if crate::navegacao::so_comandos(texto).is_some() { AbaDaBusca::Comandos } else { escolhida }
+}
+
+/// Como a Biblioteca é ordenada (os fixados vêm sempre primeiro).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Ordem {
+    /// A ordem em que vieram: o salvo há menos tempo e a ordem da conta.
+    #[default]
+    Recentes,
+    Nome,
+    Artista,
+}
+
+impl Ordem {
+    pub fn nome(self) -> &'static str {
+        match self {
+            Self::Recentes => "Recentes",
+            Self::Nome => "Nome",
+            Self::Artista => "Artista",
+        }
+    }
+
+    pub fn proxima(self) -> Self {
+        match self {
+            Self::Recentes => Self::Nome,
+            Self::Nome => Self::Artista,
+            Self::Artista => Self::Recentes,
+        }
+    }
+}
+
+/// As posições dos itens que a Biblioteca mostra: do tipo da aba, com o texto do filtro, na ordem escolhida.
+pub fn arrumar_biblioteca(itens: &[NaBiblioteca], tipo: Option<TipoSalvo>, texto: &str, ordem: Ordem) -> Vec<usize> {
+    let texto = normalizar(texto);
+    let mut achados: Vec<(usize, bool, String)> = itens
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| tipo.is_none_or(|t| t == chave_do_salvo(&b.item).1))
+        .filter_map(|(i, b)| {
+            let ficha = cartao(&b.item);
+            let (nome, sub) = (normalizar(&ficha.titulo), normalizar(&ficha.sub));
+            if !texto.split_whitespace().all(|p| nome.contains(p) || sub.contains(p)) {
+                return None;
+            }
+            let chave = match ordem {
+                Ordem::Recentes => String::new(),
+                Ordem::Nome => nome,
+                // O artista de um artista é ele mesmo.
+                Ordem::Artista if ficha.redondo => nome,
+                Ordem::Artista => format!("{sub} {nome}"),
+            };
+            Some((i, !b.fixado, chave))
+        })
+        .collect();
+    // Estável: na ordem dos recentes (chave vazia) fica a ordem em que vieram, com os fixados na frente.
+    achados.sort_by(|a, b| (a.1, &a.2).cmp(&(b.1, &b.2)));
+    achados.into_iter().map(|(i, _, _)| i).collect()
 }
 
 /// Os resultados da busca de um serviço (ou de todos), por tipo.
@@ -324,20 +398,6 @@ pub struct GruposDaBusca {
     pub albuns: Vec<Item>,
     pub artistas: Vec<Item>,
     pub playlists: Vec<Item>,
-}
-
-impl GruposDaBusca {
-    /// Os chips que valem: Tudo e os tipos que têm resultado (nenhum, sem resultado).
-    pub fn filtros(&self) -> Vec<FiltroDaBusca> {
-        let tipos = [
-            (FiltroDaBusca::Faixas, !self.faixas.is_empty()),
-            (FiltroDaBusca::Albuns, !self.albuns.is_empty()),
-            (FiltroDaBusca::Artistas, !self.artistas.is_empty()),
-            (FiltroDaBusca::Playlists, !self.playlists.is_empty()),
-        ];
-        let com: Vec<FiltroDaBusca> = tipos.into_iter().filter(|(_, tem)| *tem).map(|(f, _)| f).collect();
-        if com.is_empty() { com } else { std::iter::once(FiltroDaBusca::Tudo).chain(com).collect() }
-    }
 }
 
 /// A busca de um serviço ainda não chegou? (A da página é de outro texto, ou ele ainda não respondeu.) Cada
@@ -361,6 +421,39 @@ pub fn agrupar_busca(itens: &[Item], servico: Option<&str>) -> GruposDaBusca {
         }
     }
     g
+}
+
+#[cfg(test)]
+mod grandes {
+    use super::*;
+    use provedores::Faixa;
+
+    /// A Biblioteca com dez mil itens é arrumada (filtro, ordem) rápido o bastante para não engasgar a tela, que só
+    /// refaz a conta quando algo muda.
+    #[test]
+    fn dez_mil_na_biblioteca() {
+        let itens: Vec<NaBiblioteca> = (0..10_000)
+            .map(|i| NaBiblioteca {
+                item: Item::Faixa(Faixa {
+                    servico: "s".into(),
+                    id: i.to_string(),
+                    titulo: format!("Música {i} {}", "x".repeat(i % 200)),
+                    artistas: vec![format!("Artista {}", i % 97)],
+                    ..Default::default()
+                }),
+                salvo: true,
+                fixado: i % 1000 == 0,
+            })
+            .collect();
+        let inicio = std::time::Instant::now();
+        let todos = arrumar_biblioteca(&itens, None, "", Ordem::Nome);
+        let achados = arrumar_biblioteca(&itens, None, "artista 5", Ordem::Artista);
+        let gasto = inicio.elapsed();
+        assert_eq!(todos.len(), 10_000);
+        assert!(todos[..10].iter().all(|i| itens[*i].fixado), "os fixados primeiro");
+        assert!(!achados.is_empty() && achados.len() < 10_000);
+        assert!(gasto < std::time::Duration::from_millis(1500), "{gasto:?}");
+    }
 }
 
 #[cfg(test)]
@@ -390,8 +483,44 @@ mod testes {
             (volta.titulo.as_str(), volta.album.as_deref(), volta.capa.as_deref(), volta.duracao_s),
             ("Faixa", Some("Disco"), Some("http://c"), Some(200.0))
         );
-        assert_eq!(volta.artistas, ["A, B"]);
+        assert_eq!(volta.artistas, ["A", "B"]);
+        assert_eq!(volta.artistas_ids, ["a1", ""]);
+        // De uma playlist guardada: só o nome junto, sem ids.
+        let mut antiga = m.clone();
+        if let Some(r) = antiga.remota.as_mut() {
+            (r.artistas, r.artistas_ids, r.album_id) = (Vec::new(), Vec::new(), None);
+        }
+        assert_eq!(faixa_da_musica(&antiga).expect("faixa").artistas, ["A, B"]);
         assert!(faixa_da_musica(&biblioteca::Musica::default()).is_none(), "música do computador não");
+    }
+
+    fn rota(d: Option<Destino>) -> Option<Rota> {
+        match d {
+            Some(Destino::Rota(r)) => Some(*r),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn os_cliques_na_musica_que_toca() {
+        let f = Faixa { album: Some("Disco".into()), album_id: Some("al".into()), ..faixa() };
+        let m = crate::remoto::musica_de(&f, "YT");
+        // De serviço (a do Match é a mesma coisa: a faixa é do serviço dela).
+        let Some(Rota::Album(Item::Album(a))) = rota(destino_do_titulo(&m, true)) else {
+            assert_eq!(destino_do_titulo(&m, true), None, "devia abrir o álbum");
+            return;
+        };
+        assert_eq!((a.servico.as_str(), a.id.as_str()), ("yt", "al"));
+        assert!(matches!(rota(destino_do_titulo(&m, false)), Some(Rota::Faixa(_))), "sem abrir álbum, a faixa");
+        assert!(matches!(rota(destino_do_artista(&m, true)), Some(Rota::Artista(_))));
+        assert_eq!(destino_do_artista(&m, false), Some(Destino::Buscar("A".into())), "sem a página, a busca");
+        // Do computador.
+        let local = biblioteca::Musica { album: "Meu disco".into(), artista: "Eu".into(), ..Default::default() };
+        assert_eq!(destino_do_titulo(&local, true), Some(Destino::AlbumLocal("Meu disco".into())));
+        assert_eq!(destino_do_artista(&local, true), Some(Destino::ArtistaLocal("Eu".into())));
+        // Sem etiquetas: sem link.
+        assert_eq!(destino_do_titulo(&biblioteca::Musica::default(), true), None);
+        assert_eq!(destino_do_artista(&biblioteca::Musica::default(), true), None);
     }
 
     #[test]
@@ -466,16 +595,20 @@ mod testes {
         assert_eq!(janela_de_linhas(None, (100.0, 900.0), 50.0, 7), 0..7);
         assert_eq!(janela_de_linhas(Some(300.0), (100.0, 900.0), 0.0, 7), 0..7, "sem altura, monta tudo");
         assert_eq!(janela_de_linhas(Some(f32::NAN), (100.0, 900.0), 50.0, 2000), 0..40);
+        // Dez mil faixas: só as da tela (e a folga) são montadas, em qualquer ponto.
+        let meio = janela_de_linhas(Some(-320_000.0), (100.0, 900.0), 64.0, 10_000);
+        assert!(meio.len() <= 40 && meio.start > 4_900, "{meio:?}");
+        assert_eq!(janela_de_linhas(Some(-640_000.0), (100.0, 900.0), 64.0, 10_000).end, 10_000);
     }
 
     #[test]
     fn o_item_da_pagina_aberta_para_fixar() {
         let al = Item::Album(Album { servico: "yt".into(), id: "al".into(), ..Default::default() });
-        assert_eq!(item_da_rota(&Rota::Album(al.clone())), Some(&al));
-        assert_eq!(item_da_rota(&Rota::Busca), None);
-        assert_eq!(item_da_rota(&Rota::Fila), None);
+        assert_eq!(Rota::Album(al.clone()).item(), Some(&al));
+        assert_eq!(Rota::Busca.item(), None);
+        assert_eq!(Rota::Fila.item(), None);
         let f = Item::Faixa(faixa());
-        assert_eq!(item_da_rota(&Rota::Faixa(f.clone())), Some(&f));
+        assert_eq!(Rota::Faixa(f.clone()).item(), Some(&f));
     }
 
     #[test]
@@ -490,7 +623,7 @@ mod testes {
             ano: Some(2001),
             ..Default::default()
         });
-        assert_eq!(cartao(&al).sub, "A · 2001");
+        assert_eq!(cartao(&al).sub, "A, 2001");
         let ar = Item::Artista(Artista { servico: "yt".into(), id: "ar".into(), nome: "A".into(), foto: None });
         let c = cartao(&ar);
         assert!(c.redondo);
@@ -503,7 +636,7 @@ mod testes {
             quantas: Some(12),
             ..Default::default()
         });
-        assert_eq!(cartao(&pl).sub, "Eu · 12 faixas");
+        assert_eq!(cartao(&pl).sub, "Eu, 12 faixas");
     }
 
     #[test]
@@ -569,11 +702,45 @@ mod testes {
     }
 
     #[test]
-    fn filtros_so_dos_tipos_com_resultado() {
-        let g = agrupar_busca(&[Item::Faixa(faixa()), al("yt", "a1")], None);
-        assert_eq!(g.filtros(), vec![FiltroDaBusca::Tudo, FiltroDaBusca::Faixas, FiltroDaBusca::Albuns]);
-        assert!(agrupar_busca(&[], None).filtros().is_empty(), "sem resultado, sem chips");
-        assert_eq!(FiltroDaBusca::Albuns.nome(), "Álbuns");
+    fn o_sinal_de_maior_mostra_so_comandos() {
+        assert_eq!(aba_da_busca("lume", AbaDaBusca::Albuns), AbaDaBusca::Albuns);
+        assert_eq!(aba_da_busca("> tema", AbaDaBusca::Albuns), AbaDaBusca::Comandos);
+        assert_eq!(AbaDaBusca::TODAS[0].nome(), "Principais");
+        assert_eq!(AbaDaBusca::Albuns.nome(), "Álbuns");
+    }
+
+    #[test]
+    fn a_biblioteca_filtra_por_tipo_e_texto_e_ordena() {
+        let disco = |id: &str, nome: &str, artista: &str, fixado| NaBiblioteca {
+            item: Item::Album(Album {
+                servico: "s".into(),
+                id: id.into(),
+                titulo: nome.into(),
+                artistas: vec![artista.into()],
+                ..Default::default()
+            }),
+            salvo: true,
+            fixado,
+        };
+        let artista = NaBiblioteca {
+            item: Item::Artista(Artista { servico: "s".into(), id: "x".into(), nome: "Ana".into(), foto: None }),
+            salvo: true,
+            fixado: false,
+        };
+        let itens = [
+            disco("1", "Órbita", "Zé", false),
+            disco("2", "Chão", "Bia", true),
+            disco("3", "Alto", "Zé", false),
+            artista,
+        ];
+        let todos = |tipo, texto, ordem| arrumar_biblioteca(&itens, tipo, texto, ordem);
+        assert_eq!(todos(None, "", Ordem::Recentes), [1, 0, 2, 3], "os fixados na frente, o resto como veio");
+        assert_eq!(todos(None, "", Ordem::Nome), [1, 2, 3, 0], "Alto, Ana, Órbita (sem acento)");
+        assert_eq!(todos(Some(TipoSalvo::Album), "", Ordem::Artista), [1, 2, 0]);
+        assert_eq!(todos(None, "", Ordem::Artista), [1, 3, 2, 0], "o artista vale o próprio nome");
+        assert_eq!(todos(None, "ze orb", Ordem::Recentes), [0], "o texto olha nome e artista, sem acento");
+        assert!(todos(None, "nada", Ordem::Nome).is_empty());
+        assert_eq!(Ordem::Artista.proxima(), Ordem::Recentes);
     }
 
     #[test]
@@ -582,17 +749,6 @@ mod testes {
         assert!(!servico_buscando("abc", &respondidos, "abc", "yt"), "o YouTube já respondeu");
         assert!(servico_buscando("abc", &respondidos, "abc", "sp"), "o outro ainda não");
         assert!(servico_buscando("ab", &respondidos, "abc", "yt"), "a resposta é de outro texto");
-    }
-
-    #[test]
-    fn titulo_de_cada_rota() {
-        assert_eq!(titulo_da_rota(&Rota::ParaVoce), "Para você");
-        assert_eq!(titulo_da_rota(&Rota::Historico), "Histórico");
-        assert_eq!(titulo_da_rota(&Rota::Configuracoes), "Configurações");
-        let al =
-            Item::Album(Album { servico: "yt".into(), id: "a".into(), titulo: "Disco".into(), ..Default::default() });
-        assert_eq!(titulo_da_rota(&Rota::Album(al)), "Disco", "a de detalhe leva o nome do item");
-        assert_eq!(titulo_da_rota(&Rota::Faixa(Item::Faixa(faixa()))), "Faixa");
     }
 
     #[test]
@@ -612,14 +768,5 @@ mod testes {
         assert_eq!(a.artistas, com.artistas, "o álbum herda os artistas da faixa até a página chegar");
         assert_eq!(rota_do_album(&com, false), None, "o provedor não abre álbum");
         assert_eq!(rota_do_album(&Faixa { album_id: None, ..com.clone() }, true), None, "sem id");
-    }
-
-    #[test]
-    fn cada_pagina_tem_a_sua_chave_de_rolagem() {
-        let al =
-            |id: &str| Rota::Album(Item::Album(Album { servico: "yt".into(), id: id.into(), ..Default::default() }));
-        assert_eq!(chave_da_rota(&al("a")), chave_da_rota(&al("a")));
-        assert_ne!(chave_da_rota(&al("a")), chave_da_rota(&al("b")));
-        assert_ne!(chave_da_rota(&Rota::ParaVoce), chave_da_rota(&Rota::Biblioteca));
     }
 }

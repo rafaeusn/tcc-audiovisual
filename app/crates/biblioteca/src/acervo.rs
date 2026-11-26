@@ -10,6 +10,9 @@ use nucleo::{Erro, Resultado};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 
+/// Quantos recentes ficam guardados.
+const MAXIMO_DE_RECENTES: u32 = 60;
+
 pub struct Acervo {
     con: Connection,
 }
@@ -75,6 +78,7 @@ fn musica_da_linha(l: &rusqlite::Row) -> rusqlite::Result<Musica> {
                 isrc: l.get(10)?,
                 capa: l.get(11)?,
                 fonte: l.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                ..Default::default()
             }),
             None => None,
         },
@@ -237,6 +241,14 @@ impl Acervo {
                  dados   TEXT NOT NULL,
                  quando  INTEGER NOT NULL,
                  fixado  INTEGER NOT NULL DEFAULT 0,
+                 PRIMARY KEY (servico, tipo, id)
+             );
+             CREATE TABLE IF NOT EXISTS recentes (
+                 servico TEXT NOT NULL,
+                 tipo    TEXT NOT NULL,
+                 id      TEXT NOT NULL,
+                 dados   TEXT NOT NULL,
+                 quando  INTEGER NOT NULL,
                  PRIMARY KEY (servico, tipo, id)
              );",
         )
@@ -448,6 +460,37 @@ impl Acervo {
         Ok(mudou > 0)
     }
 
+    // ------------------------------------------------------------------ recentes
+
+    /// O que acabou de ser aberto ou tocado: vai para o começo (o mesmo item não repete) e os mais antigos saem.
+    pub fn registrar_recente(&self, s: &Salvo) -> Resultado<()> {
+        self.con
+            .execute(
+                "INSERT INTO recentes (servico, tipo, id, dados, quando) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT (servico, tipo, id) DO UPDATE SET dados = excluded.dados, quando = excluded.quando",
+                params![s.servico, s.tipo.chave(), s.id, s.dados, s.quando],
+            )
+            .map_err(erro)?;
+        self.con
+            .execute(
+                "DELETE FROM recentes WHERE rowid NOT IN
+                     (SELECT rowid FROM recentes ORDER BY quando DESC, rowid DESC LIMIT ?1)",
+                params![MAXIMO_DE_RECENTES],
+            )
+            .map_err(erro)?;
+        Ok(())
+    }
+
+    /// O que foi aberto e tocado, do mais novo ao mais antigo.
+    pub fn recentes(&self) -> Resultado<Vec<Salvo>> {
+        let mut consulta = self
+            .con
+            .prepare("SELECT servico, tipo, id, dados, quando, 0 FROM recentes ORDER BY quando DESC, rowid DESC")
+            .map_err(erro)?;
+        let linhas = consulta.query_map([], salvo_da_linha).map_err(erro)?;
+        Ok(linhas.filter_map(Result::ok).flatten().collect())
+    }
+
     // ------------------------------------------------------------------ playlists
 
     /// As playlists, em ordem de criação, com quantas músicas cada uma tem.
@@ -656,6 +699,32 @@ mod testes {
 
     fn titulos(a: &Acervo, f: &Filtro) -> Vec<String> {
         a.buscar(f, 100).expect("buscar").into_iter().map(|m| m.titulo).collect()
+    }
+
+    #[test]
+    fn recentes_do_mais_novo_sem_repetir_e_com_limite() {
+        let a = Acervo::em_memoria().expect("acervo");
+        let salvo = |id: &str, quando: i64, dados: &str| Salvo {
+            servico: "s".into(),
+            tipo: TipoSalvo::Album,
+            id: id.into(),
+            dados: dados.into(),
+            quando,
+            fixado: false,
+        };
+        for (id, q) in [("a", 1), ("b", 2), ("c", 3)] {
+            a.registrar_recente(&salvo(id, q, "{}")).expect("registra");
+        }
+        a.registrar_recente(&salvo("a", 9, "{1}")).expect("de novo");
+        let r = a.recentes().expect("recentes");
+        assert_eq!(r.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["a", "c", "b"]);
+        assert_eq!((r[0].dados.as_str(), r[0].quando), ("{1}", 9), "os dados são os últimos");
+        for i in 0..80 {
+            a.registrar_recente(&salvo(&format!("x{i}"), 100 + i, "{}")).expect("registra");
+        }
+        let r = a.recentes().expect("recentes");
+        assert_eq!((r.len(), r[0].id.as_str()), (60, "x79"));
+        assert!(a.salvos(None, None).expect("salvos").is_empty(), "recente não é salvo");
     }
 
     #[test]
@@ -880,6 +949,7 @@ mod testes {
                 isrc: None,
                 capa: Some("https://capa".into()),
                 fonte: "YouTube Music".into(),
+                ..Default::default()
             }),
             ..Default::default()
         };

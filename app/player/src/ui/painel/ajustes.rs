@@ -1,6 +1,8 @@
 //! Os blocos de ajuste (Aparência, Visual, Som...), usados pela página Configurações.
 
 use super::*;
+use crate::ui::medidas;
+use nucleo::ajustes::TAMANHOS;
 
 impl Player {
     /// Os blocos de ajuste, um por assunto, para a página Configurações. `largura` é a da coluna de conteúdo.
@@ -47,14 +49,14 @@ impl Player {
             apps.insert(0, escolhido.clone());
         }
         let opcao_de_fonte = |id: (&'static str, usize), nome: SharedString, ativa: bool, aberto: bool| {
-            texto(14.0)
+            medidas::apoio()
                 .id(id)
-                .h(px(36.0))
+                .h(px(medidas::FICHA))
                 .px(px(14.0))
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .border_1()
                 .border_color(if ativa { c.texto } else { c.linha_2 })
                 .cursor_pointer()
@@ -62,7 +64,7 @@ impl Player {
                 .text_color(if ativa { c.texto } else { c.texto_2 })
                 .when(ativa, |d| d.bg(c.sel))
                 .hover(|s| s.bg(c.hover))
-                .child(div().size(px(8.0)).rounded(px(999.0)).bg(if aberto { c.calma } else { c.texto_3 }))
+                .child(div().size(px(8.0)).rounded(px(medidas::PILULA)).bg(if aberto { c.calma } else { c.texto_3 }))
                 .child(nome)
         };
         let mut fontes = div().flex().flex_wrap().gap(px(8.0)).child(
@@ -87,7 +89,7 @@ impl Player {
         let escuta = bloco_ajuste(&c, false)
             .child(linha_ajuste(&c, "icones/wave.svg", "O que o Modo Escuta ouve", frase_escuta))
             .child(div().pl(px(recuo)).flex().flex_col().gap(px(8.0)).child(fontes).child(
-                texto(12.0).text_color(c.texto_3).child(
+                medidas::apoio().text_color(c.texto_3).child(
                     "Aparecem aqui os apps que estão com som aberto agora. Comece a tocar no app para ele aparecer.",
                 ),
             ));
@@ -105,8 +107,8 @@ impl Player {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(div().size(px(10.0)).rounded(px(999.0)).bg(cor))
-                    .child(texto(14.0).text_color(c.texto_2).child(nome))
+                    .child(div().size(px(10.0)).rounded(px(medidas::PILULA)).bg(cor))
+                    .child(medidas::apoio().text_color(c.texto_2).child(nome))
             };
             div()
                 .flex()
@@ -123,12 +125,12 @@ impl Player {
                 amostras = amostras.child(
                     div()
                         .id(("paleta", i))
-                        .h(px(40.0))
-                        .px(px(10.0))
+                        .h(px(medidas::BOTAO))
+                        .px(px(12.0))
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .border_1()
                         .border_color(if escolhida { c.texto } else { c.linha_2 })
                         .cursor_pointer()
@@ -137,11 +139,11 @@ impl Player {
                         .child(
                             div()
                                 .flex()
-                                .child(div().size(px(16.0)).rounded(px(999.0)).bg(rgb8(p.a)))
-                                .child(div().size(px(16.0)).ml(px(-6.0)).rounded(px(999.0)).bg(rgb8(p.b))),
+                                .child(div().size(px(16.0)).rounded(px(medidas::PILULA)).bg(rgb8(p.a)))
+                                .child(div().size(px(16.0)).ml(px(-6.0)).rounded(px(medidas::PILULA)).bg(rgb8(p.b))),
                         )
                         .child(
-                            texto(14.0)
+                            medidas::corpo()
                                 .text_color(if escolhida { c.texto } else { c.texto_2 })
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(p.nome),
@@ -188,8 +190,8 @@ impl Player {
                         .flex()
                         .items_center()
                         .gap(px(10.0))
-                        .child(icone("icones/check.svg", 16.0, c.texto))
-                        .child(texto(14.0).text_color(c.texto_2).child(regra)),
+                        .child(icone("icones/check.svg", medidas::ICONE_LINHA, c.texto))
+                        .child(medidas::apoio().text_color(c.texto_2).child(regra)),
                 );
             }
             seguro = seguro.child(regras);
@@ -223,19 +225,56 @@ impl Player {
                 },
             )));
         }
+        const ESPERAS: [(u32, &str); 5] = [(0, "Nunca"), (15, "15 s"), (30, "30 s"), (60, "1 min"), (120, "2 min")];
+        let espera_atual = ESPERAS.iter().position(|(s, _)| *s == aj.descanso_s).unwrap_or(ESPERAS.len());
+        let mut esperas = self.seletor("seletor-descanso", largura_seletor, ESPERAS.len(), espera_atual);
+        for (i, (s, nome)) in ESPERAS.into_iter().enumerate() {
+            esperas = esperas.child(self.opcao(("descanso", i), nome, aj.descanso_s == s).on_click(cx.listener(
+                move |this, _: &ClickEvent, _, cx| {
+                    this.ajustes.descanso_s = s;
+                    this.salvar();
+                    cx.notify();
+                },
+            )));
+        }
+        let tamanho_atual = TAMANHOS.iter().position(|t| *t == aj.tamanho).unwrap_or(1);
+        let mut tamanhos = self.seletor("seletor-tamanho", largura_seletor, TAMANHOS.len(), tamanho_atual);
+        for (i, t) in TAMANHOS.into_iter().enumerate() {
+            let rotulo: &'static str = match t {
+                90 => "90%",
+                110 => "110%",
+                125 => "125%",
+                _ => "100%",
+            };
+            tamanhos = tamanhos.child(self.opcao(("tamanho", i), rotulo, aj.tamanho == t).on_click(cx.listener(
+                move |this, _: &ClickEvent, _, cx| {
+                    this.mudar_tamanho(t);
+                    cx.notify();
+                },
+            )));
+        }
         let aparencia = bloco_ajuste(&c, false)
             .child(linha_ajuste(
                 &c,
                 "icones/layout.svg",
                 "Layout",
                 if estante {
-                    "Estante: os espaços ao lado, a página no meio e o visual no trilho Tocando (Ctrl L)."
+                    "Estante: o visual no centro e a página ao lado dele (Ctrl L)."
                 } else {
                     "Palco: o visual no centro e as páginas por cima dele (Ctrl L)."
                 }
                 .into(),
             ))
             .child(div().pl(px(recuo)).child(layouts))
+            .children(estante.then(|| {
+                linha_ajuste(
+                    &c,
+                    "icones/eye.svg",
+                    "A página sai da frente",
+                    "Com música tocando e ninguém mexendo, fica só o visual. Mexer traz a página de volta.".into(),
+                )
+            }))
+            .children(estante.then(|| div().pl(px(recuo)).child(esperas)))
             .child(linha_ajuste(
                 &c,
                 "icones/tone.svg",
@@ -243,6 +282,13 @@ impl Player {
                 "As cores da interface. O visual só muda no Mono.".into(),
             ))
             .child(div().pl(px(recuo)).child(temas))
+            .child(linha_ajuste(
+                &c,
+                "icones/expand.svg",
+                "Tamanho da interface",
+                "Letras, ícones e espaços juntos (Ctrl + e Ctrl −).".into(),
+            ))
+            .child(div().pl(px(recuo)).child(tamanhos))
             .child(linha_ajuste(
                 &c,
                 "icones/immersive.svg",
@@ -257,22 +303,22 @@ impl Player {
             .child(div().pl(px(recuo)).child(skins))
             .child(
                 div().pl(px(recuo)).child(
-                    texto(14.0)
+                    medidas::corpo()
                         .id("aj-editar")
-                        .h(px(40.0))
+                        .h(px(medidas::BOTAO))
                         .px(px(16.0))
                         .flex()
                         .items_center()
                         .justify_center()
                         .gap(px(8.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .border_1()
                         .border_color(c.linha_2)
                         .text_color(c.texto)
                         .font_weight(FontWeight::SEMIBOLD)
                         .cursor_pointer()
                         .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/grid.svg", 18.0, c.texto))
+                        .child(icone("icones/grid.svg", medidas::ICONE_LINHA, c.texto))
                         .child("Personalizar o layout")
                         .child(tecla(&c, "E"))
                         .on_click(self.ao_clicar(Comando::EditarLayout, cx)),
@@ -283,22 +329,22 @@ impl Player {
         let pos_bandeja = self.anim.seguir(("interruptor-bandeja", 0), f32::from(u8::from(aj.fechar_na_bandeja)), 0.2);
         let pos_dicas = self.anim.seguir(("interruptor-dicas", 0), f32::from(u8::from(aj.dicas)), 0.2);
         let pilula = |id: &'static str, caminho: &'static str, rotulo: &'static str| {
-            texto(14.0)
+            medidas::corpo()
                 .id(id)
-                .h(px(40.0))
+                .h(px(medidas::BOTAO))
                 .px(px(16.0))
                 .flex()
                 .items_center()
                 .justify_center()
                 .gap(px(8.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .border_1()
                 .border_color(c.linha_2)
                 .text_color(c.texto)
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|s| s.bg(c.hover))
-                .child(icone(caminho, 18.0, c.texto))
+                .child(icone(caminho, medidas::ICONE_LINHA, c.texto))
                 .child(rotulo)
         };
         let janela = bloco_ajuste(&c, false)
@@ -361,7 +407,7 @@ impl Player {
                     .justify_between()
                     .gap(px(12.0))
                     .when(i + 1 < com_atalho.len(), |d| d.border_b_1().border_color(c.linha))
-                    .child(texto(14.0).min_w(px(0.0)).text_color(c.texto_2).child(comando.nome()))
+                    .child(medidas::apoio().min_w(px(0.0)).text_color(c.texto_2).child(comando.nome()))
                     .child(grupo),
             );
         }
@@ -375,11 +421,11 @@ impl Player {
         let sobre = bloco_ajuste(&c, true)
             .gap(px(8.0))
             .child(titulo_secao(&c, "Sobre"))
-            .child(texto(14.0).child(format!("Player {} (nome provisório)", env!("CARGO_PKG_VERSION"))))
-            .child(texto(14.0).text_color(c.texto_2).child(
+            .child(medidas::corpo().child(format!("Player {} (nome provisório)", env!("CARGO_PKG_VERSION"))))
+            .child(medidas::apoio().text_color(c.texto_2).child(
                 "No Modo Escuta o app analisa o som que o PC está tocando para mover o visual. Nenhum áudio é gravado nem enviado para fora. O histórico fica só neste computador. Com o módulo Letra no painel, o título e o artista da faixa vão ao LRCLIB para buscar a letra.",
             ))
-            .child(texto(14.0).text_color(c.texto_2).child(placa))
+            .child(medidas::apoio().text_color(c.texto_2).child(placa))
             .child(
                 div().pt(px(4.0)).flex().child(
                     pilula("aj-diagnostico", "icones/info.svg", "Copiar relatório de diagnóstico")

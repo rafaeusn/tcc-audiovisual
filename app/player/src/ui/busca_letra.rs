@@ -4,10 +4,11 @@
 //! Enter para procurar no LRCLIB e escolhe um dos resultados. A escolha vira a letra da faixa que está tocando
 //! e fica guardada, como as letras achadas sozinhas.
 
-use super::{RAIO_CONTROLE, RAIO_MODULO, icone, mono, tecla, tempo, texto};
+use super::{RAIO_CONTROLE, RAIO_MODULO, icone, medidas, mono, tecla, tempo};
 use crate::app::Player;
 use crate::letrista::Achados;
-use gpui::{AnyElement, ClickEvent, Context, FontWeight, KeyDownEvent, SharedString, div, prelude::*, px};
+use crate::ui::medidas::px;
+use gpui::{AnyElement, ClickEvent, Context, FontWeight, KeyDownEvent, div, prelude::*};
 
 impl Player {
     /// Os resultados valem para o que está digitado agora?
@@ -67,7 +68,7 @@ impl Player {
             .p(px(6.0))
             .flex()
             .flex_col();
-        let aviso = |frase: &'static str| texto(14.0).px(px(14.0)).py(px(28.0)).text_color(c.texto_2).child(frase);
+        let aviso = |frase: &'static str| medidas::apoio().px(px(14.0)).py(px(28.0)).text_color(c.texto_2).child(frase);
         match resultados {
             Some([]) => {
                 lista = lista.child(aviso("Nada encontrado. Tente só o nome da música, ou outro jeito de escrever."))
@@ -76,7 +77,7 @@ impl Player {
                 for (i, r) in itens.iter().enumerate() {
                     let ativo = i == selecionado.min(itens.len() - 1);
                     let de_quem = match (r.artist_name.is_empty(), r.album_name.is_empty()) {
-                        (false, false) => format!("{} · {}", r.artist_name, r.album_name),
+                        (false, false) => format!("{}, {}", r.artist_name, r.album_name),
                         (false, true) => r.artist_name.clone(),
                         _ => r.album_name.clone(),
                     };
@@ -101,7 +102,11 @@ impl Player {
                             .cursor_pointer()
                             .when(ativo, |d| d.bg(c.sel))
                             .when(!ativo, |d| d.hover(|s| s.bg(c.hover)))
-                            .child(icone("icones/lyrics.svg", 18.0, if ativo { c.texto } else { c.texto_2 }))
+                            .child(icone(
+                                "icones/lyrics.svg",
+                                medidas::ICONE_LINHA,
+                                if ativo { c.texto } else { c.texto_2 },
+                            ))
                             .child(
                                 div()
                                     .flex_1()
@@ -109,14 +114,13 @@ impl Player {
                                     .flex()
                                     .flex_col()
                                     .child(
-                                        texto(14.0)
+                                        medidas::corpo()
                                             .font_weight(FontWeight::SEMIBOLD)
-                                            .truncate()
-                                            .child(SharedString::from(r.track_name.clone())),
+                                            .child(super::linha(r.track_name.clone())),
                                     )
-                                    .child(texto(12.0).text_color(c.texto_2).truncate().child(de_quem)),
+                                    .child(medidas::apoio().text_color(c.texto_2).child(super::linha(de_quem))),
                             )
-                            .child(texto(12.0).flex_none().text_color(c.texto_2).child(tipo))
+                            .child(medidas::apoio().flex_none().text_color(c.texto_2).child(tipo))
                             .child(mono().flex_none().text_color(c.texto_2).child(tempo(r.duration)))
                             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                                 this.fixar_letra(i);
@@ -147,17 +151,10 @@ impl Player {
             .pr(px(16.0))
             .border_b_1()
             .border_color(c.linha_2)
-            .child(icone("icones/lyrics.svg", 20.0, c.texto_3))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h_full()
-                    .relative()
-                    .flex()
-                    .child(self.receber_texto(cx))
-                    .child(Self::conteudo_do_campo(&c, &consulta, "Buscar a letra: música e artista", 16.0, true)),
-            )
+            .child(icone("icones/lyrics.svg", medidas::ICONE, c.texto_3))
+            .child(div().flex_1().min_w(px(0.0)).h_full().relative().flex().child(self.receber_texto(cx)).child(
+                Self::conteudo_do_campo(&c, &consulta, "Buscar a letra: música e artista", medidas::CORPO, true, false),
+            ))
             .child(tecla(&c, "Esc"));
 
         let tem_resultados = resultados.is_some_and(|r| !r.is_empty());
@@ -166,7 +163,7 @@ impl Player {
             for t in teclas {
                 grupo = grupo.child(tecla(&c, t));
             }
-            grupo.child(texto(12.0).text_color(c.texto_2).child(frase))
+            grupo.child(medidas::apoio().text_color(c.texto_2).child(frase))
         };
         let rodape = div()
             .flex()

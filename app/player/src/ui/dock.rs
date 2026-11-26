@@ -1,21 +1,29 @@
 //! O dock: a faixa que está tocando, os controles, o mapa de energia e o volume. O fundo dele segue a cor do
 //! visual.
 
-use super::{Botao, RAIO_CONTROLE, caixa, com_alfa, icone, mono, numero, tempo, texto};
-use crate::app::Player;
+use super::{Botao, caixa, com_alfa, icone, medidas, mono, numero, tempo};
+use crate::app::{AbaDoPainel, Player};
 use crate::arranjo::{Modo, RAIO};
+use crate::menu::Alvo;
+use crate::paginas::{Destino, destino_do_artista, destino_do_titulo};
 use crate::tema;
+use crate::ui::medidas::px;
 use gpui::{
-    Bounds, Context, Div, FontWeight, Hsla, MouseButton, MouseDownEvent, PathBuilder, ScrollWheelEvent, SharedString,
-    Stateful, canvas, div, fill, img, point, prelude::*, px, size,
+    App, Bounds, ClickEvent, Context, Div, FontWeight, Hsla, MouseButton, MouseDownEvent, PathBuilder,
+    ScrollWheelEvent, SharedString, Stateful, canvas, div, fill, img, point, prelude::*, size,
 };
 use nucleo::{Comando, Tema};
+use provedores::{Capacidade, Item};
 
 /// Play e pause como dois polígonos de 4 pontos (numa grade de 24), para um virar o outro ponto a ponto.
 const PLAY: [[(f32, f32); 4]; 2] =
     [[(8.0, 5.0), (14.0, 8.5), (14.0, 15.5), (8.0, 19.0)], [(14.0, 8.5), (20.0, 12.0), (20.0, 12.0), (14.0, 15.5)]];
 const PAUSE: [[(f32, f32); 4]; 2] =
     [[(7.0, 5.0), (10.5, 5.0), (10.5, 19.0), (7.0, 19.0)], [(13.5, 5.0), (17.0, 5.0), (17.0, 19.0), (13.5, 19.0)]];
+
+/// O botão de ícone do dock e o de tocar.
+const DOCK_BOTAO: f32 = 40.0;
+const TOCAR: f32 = 52.0;
 
 impl Player {
     pub(crate) fn ver_dock(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -26,6 +34,17 @@ impl Player {
             .bg(if self.imersivo() { com_alfa(tom, 0.72) } else { tom })
             // Cliques no dock não passam para o visual que, na skin imersiva, está por baixo.
             .occlude();
+        if a.modo == Modo::Empilhado && a.dock.h <= crate::arranjo::DOCK_EMPILHADO_BAIXO {
+            // Janela baixa: uma linha só (a capa, o nome, os controles e o ⋯); o tempo fica para a janela maior.
+            return base
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(10.0))
+                .child(self.dock_faixa(52.0, false, cx).flex_1())
+                .child(self.dock_controles(false, cx))
+                .child(self.botao_mais(("dock-mais", 0), DOCK_BOTAO, || Alvo::Barra, cx));
+        }
         if a.modo == Modo::Empilhado {
             // Duas linhas: faixa e controles em cima, linha do tempo embaixo.
             return base
@@ -39,8 +58,8 @@ impl Player {
                         .flex()
                         .items_center()
                         .gap(px(12.0))
-                        .child(self.dock_faixa(44.0).flex_1())
-                        .child(self.dock_controles(cx))
+                        .child(self.dock_faixa(52.0, a.dock.w >= 440.0, cx).flex_1())
+                        .child(self.dock_controles(a.dock.w >= 440.0, cx))
                         .when(a.dock.w >= 440.0, |d| {
                             d.child(self.dock_botao(
                                 "dock-mudo",
@@ -51,27 +70,38 @@ impl Player {
                             ))
                         }),
                 )
-                .child(self.dock_linha_do_tempo(cx));
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(self.dock_linha_do_tempo(cx).flex_1())
+                        .child(self.botao_mais(("dock-mais", 0), 28.0, || Alvo::Barra, cx)),
+                );
         }
 
-        let meio = ((a.dock.w - 36.0) * 0.4).clamp(260.0, 560.0);
         let painel_visivel = match a.modo {
+            _ if self.estante() => a.painel.is_some(),
             Modo::Largo => self.ajustes.painel_aberto,
             _ => self.gaveta_aberta,
         };
-        // A barra de volume encolhe e some conforme o dock estreita; o botão de mudo fica.
-        let pista = if a.dock.w >= 1040.0 {
-            112.0
-        } else if a.dock.w >= 860.0 {
-            84.0
-        } else {
-            0.0
-        };
+        // Com largura, o play fica no meio da barra. Abaixo disso o nome da música vale mais que o meio exato: a coluna
+        // dele fica com pelo menos 264, e a barra de volume sai (o botão de mudo fica).
+        let larga = a.dock.w >= 1100.0;
+        let pista = if larga { 88.0 } else { 0.0 };
+        // Apertada, a letra e o mudo vão para o ⋯.
+        let apertada = self.barra_apertada();
+        let botoes = 3.0 + if apertada { 0.0 } else { 2.0 };
+        let direita = DOCK_BOTAO * botoes + if pista > 0.0 { pista + 12.0 } else { 0.0 };
+        let esquerda = if larga { direita } else { 264.0 };
+        let meio = (a.dock.w - 36.0 - 48.0 - direita - esquerda).clamp(252.0, 560.0);
+        let lados =
+            |d: Div| if larga { d.flex_1().flex_basis(px(0.0)).min_w(px(0.0)) } else { d.flex_none().w(px(direita)) };
         base.flex()
             .items_center()
             .gap(px(24.0))
             .px(px(18.0))
-            .child(self.dock_faixa(48.0).flex_1().flex_basis(px(0.0)))
+            .child(self.dock_faixa(64.0, !apertada, cx).flex_1().flex_basis(px(0.0)))
             .child(
                 div()
                     .w(px(meio))
@@ -79,18 +109,31 @@ impl Player {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .child(self.dock_controles(cx))
+                    .child(self.dock_controles(true, cx))
                     .child(self.dock_linha_do_tempo(cx)),
             )
             .child(
-                div()
-                    .flex_1()
-                    .flex_basis(px(0.0))
-                    .min_w(px(0.0))
+                lados(div())
                     .flex()
                     .items_center()
                     .justify_end()
-                    .gap(px(4.0))
+                    .when(!apertada, |d| {
+                        d.child(self.dock_botao(
+                            "dock-letra",
+                            "icones/lyrics.svg",
+                            self.letra_na_aba() || self.letra_cheia,
+                            Comando::AbrirLetra,
+                            cx,
+                        ))
+                    })
+                    .child(self.dock_botao(
+                        "dock-fila",
+                        "icones/queue.svg",
+                        (self.painel_a_vista() && self.aba_do_painel == AbaDoPainel::Fila)
+                            || self.nav.atual() == Some(&crate::navegacao::Rota::Fila),
+                        Comando::AbrirFila,
+                        cx,
+                    ))
                     .child(self.dock_botao(
                         "dock-painel",
                         "icones/panel.svg",
@@ -98,26 +141,17 @@ impl Player {
                         Comando::AlternarPainel,
                         cx,
                     ))
-                    .child(self.dock_botao(
-                        "dock-fila",
-                        "icones/queue.svg",
-                        self.pagina() == nucleo::Pagina::Biblioteca
-                            && self.aba_biblioteca() == crate::app::AbaBiblioteca::Fila,
-                        Comando::AbrirFila,
-                        cx,
-                    ))
-                    .child(self.dock_botao(
-                        "dock-ilha",
-                        "icones/ilha.svg",
-                        self.ajustes.ilha,
-                        Comando::AlternarIlha,
-                        cx,
-                    ))
-                    .child(self.dock_botao("dock-mini", "icones/pip.svg", false, Comando::AlternarMini, cx))
-                    .child(self.dock_botao("dock-cheia", "icones/full.svg", false, Comando::TelaCheia, cx))
-                    .child(self.dock_botao("dock-mudo", self.icone_do_volume(), false, Comando::Silenciar, cx))
-                    .when(pista > 0.0, |d| d.child(self.dock_volume(pista, cx))),
+                    .when(!apertada, |d| {
+                        d.child(self.dock_botao("dock-mudo", self.icone_do_volume(), false, Comando::Silenciar, cx))
+                    })
+                    .when(pista > 0.0, |d| d.child(self.dock_volume(pista, cx)))
+                    .child(self.botao_mais(("dock-mais", 0), DOCK_BOTAO, || Alvo::Barra, cx)),
             )
+    }
+
+    /// A barra não tem lugar para a letra, o coração e o mudo: eles vão para o ⋯.
+    pub(crate) fn barra_apertada(&self) -> bool {
+        self.arranjo.dock.w < 800.0
     }
 
     fn icone_do_volume(&self) -> &'static str {
@@ -139,9 +173,9 @@ impl Player {
             Botao {
                 id,
                 icone: caminho,
-                tamanho: 40.0,
-                tamanho_icone: 20.0,
-                raio: RAIO_CONTROLE,
+                tamanho: DOCK_BOTAO,
+                tamanho_icone: medidas::ICONE,
+                raio: medidas::PILULA,
                 cor: if ativo { c.texto } else { c.texto_2 },
                 fundo: ativo.then_some(com_alfa(c.texto, 0.14)),
                 realce: com_alfa(c.texto, 0.1),
@@ -153,14 +187,27 @@ impl Player {
         .on_hover(self.ao_pairar(id, Some(comando), "", cx))
     }
 
-    /// Capa, título e artista (ou de onde vem o som).
-    fn dock_faixa(&self, lado: f32) -> Div {
+    /// O clique que leva a um destino da música (o álbum, o artista).
+    fn ao_destino(
+        &self,
+        destino: Destino,
+        cx: &Context<Self>,
+    ) -> impl Fn(&ClickEvent, &mut gpui::Window, &mut App) + 'static {
+        cx.listener(move |this, _: &ClickEvent, _, cx| {
+            this.ir_ao_destino_do_clique(destino.clone());
+            cx.notify();
+        })
+    }
+
+    /// Capa, título e artista (ou de onde vem o som). Com a música do Player, a capa e o título levam ao álbum e o
+    /// artista à página dele; o som de outro app não leva a lugar nenhum.
+    fn dock_faixa(&self, lado: f32, com_coracao: bool, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
         let capa = match &self.capa {
             Some(imagem) => img(imagem.clone())
                 .size(px(lado))
                 .flex_none()
-                .rounded(px(RAIO_CONTROLE))
+                .rounded(px(medidas::raio_da_capa(lado)))
                 // No tema Mono nada tem cor, nem a capa.
                 .grayscale(self.ajustes.tema == Tema::Mono)
                 .into_any_element(),
@@ -170,9 +217,9 @@ impl Player {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(RAIO_CONTROLE))
+                .rounded(px(medidas::raio_da_capa(lado)))
                 .bg(c.ponto)
-                .child(icone("icones/headphones.svg", 20.0, c.texto_2))
+                .child(icone("icones/headphones.svg", medidas::ICONE, c.texto_2))
                 .into_any_element(),
         };
         let (nome, sub): (SharedString, SharedString) = match self.midia.faixa.as_ref().filter(|f| !f.titulo.is_empty())
@@ -184,19 +231,65 @@ impl Player {
             None if self.retrato.gate > 0.5 => ("Som do sistema".into(), "Modo Escuta".into()),
             None => ("Nada tocando".into(), "Modo Escuta".into()),
         };
-        div().min_w(px(0.0)).flex().items_center().gap(px(12.0)).child(capa).child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .child(texto(14.0).font_weight(FontWeight::SEMIBOLD).truncate().child(nome))
-                .child(texto(14.0).text_color(c.texto_2).truncate().child(sub)),
-        )
+        let de_onde = self.servicos_do_tocando();
+        let servicos: Vec<&str> = de_onde.iter().map(String::as_str).collect();
+        // Dois selos: a faixa é de um serviço e toca por outro.
+        let pelo_outro = servicos.len() > 1;
+        let capa = self
+            .com_selo(capa, &servicos, medidas::MARCA_DA_BARRA)
+            .id("dock-capa")
+            .child(self.marca("dock-capa"))
+            .when(pelo_outro, |d| d.on_hover(self.ao_pairar("dock-capa", None, "Tocando pelo serviço da frente", cx)));
+        let tocando = self.local.atual().filter(|_| self.origem_local);
+        let sabe = |capacidade| {
+            let servico = tocando.and_then(|m| m.remota.as_ref()).map(|r| r.servico.as_str());
+            servico.is_some_and(|s| self.sabe(s, capacidade))
+        };
+        let ao_titulo = tocando.and_then(|m| destino_do_titulo(m, sabe(Capacidade::Album)));
+        let ao_artista = tocando.and_then(|m| destino_do_artista(m, sabe(Capacidade::Artista)));
+        let capa = match ao_titulo.clone() {
+            Some(d) => capa.cursor_pointer().on_click(self.ao_destino(d, cx)),
+            None => capa,
+        };
+        let titulo = medidas::corpo().id("dock-titulo").font_weight(FontWeight::SEMIBOLD).child(super::linha(nome));
+        let titulo = match ao_titulo {
+            Some(d) => titulo.cursor_pointer().hover(|s| s.underline()).on_click(self.ao_destino(d, cx)),
+            None => titulo,
+        };
+        let artista = medidas::apoio().id("dock-artista").text_color(c.texto_2).child(super::linha(sub));
+        let artista = match ao_artista {
+            Some(d) => {
+                artista.cursor_pointer().hover(|s| s.underline().text_color(c.texto)).on_click(self.ao_destino(d, cx))
+            }
+            None => artista,
+        };
+        let coracao = self
+            .faixa_que_toca()
+            .filter(|_| com_coracao)
+            .map(|f| self.coracao(("dock-coracao", 60_000), &Item::Faixa(f), medidas::ICONE, cx));
+        let do_menu = tocando.map(|m| Player::alvo_da_musica(m, self.local.fila.atual()));
+        div()
+            .min_w(px(0.0))
+            .flex()
+            .items_center()
+            .gap(px(16.0))
+            .child(capa)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(div().flex_1().min_w(px(0.0)).flex().flex_col().items_start().child(titulo).child(artista))
+                    .children(coracao),
+            )
+            .when_some(do_menu, |d, alvo| d.on_mouse_down(MouseButton::Right, self.ao_menu(move || alvo.clone(), cx)))
     }
 
     /// Anterior, tocar/pausar e próxima. Agem no app que está tocando; sem app, ficam apagados.
-    fn dock_controles(&self, cx: &mut Context<Self>) -> Div {
+    /// `modos`: com o aleatório e o repetir (em janela estreita eles dão lugar ao nome da música; ficam na Fila).
+    fn dock_controles(&self, modos: bool, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
         let ativo = self.midia.disponivel;
         let lateral =
@@ -204,21 +297,21 @@ impl Player {
                 if !ativo {
                     return div()
                         .id(id)
-                        .size(px(40.0))
+                        .size(px(medidas::ALVO))
                         .flex_none()
                         .flex()
                         .items_center()
                         .justify_center()
                         .opacity(0.4)
-                        .child(icone(caminho, 22.0, c.texto_2));
+                        .child(icone(caminho, medidas::ICONE, c.texto_2));
                 }
                 self.botao(
                     Botao {
                         id,
                         icone: caminho,
-                        tamanho: 40.0,
-                        tamanho_icone: 22.0,
-                        raio: 999.0,
+                        tamanho: medidas::ALVO,
+                        tamanho_icone: medidas::ICONE,
+                        raio: medidas::PILULA,
                         cor: c.texto_2,
                         fundo: None,
                         realce: com_alfa(c.texto, 0.1),
@@ -243,8 +336,8 @@ impl Player {
                     let mut caminho = PathBuilder::fill();
                     for (i, (de, para)) in PLAY[lado].iter().zip(PAUSE[lado].iter()).enumerate() {
                         let p = point(
-                            px(x0 + (de.0 + (para.0 - de.0) * forma) * escala),
-                            px(y0 + (de.1 + (para.1 - de.1) * forma) * escala),
+                            gpui::px(x0 + (de.0 + (para.0 - de.0) * forma) * escala),
+                            gpui::px(y0 + (de.1 + (para.1 - de.1) * forma) * escala),
                         );
                         if i == 0 { caminho.move_to(p) } else { caminho.line_to(p) }
                     }
@@ -255,10 +348,18 @@ impl Player {
                 }
             },
         )
-        .size(px(22.0 * e));
-        let mut tocar = div().id("dock-tocar").size(px(44.0)).flex_none().flex().items_center().justify_center().child(
-            div().size(px(44.0 * e)).flex().items_center().justify_center().rounded(px(999.0)).bg(c.inv).child(desenho),
-        );
+        .size(px(medidas::ICONE * e));
+        let mut tocar =
+            div().id("dock-tocar").size(px(TOCAR)).flex_none().flex().items_center().justify_center().child(
+                div()
+                    .size(px(TOCAR * e))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(medidas::PILULA))
+                    .bg(c.inv)
+                    .child(desenho),
+            );
         tocar = if ativo {
             tocar
                 .cursor_pointer()
@@ -270,15 +371,15 @@ impl Player {
             tocar.opacity(0.4)
         };
         // Aleatório e repetir só existem para as músicas do computador: os outros apps têm os deles.
-        let local = self.origem_local;
+        let local = self.origem_local && modos;
         let modo = |id: &'static str, caminho: &'static str, comando: Comando, ligado: bool, cx: &mut Context<Self>| {
             self.botao(
                 Botao {
                     id,
                     icone: caminho,
-                    tamanho: 34.0,
-                    tamanho_icone: 18.0,
-                    raio: 999.0,
+                    tamanho: DOCK_BOTAO,
+                    tamanho_icone: medidas::ICONE_LINHA,
+                    raio: medidas::PILULA,
                     cor: if ligado { c.texto } else { c.texto_3 },
                     fundo: ligado.then_some(com_alfa(c.texto, 0.1)),
                     realce: com_alfa(c.texto, 0.1),
@@ -335,10 +436,10 @@ impl Player {
                         (3.0 + e.clamp(0.0, 1.0) * (altura - 3.0), if passou { ouvido } else { adiante })
                     };
                     let barra = Bounds::new(
-                        point(px(x0 + i as f32 * passo), px(meio - h / 2.0)),
-                        size(px((passo - folga).max(1.0)), px(h)),
+                        point(gpui::px(x0 + i as f32 * passo), gpui::px(meio - h / 2.0)),
+                        size(gpui::px((passo - folga).max(1.0)), gpui::px(h)),
                     );
-                    window.paint_quad(fill(barra, cor).corner_radii(px(1.0)));
+                    window.paint_quad(fill(barra, cor).corner_radii(gpui::px(1.0)));
                 }
             },
         )
@@ -351,7 +452,7 @@ impl Player {
         };
         div()
             .w_full()
-            .h(px(32.0))
+            .h(px(28.0))
             .flex()
             .flex_none()
             .items_center()
@@ -427,9 +528,11 @@ impl Player {
                     .top(px(14.0))
                     .w(px(barra_w))
                     .h(px(4.0))
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .bg(com_alfa(c.texto, 0.2))
-                    .child(div().w(px(preenchido.clamp(0.0, barra_w))).h_full().rounded(px(999.0)).bg(c.texto)),
+                    .child(
+                        div().w(px(preenchido.clamp(0.0, barra_w))).h_full().rounded(px(medidas::PILULA)).bg(c.texto),
+                    ),
             );
         if !self.volume_disponivel {
             return controle.opacity(0.4);
@@ -439,12 +542,12 @@ impl Player {
             .left(px(v * largura - 7.0))
             .top(px(9.0))
             .size(px(14.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .bg(c.texto)
             .shadow_md();
         controle = if self.arrastando_volume {
             controle.child(bolinha).child(
-                numero(16.0)
+                numero(medidas::CORPO)
                     .absolute()
                     .left(px(v * largura - 20.0))
                     .top(px(-10.0))

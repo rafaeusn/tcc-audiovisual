@@ -4,7 +4,7 @@
 //! podem vir de várias threads ao mesmo tempo (cada um espera a própria resposta, com prazo). Quem chama fica
 //! esperando: na interface, os pedidos saem de uma thread própria, nunca da janela.
 
-use crate::modelo::{Item, Prateleira};
+use crate::modelo::{Detalhe, Item, Prateleira};
 use crate::protocolo::{
     Apresentacao, Causa, CorpoDaResposta, CorpoDoPedido, Fonte, Pedido, VERSAO_DO_PROTOCOLO, em_linha, ler_resposta,
 };
@@ -182,7 +182,7 @@ impl Provedor {
 
     pub fn buscar(&self, texto: &str, limite: u32, prazo: Duration) -> Resultado<Vec<Item>> {
         match self.pedir(CorpoDoPedido::Buscar { texto: texto.to_string(), limite }, prazo)? {
-            CorpoDaResposta::Itens { itens } => Ok(itens),
+            CorpoDaResposta::Itens { itens, .. } => Ok(itens),
             outra => Err(inesperada(&outra)),
         }
     }
@@ -197,7 +197,15 @@ impl Provedor {
     /// Os itens de um álbum, artista ou playlist (`pedido` é `Album`, `Artista` ou `Playlist`).
     pub fn itens(&self, pedido: CorpoDoPedido, prazo: Duration) -> Resultado<Vec<Item>> {
         match self.pedir(pedido, prazo)? {
-            CorpoDaResposta::Itens { itens } => Ok(itens),
+            CorpoDaResposta::Itens { itens, .. } => Ok(itens),
+            outra => Err(inesperada(&outra)),
+        }
+    }
+
+    /// Como [`itens`](Self::itens), com o que mais o serviço mandou da página.
+    pub fn pagina(&self, pedido: CorpoDoPedido, prazo: Duration) -> Resultado<(Vec<Item>, Option<Box<Detalhe>>)> {
+        match self.pedir(pedido, prazo)? {
+            CorpoDaResposta::Itens { itens, detalhe } => Ok((itens, detalhe)),
             outra => Err(inesperada(&outra)),
         }
     }

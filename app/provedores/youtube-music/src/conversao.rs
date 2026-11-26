@@ -1,7 +1,11 @@
 //! Do formato do `rustypipe` para o formato comum dos provedores. Só contas, testadas sem internet.
 
-use provedores::{Album, Artista, Faixa, Item, Playlist};
-use rustypipe::model::{AlbumItem, ArtistId, ArtistItem, MusicPlaylistItem, Thumbnail, TrackItem, TrackType};
+use provedores::{Album, Artista, Detalhe, Faixa, Item, Playlist, Prateleira, TipoDaPrateleira, TipoDeAlbum};
+use rustypipe::model::richtext::ToPlaintext;
+use rustypipe::model::{
+    AlbumItem, AlbumType, ArtistId, ArtistItem, MusicAlbum, MusicArtist, MusicPlaylist, MusicPlaylistItem, Thumbnail,
+    TrackItem, TrackType,
+};
 
 /// O serviço, como ele vai em toda faixa.
 pub const SERVICO: &str = "youtube-music";
@@ -44,6 +48,7 @@ pub fn faixa(t: &TrackItem) -> Faixa {
         duracao_s: t.duration.map(f64::from),
         capa: capa(&t.cover),
         video: t.track_type != TrackType::Track,
+        ouvidas: t.view_count,
     }
 }
 
@@ -56,6 +61,86 @@ pub fn album_item(a: &AlbumItem) -> Album {
         artistas_ids: ids(&a.artists.iter().map(|x| (x.id.as_deref(), x.name.as_str())).collect::<Vec<_>>()),
         ano: a.year,
         capa: capa(&a.cover),
+        tipo: Some(tipo_de_album(a.album_type)),
+    }
+}
+
+fn tipo_de_album(t: AlbumType) -> TipoDeAlbum {
+    match t {
+        AlbumType::Album => TipoDeAlbum::Album,
+        AlbumType::Single => TipoDeAlbum::Single,
+        AlbumType::Ep => TipoDeAlbum::Ep,
+        _ => TipoDeAlbum::Outro,
+    }
+}
+
+fn secao(titulo: &str, tipo: TipoDaPrateleira, itens: Vec<Item>) -> Option<Prateleira> {
+    (!itens.is_empty()).then(|| Prateleira { titulo: titulo.into(), tipo, itens })
+}
+
+/// O que mais se sabe de um artista. A foto dele não vem: só a larga.
+pub fn detalhe_do_artista(a: &MusicArtist) -> Detalhe {
+    let parecidos = a.similar_artists.iter().map(|x| Item::Artista(artista_item(x))).collect();
+    let playlists = a.playlists.iter().map(|p| Item::Playlist(playlist_item(p))).collect();
+    Detalhe {
+        imagem: capa(&a.header_image),
+        descricao: a.description.clone().filter(|t| !t.trim().is_empty()),
+        seguidores: a.subscriber_count,
+        secoes: [
+            secao("Em playlists", TipoDaPrateleira::Outras, playlists),
+            secao("Quem ouve também curte", TipoDaPrateleira::Parecidos, parecidos),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        ..Default::default()
+    }
+}
+
+/// O que mais se sabe de um álbum.
+pub fn detalhe_do_album(a: &MusicAlbum) -> Detalhe {
+    let item = Album {
+        servico: SERVICO.into(),
+        id: a.id.clone(),
+        titulo: a.name.clone(),
+        artistas: a.artists.iter().map(|x| x.name.clone()).collect(),
+        artistas_ids: ids(&a.artists.iter().map(|x| (x.id.as_deref(), x.name.as_str())).collect::<Vec<_>>()),
+        ano: a.year,
+        capa: capa(&a.cover),
+        tipo: Some(tipo_de_album(a.album_type)),
+    };
+    let edicoes = a.variants.iter().map(|x| Item::Album(album_item(x))).collect();
+    Detalhe {
+        item: Some(Item::Album(item)),
+        descricao: a.description.as_ref().map(ToPlaintext::to_plaintext).filter(|t| !t.trim().is_empty()),
+        total: Some(u32::from(a.track_count)).filter(|n| *n > 0),
+        data: a.year.map(|y| y.to_string()),
+        tipo: Some(tipo_de_album(a.album_type)),
+        secoes: secao("Outras edições", TipoDaPrateleira::Outras, edicoes).into_iter().collect(),
+        ..Default::default()
+    }
+}
+
+/// O que mais se sabe de uma playlist.
+pub fn detalhe_da_playlist(p: &MusicPlaylist) -> Detalhe {
+    let dono = p.channel.as_ref().map(|c| c.name.clone());
+    let total = p.track_count.and_then(|n| u32::try_from(n).ok());
+    let item = Playlist {
+        servico: SERVICO.into(),
+        id: p.id.clone(),
+        titulo: p.name.clone(),
+        dono: dono.clone(),
+        capa: capa(&p.thumbnail),
+        quantas: total,
+    };
+    let parecidas = p.related_playlists.items.iter().map(|x| Item::Playlist(playlist_item(x))).collect();
+    Detalhe {
+        item: Some(Item::Playlist(item)),
+        descricao: p.description.as_ref().map(ToPlaintext::to_plaintext).filter(|t| !t.trim().is_empty()),
+        total,
+        dono,
+        secoes: secao("Parecidas", TipoDaPrateleira::Parecidos, parecidas).into_iter().collect(),
+        ..Default::default()
     }
 }
 

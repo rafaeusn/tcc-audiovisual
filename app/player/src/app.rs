@@ -15,7 +15,7 @@ use crate::tema::{self, Cores};
 use analise::{Retrato, Rotulo};
 use gpui::{
     Bounds, Context, DispatchPhase, FocusHandle, KeyDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    RenderImage, SharedString, Window, WindowHandle, canvas, div, prelude::*, px,
+    RenderImage, SharedString, Window, WindowHandle, canvas, div, prelude::*,
 };
 use nucleo::{Ajustes, Comando, Modelo, Modulo, Pagina, Skin, Tema};
 use sessao::{Capa, Controle, Estado, Faixa, Sessao};
@@ -27,8 +27,11 @@ use std::time::{Duration, Instant};
 
 mod letra;
 mod loja;
+mod menu;
 mod midia;
 mod navegar;
+pub(crate) use menu::AbaDoPainel;
+pub(crate) use navegar::ALTURA_DO_COMANDO;
 mod salvos;
 mod volume;
 
@@ -73,17 +76,6 @@ pub struct Paleta {
     pub selecionado: usize,
     /// A barra está no modo "buscar a letra" (em vez de buscar comandos).
     pub letra: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AbaBiblioteca {
-    /// As músicas das pastas do computador.
-    #[default]
-    Musicas,
-    /// O que toca agora e o que vem depois.
-    Fila,
-    /// O que foi ouvido, em números.
-    Historico,
 }
 
 /// O aviso que aparece acima do dock por alguns segundos, às vezes com "Desfazer".
@@ -176,12 +168,8 @@ pub struct Player {
     pub(crate) erro_visual: Option<SharedString>,
     pub(crate) placa: SharedString,
     proxima_camada: Instant,
-    /// As páginas abertas: o espaço e a pilha de cada um. Sem página, só o visual (no Palco).
+    /// As páginas abertas: a pilha e o filtro de serviço. Sem página, só o visual (no Palco).
     pub(crate) nav: crate::navegacao::Navegacao,
-    /// A paleta de onde a transição de cor do espaço parte (a da hora da troca).
-    pub(crate) paleta_de: crate::espacos::PaletaDoEspaco,
-    /// A paleta deste quadro (a transição anda uma vez por quadro, em `quadro`).
-    pub(crate) paleta_agora: crate::espacos::PaletaDoEspaco,
     /// As capas das páginas dos serviços (baixadas e guardadas em disco).
     pub(crate) capas: crate::capas::Capas,
     /// Curtidas e salvos que a biblioteca ainda não confirmou (para dois cliques rápidos ficarem no último).
@@ -192,24 +180,54 @@ pub struct Player {
     pub(crate) avisou_do_match: bool,
     /// Já disse, nesta abertura, que o serviço tocava em outro app e para ao tocar aqui.
     pub(crate) avisou_que_toma_a_vez: bool,
-    /// A biblioteca do espaço aberto, já junta.
-    pub(crate) biblioteca_lida: RefCell<Option<salvos::BibliotecaLida>>,
+    /// A biblioteca de cada filtro que a tela mostra (o da página e Tudo, na lateral), já junta.
+    pub(crate) biblioteca_lida: RefCell<HashMap<Option<String>, salvos::BibliotecaLida>>,
+    /// Os resultados da busca e o Início, juntos uma vez por resposta que chega.
+    pub(crate) busca_lida: RefCell<Option<salvos::BuscaLida>>,
+    pub(crate) inicio_lido: RefCell<Option<salvos::InicioLido>>,
+    /// Um álbum, playlist ou artista para tocar quando as faixas chegarem (o botão de tocar de um cartão).
+    pub(crate) tocar_ao_chegar: Option<(crate::remoto::PedidoDePagina, Instant, menu::AoChegar)>,
+    /// O menu aberto (do botão direito ou do ⋯).
+    pub(crate) menu: Option<menu::MenuAberto>,
+    /// O que o painel mostra: os módulos, a fila ou a letra.
+    pub(crate) aba_do_painel: AbaDoPainel,
+    /// A rolagem da fila no painel (ela abre na música de agora).
+    pub(crate) rolagem_da_fila: gpui::UniformListScrollHandle,
+    /// O que a pessoa disse que não é a mesma música.
+    pub(crate) separadas: crate::juntar::Separadas,
+    /// A última música de serviço que entrou nos recentes.
+    recente_visto: Option<std::path::PathBuf>,
+    /// O que a Biblioteca aberta mostra, já filtrado e em ordem.
+    pub(crate) biblioteca_arrumada: RefCell<Option<salvos::Arrumada>>,
+    pub(crate) ordem_da_biblioteca: crate::paginas::Ordem,
+    /// A Biblioteca em linhas (ou em cartões).
+    pub(crate) biblioteca_em_lista: bool,
+    /// A aba em que a Biblioteca reabre.
+    pub(crate) aba_lembrada: crate::navegacao::AbaDaBiblioteca,
     /// Quantos cartões as grades longas (Biblioteca do serviço, discografia) mostram; cresce no "Ver mais".
     pub(crate) cartoes_a_mostrar: usize,
-    /// O tipo escolhido na Biblioteca de um serviço (`None` = tudo).
-    pub(crate) filtro_salvos: Option<biblioteca::TipoSalvo>,
-    /// O chip escolhido na página Busca.
-    pub(crate) filtro_busca: crate::paginas::FiltroDaBusca,
+    /// A aba escolhida na página Buscar e, nos comandos, o que o Enter executa.
+    pub(crate) aba_da_busca: crate::paginas::AbaDaBusca,
+    pub(crate) comando_escolhido: usize,
+    /// A busca foi aberta pelo atalho: um comando escolhido nela devolve a página de antes.
+    pub(crate) busca_de_passagem: bool,
     /// A aba aberta na página da faixa.
     pub(crate) aba_da_faixa: crate::paginas::AbaDaFaixa,
+    /// A aba aberta na página de um artista.
+    pub(crate) aba_do_artista: crate::detalhes::AbaDoArtista,
+    /// O passo da navegação cujo item já foi completado nos recentes.
+    pub(crate) recente_completo: Option<u64>,
     /// O cartão sob o mouse (a capa dele cresce).
     pub(crate) cartao_sob: Option<usize>,
-    /// De que lado a página nova entra (1 = da direita, ao abrir; -1 = da esquerda, ao voltar).
-    pub(crate) entrada_de: f32,
     /// A página do artista mostra todas as populares.
     pub(crate) ver_mais: bool,
     /// A rolagem de cada prateleira de cartões.
-    pub(crate) rolagens: std::cell::RefCell<std::collections::HashMap<usize, gpui::ScrollHandle>>,
+    pub(crate) rolagens: RefCell<HashMap<usize, gpui::ScrollHandle>>,
+    /// A aba escolhida em cada fileira de abas, e em que passo: ela só volta à vista quando muda.
+    pub(crate) abas_vistas: RefCell<HashMap<&'static str, (u64, usize)>>,
+    /// A rolagem de cada passo da navegação (voltar devolve a página onde ela estava), e a das listas de músicas.
+    pub(crate) rolagens_das_paginas: RefCell<HashMap<u64, gpui::ScrollHandle>>,
+    pub(crate) rolagens_das_listas: RefCell<HashMap<u64, gpui::UniformListScrollHandle>>,
     /// A seção aberta na página Configurações.
     pub(crate) secao_config: crate::ui::configuracoes::Secao,
     pub(crate) gaveta_aberta: bool,
@@ -316,9 +334,11 @@ pub struct Player {
     pub(crate) origem_local: bool,
     /// A mesma informação, para a bandeja e os botões da barra de tarefas (que agem fora da interface).
     origem_local_fora: Arc<std::sync::atomic::AtomicBool>,
-    /// O texto da busca de músicas e se o teclado está nela.
-    pub(crate) busca_musicas: String,
-    pub(crate) buscando_musicas: bool,
+    /// Os textos dos campos das páginas, e o campo com o teclado (vale enquanto ele está na tela).
+    pub(crate) buscas: crate::navegacao::Buscas,
+    pub(crate) campo: Option<crate::navegacao::Campo>,
+    /// O texto do campo está todo selecionado: a próxima letra troca tudo.
+    pub(crate) campo_selecionado: bool,
     /// No campo de texto ativo: o pedaço ainda provisório (a tecla morta esperando a letra), em bytes.
     pub(crate) marcado: Option<std::ops::Range<usize>>,
     /// A janela de playlist aberta (pôr músicas numa playlist ou criar uma).
@@ -350,10 +370,18 @@ pub struct Player {
     sistema: Option<integracao::Integracao>,
     /// A janela está no modo mini (pequena, no canto, por cima das outras).
     pub(crate) mini: bool,
-    /// Estante: o visual do trilho crescido até a janela inteira.
+    /// Estante: o visual na janela inteira, a pedido da pessoa.
     pub(crate) expandido: bool,
-    /// Quanto o visual já cresceu (0 no trilho, 1 na janela), lido pela tela para esmaecer o resto.
+    /// Quanto o visual já cresceu (0 ao lado da página, 1 na janela), lido pela tela para esmaecer o resto.
     pub(crate) expansao: f32,
+    /// Ninguém mexe há um tempo: a página da Estante sai da frente do visual.
+    pub(crate) descanso: crate::descanso::Descanso,
+    /// A divisória da Estante está sendo arrastada.
+    pub(crate) arrastando_divisao: bool,
+    /// No empilhado da Estante, a página do Início foi rolada e o visual virou tira.
+    recolhido: bool,
+    /// A pessoa anda pela tela com o Tab: o anel de foco aparece, e espaço e Enter são do elemento focado.
+    pub(crate) foco_pelo_teclado: bool,
     /// Quando o estado (som, mídia, threads) foi atualizado pela última vez: a Ilha também atualiza, e a guarda
     /// evita rodar duas vezes no mesmo quadro.
     estado_em: Instant,
@@ -411,22 +439,39 @@ impl Player {
             placa: "".into(),
             proxima_camada: agora,
             nav: crate::navegacao::Navegacao::new(crate::navegacao::Espaco::da_chave(&ajustes.espaco)),
-            paleta_de: crate::espacos::neutra(&tema::cores(ajustes.tema)),
-            paleta_agora: crate::espacos::neutra(&tema::cores(ajustes.tema)),
             capas: crate::capas::Capas::iniciar(nucleo::caminhos::pasta_dados().ok().map(|d| d.join("capas"))),
             salvos_pendentes: std::collections::HashMap::new(),
             detalhe_lido: RefCell::new(None),
             avisou_do_match: false,
             avisou_que_toma_a_vez: false,
-            biblioteca_lida: RefCell::new(None),
+            biblioteca_lida: RefCell::default(),
+            busca_lida: RefCell::default(),
+            inicio_lido: RefCell::default(),
+            tocar_ao_chegar: None,
+            menu: None,
+            aba_do_painel: AbaDoPainel::default(),
+            rolagem_da_fila: gpui::UniformListScrollHandle::new(),
+            separadas: crate::juntar::Separadas::abrir(
+                nucleo::caminhos::pasta_dados().ok().map(|d| d.join("separadas.json")),
+            ),
+            recente_visto: None,
+            biblioteca_arrumada: RefCell::default(),
+            ordem_da_biblioteca: crate::paginas::Ordem::default(),
+            biblioteca_em_lista: false,
+            aba_lembrada: crate::navegacao::AbaDaBiblioteca::default(),
             cartoes_a_mostrar: crate::ui::CARTOES_POR_VEZ,
-            filtro_salvos: None,
-            filtro_busca: crate::paginas::FiltroDaBusca::Tudo,
+            aba_da_busca: crate::paginas::AbaDaBusca::default(),
+            comando_escolhido: 0,
+            busca_de_passagem: false,
             aba_da_faixa: crate::paginas::AbaDaFaixa::Letra,
+            aba_do_artista: Default::default(),
+            recente_completo: None,
             cartao_sob: None,
-            entrada_de: 1.0,
             ver_mais: false,
-            rolagens: std::cell::RefCell::default(),
+            rolagens: RefCell::default(),
+            abas_vistas: RefCell::default(),
+            rolagens_das_paginas: RefCell::default(),
+            rolagens_das_listas: RefCell::default(),
             secao_config: Default::default(),
             gaveta_aberta: false,
             arranjo: arranjo::calcular(
@@ -505,8 +550,9 @@ impl Player {
             ultimo_foi_local: false,
             origem_local: false,
             origem_local_fora: Arc::default(),
-            busca_musicas: String::new(),
-            buscando_musicas: false,
+            buscas: crate::navegacao::Buscas::default(),
+            campo: None,
+            campo_selecionado: false,
             marcado: None,
             janela_playlist: None,
             apagar_playlist: None,
@@ -524,6 +570,10 @@ impl Player {
             mini: false,
             expandido: false,
             expansao: 0.0,
+            descanso: crate::descanso::Descanso::new(agora),
+            arrastando_divisao: false,
+            recolhido: false,
+            foco_pelo_teclado: false,
             estado_em: agora,
             ilha: None,
             abrindo_ilha: false,
@@ -618,12 +668,12 @@ impl Player {
             }
             self.expandido = false;
             self.gaveta_aberta = false;
+            self.menu = None;
             self.paleta = None;
             // Janelas por cima e campos de texto não cabem na janela mini.
             self.janela_playlist = None;
             self.ficha = None;
-            self.buscando_musicas = false;
-            self.marcado = None;
+            self.largar_campo();
             self.apagar_playlist = None;
             self.sair_da_edicao();
         }
@@ -861,10 +911,19 @@ impl Player {
                 if self.mini {
                     self.alternar_mini(window);
                 }
-                // A Fila abre no espaço em que a pessoa está (num serviço, não vira a Biblioteca dele).
-                self.abrir_aba_da_biblioteca(AbaBiblioteca::Fila);
-                self.fechar_gaveta_fora_da_estante();
-                self.edicao = false;
+                // No painel, ao lado da página; sem lugar para ele, a página da Fila.
+                if !self.alternar_no_painel(AbaDoPainel::Fila) {
+                    self.abrir_rota(Rota::Fila);
+                    self.edicao = false;
+                }
+            }
+            Comando::AbrirLetra => {
+                if self.mini {
+                    self.alternar_mini(window);
+                }
+                if !self.alternar_no_painel(AbaDoPainel::Letra) {
+                    self.executar(Comando::LetraTelaCheia, window, cx);
+                }
             }
             Comando::AlternarDicas => {
                 self.ajustes.dicas = !self.ajustes.dicas;
@@ -875,9 +934,7 @@ impl Player {
                 });
                 self.salvar();
             }
-            Comando::AlternarPainel if self.estante() && self.arranjo.modo == Modo::Largo => {
-                self.avisar("Na Estante larga o trilho Tocando fica sempre à vista");
-            }
+            Comando::AlternarPainel if self.estante() => self.gaveta_aberta = !self.gaveta_aberta,
             Comando::AlternarPainel => match self.arranjo.modo {
                 Modo::Largo => {
                     self.ajustes.painel_aberto = !self.ajustes.painel_aberto;
@@ -887,31 +944,35 @@ impl Player {
                 Modo::Empilhado => {}
             },
             Comando::AbrirAjustes => {
-                self.buscando_musicas = false;
                 if self.pagina() == Pagina::Configuracoes {
                     self.fechar_folha();
                 } else {
                     self.abrir_rota(Rota::Configuracoes);
                 }
-                self.fechar_gaveta_fora_da_estante();
+                self.tirar_o_painel_da_frente();
                 self.edicao = false;
             }
             Comando::AbrirPagina(p) => {
-                if p == Pagina::Biblioteca {
-                    self.pedir_relatorio();
-                }
-                self.buscando_musicas = false;
                 match p {
-                    Pagina::Inicio => self.fechar_folha(),
-                    Pagina::Biblioteca => self.abrir_rota(Rota::Biblioteca),
+                    Pagina::Inicio => self.ir_ao_destino(Rota::Inicio),
+                    Pagina::Biblioteca => self.ir_ao_destino(Rota::Biblioteca(self.aba_lembrada)),
                     Pagina::Loja => self.abrir_rota(Rota::Loja),
                     Pagina::Configuracoes => self.abrir_rota(Rota::Configuracoes),
                 }
-                self.fechar_gaveta_fora_da_estante();
+                self.tirar_o_painel_da_frente();
                 self.edicao = false;
             }
             Comando::AbrirPaleta => {
-                self.paleta = if self.paleta.is_some() { None } else { Some(Paleta::default()) };
+                // Só o visual na tela (tela cheia, letra, mini): a barra de comandos por cima. Senão, o campo do topo.
+                if self.paleta.is_some() {
+                    self.paleta = None;
+                } else if self.arranjo.so_visual || self.letra_cheia {
+                    self.paleta = Some(Paleta::default());
+                } else if self.campo_no_teclado() == Some(crate::navegacao::Campo::Busca) {
+                    self.largar_campo();
+                } else {
+                    self.abrir_busca();
+                }
             }
             Comando::Fechar => {
                 if self.paleta.is_some() {
@@ -932,10 +993,7 @@ impl Player {
                     self.gaveta_aberta = false;
                 } else if self.estante() {
                     // Na Estante a página não fecha: o Esc volta uma página.
-                    if self.pode_navegar() && self.nav.voltar_sem_vazias() {
-                        self.depois_de_navegar();
-                        self.entrada_de = -1.0;
-                    }
+                    self.andar(true);
                 } else if self.pagina() != Pagina::Inicio {
                     self.nav.fechar();
                 }
@@ -952,12 +1010,27 @@ impl Player {
                     // O visual já está na janela inteira.
                 } else if self.estante() {
                     self.expandido = !self.expandido;
-                    if self.expandido && self.arranjo.modo == Modo::Gaveta {
-                        // Na gaveta, o visual cresce do Tocando: fechado, ele abre (e fica aberto ao encolher).
-                        self.gaveta_aberta = true;
-                    }
                 } else {
                     self.avisar("Expandir o visual vale no layout Estante (Ctrl L troca o layout)");
+                }
+            }
+            Comando::AumentarInterface | Comando::DiminuirInterface => {
+                let passo: isize = if comando == Comando::AumentarInterface { 1 } else { -1 };
+                let tamanhos = nucleo::ajustes::TAMANHOS;
+                let agora = tamanhos.iter().position(|t| *t == self.ajustes.tamanho).unwrap_or(1) as isize;
+                let novo = tamanhos[(agora + passo).clamp(0, tamanhos.len() as isize - 1) as usize];
+                self.mudar_tamanho(novo);
+            }
+            Comando::AlternarPaginaLarga => {
+                if self.estante() && self.arranjo.modo != Modo::Empilhado {
+                    self.ajustes.pagina_larga = !self.ajustes.pagina_larga;
+                    self.expandido = false;
+                    self.tirar_o_painel_da_frente();
+                    self.salvar();
+                } else if self.estante() {
+                    self.avisar("A página já está na largura da janela");
+                } else {
+                    self.avisar("A página larga vale no layout Estante (Ctrl L troca o layout)");
                 }
             }
             Comando::TrocarVisual(m) => self.trocar_visual(m),
@@ -988,6 +1061,7 @@ impl Player {
                     self.avisar("Saia da tela cheia para personalizar o layout");
                 } else {
                     self.edicao = true;
+                    self.aba_do_painel = AbaDoPainel::Agora;
                     if !self.estante() {
                         self.nav.fechar();
                     }
@@ -1000,19 +1074,10 @@ impl Player {
                 self.salvar();
             }
             Comando::Voltar => {
-                let voltou = self.pode_navegar()
-                    && if self.estante() { self.nav.voltar_sem_vazias() } else { self.nav.voltar() };
-                if voltou {
-                    self.depois_de_navegar();
-                    self.entrada_de = -1.0;
-                }
+                self.andar(true);
             }
             Comando::Avancar => {
-                let foi = self.pode_navegar()
-                    && if self.estante() { self.nav.avancar_sem_vazias() } else { self.nav.avancar() };
-                if foi {
-                    self.depois_de_navegar();
-                }
+                self.andar(false);
             }
             Comando::AbrirEspaco(n) => {
                 if let Some((e, _)) = self.espacos().get(usize::from(n)).cloned() {
@@ -1049,6 +1114,10 @@ impl Player {
     }
 
     fn mostrar_painel(&mut self) {
+        if self.estante() {
+            self.gaveta_aberta = true;
+            return;
+        }
         match self.arranjo.modo {
             Modo::Largo if !self.ajustes.painel_aberto => {
                 self.ajustes.painel_aberto = true;
@@ -1141,19 +1210,19 @@ impl Player {
 
     // ------------------------------------------------------------------ músicas locais
 
-    pub(crate) fn abrir_aba_da_biblioteca(&mut self, aba: AbaBiblioteca) {
-        self.buscando_musicas = false;
-        self.abrir_rota(match aba {
-            AbaBiblioteca::Musicas => Rota::Biblioteca,
-            AbaBiblioteca::Fila => Rota::Fila,
-            AbaBiblioteca::Historico => Rota::Historico,
-        });
-    }
-
     /// Toca a música `i` da lista da Biblioteca; as seguintes viram a fila.
     pub(crate) fn tocar_musica(&mut self, i: usize, caminho: &std::path::Path) {
-        self.buscando_musicas = false;
+        self.largar_campo();
         self.local.tocar(i, caminho);
+    }
+
+    /// Toca uma música achada pela busca do topo; as outras achadas viram a fila.
+    pub(crate) fn tocar_achada(&mut self, caminho: &std::path::Path) {
+        let achadas = self.local.lista.achadas.as_ref().clone();
+        // Pelo caminho: a lista pode ter mudado entre o desenho e o clique.
+        let Some(i) = achadas.iter().position(|m| m.caminho == caminho) else { return };
+        self.lembrar_a_busca();
+        self.local.tocar_lista(achadas, i);
     }
 
     /// Com a janela escondida (bandeja) ou minimizada, a interface não desenha, e o player local era atendido
@@ -1238,23 +1307,6 @@ impl Player {
         }
     }
 
-    /// Tecla com a busca de músicas ativa: digitar filtra a lista; Esc ou Enter devolvem os atalhos.
-    fn tecla_na_busca_de_musicas(&mut self, ev: &KeyDownEvent, cx: &mut Context<Self>) {
-        let k = &ev.keystroke;
-        let ctrl = k.modifiers.control || k.modifiers.platform;
-        // As letras chegam pelo caminho de texto do sistema (ver `ui::campo`); aqui só as teclas de controle.
-        match k.key.as_str() {
-            "escape" | "enter" => {
-                self.buscando_musicas = false;
-                self.marcado = None;
-            }
-            "backspace" => self.apagar_no_campo(ctrl),
-            "v" if ctrl => self.colar_no_campo(cx),
-            _ => {}
-        }
-        cx.notify();
-    }
-
     /// Clique no mapa do dock: vai para aquele ponto da música (só para a música local, que é a que o app toca).
     pub(crate) fn ir_no_mapa(&mut self, x: Pixels) {
         let Some(area) = self.areas.borrow().get("dock-mapa").copied() else { return };
@@ -1292,7 +1344,7 @@ impl Player {
             self.versao_diario = versao;
             self.relatorio = self.diario.relatorio();
         }
-        if self.pagina() == Pagina::Biblioteca {
+        if self.nav.aba() == crate::navegacao::AbaDaBiblioteca::Historico {
             self.t_relatorio += dt;
             if self.t_relatorio >= RENOVAR_RESUMO_S {
                 self.pedir_relatorio();
@@ -1318,6 +1370,9 @@ impl Player {
         self.local.quadro();
         self.conferir_espaco();
         self.conferir_salvos_pendentes();
+        self.conferir_tocar_ao_chegar();
+        self.lembrar_o_que_toca();
+        self.completar_o_recente();
         self.pedir_paginas_da_rota();
         if let Some(aviso) = self.local.aviso.take() {
             self.avisar(aviso);
@@ -1375,22 +1430,37 @@ impl Player {
         // Com "Efeitos de animação" desligado no Windows ou o modo seguro, nada desliza: vai direto ao fim.
         self.anim.quadro(dt, self.movimento_reduzido || self.ajustes.modo_seguro);
         self.atualizar_estado();
-        self.atualizar_paleta();
 
         let vp = window.viewport_size();
-        let (w, h) = (f32::from(vp.width), f32::from(vp.height));
+        let (real_w, real_h) = (f32::from(vp.width), f32::from(vp.height));
+        // O tamanho da interface: tudo é medido na janela dividida pela escala (e o `px` das telas multiplica de volta).
+        let escala = crate::ui::medidas::escala_que_cabe(self.ajustes.tamanho, real_w, real_h);
+        crate::ui::medidas::definir_escala(escala);
+        let (w, h) = (real_w / escala, real_h / escala);
         let tela_cheia = window.is_fullscreen();
-        // A Estante sempre mostra uma página; o visual do trilho cresce até a janela numa mola curta.
+        // A Estante sempre mostra uma página; o visual cresce até a janela numa curva curta.
         let estante = self.estante();
         if estante {
             self.nav.garantir_pagina();
         } else {
             self.expandido = false;
+            self.arrastando_divisao = false;
         }
-        let expansao = self.anim.seguir(("estante-expande", 0), f32::from(u8::from(self.expandido)), 0.32);
+        self.descansar(window, agora);
+        // Fora do modo do teclado, o foco é da raiz (um clique num elemento focável o leva para ele).
+        if !self.foco_pelo_teclado && !self.foco.is_focused(window) {
+            window.focus(&self.foco);
+        }
+        let so_visual = f32::from(u8::from(self.so_visual_na_estante()));
+        let expansao = self.anim.seguir(("estante-expande", 0), so_visual, 0.32);
         // No fim da expansão, o arranjo é o da tela cheia (o herói com o título grande).
-        let expandido_de_vez = estante && self.expandido && expansao >= 0.999;
+        let expandido_de_vez = so_visual > 0.0 && expansao >= 0.999;
         self.expansao = if estante { expansao } else { 0.0 };
+        // O painel no lugar da página precisa da largura dela: a página larga espera ele fechar.
+        let larga = self.ajustes.pagina_larga && !(self.gaveta_aberta && w < arranjo::PAINEL_AO_LADO);
+        let larga_em = self.anim.seguir(("estante-larga", 0), f32::from(u8::from(larga)), 0.32);
+        let alta = estante && self.nav.atual() == Some(&Rota::Inicio) && !self.recolher_o_visual();
+        let alta = self.anim.seguir(("estante-alta", 0), f32::from(u8::from(alta)), 0.24);
         self.arranjo = arranjo::calcular(
             w,
             h,
@@ -1405,18 +1475,117 @@ impl Player {
                 pagina_cheia: matches!(self.pagina(), Pagina::Biblioteca | Pagina::Loja),
                 estante,
                 expansao,
+                divisao: self.ajustes.divisao,
+                arrastando: self.arrastando_divisao,
+                larga,
+                larga_em,
+                alta,
             },
         );
-        if self.arranjo.modo != Modo::Gaveta {
+        if self.arranjo.modo != Modo::Gaveta && !estante {
             self.gaveta_aberta = false;
         }
         if self.arranjo.so_visual {
             self.sair_da_edicao();
         }
-        self.lembrar_tamanho(w, h, tela_cheia || self.mini || window.is_maximized());
+        self.lembrar_tamanho(real_w, real_h, tela_cheia || self.mini || window.is_maximized());
         self.contar_para_a_sessao(dt, window);
         self.desenhar_visual(window, dt);
         window.request_animation_frame();
+    }
+
+    /// Tab e Shift Tab andam pelos elementos da tela; com um deles focado, espaço e Enter são dele (o GPUI clica no soltar
+    /// da tecla) e `Esc` volta ao jeito de sempre. Devolve se a tecla foi tratada aqui.
+    fn tecla_de_foco(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let m = &ev.keystroke.modifiers;
+        let tecla = ev.keystroke.key.as_str();
+        let janela_por_cima = self.paleta.is_some() || self.janela_playlist.is_some() || self.ficha.is_some();
+        if tecla == "tab" && !m.control && !m.alt && !m.platform && !janela_por_cima {
+            self.largar_campo();
+            self.foco_pelo_teclado = true;
+            if m.shift {
+                window.focus_prev();
+            } else {
+                window.focus_next();
+            }
+            cx.notify();
+            return true;
+        }
+        if !self.foco_pelo_teclado || self.foco.is_focused(window) {
+            return false;
+        }
+        match tecla {
+            "space" | "enter" if !m.modified() => true,
+            "escape" => {
+                self.foco_pelo_teclado = false;
+                window.focus(&self.foco);
+                cx.notify();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Troca o tamanho da interface (gravado) e diz qual ficou.
+    pub(crate) fn mudar_tamanho(&mut self, tamanho: u16) {
+        if self.ajustes.tamanho != tamanho {
+            self.ajustes.tamanho = tamanho;
+            self.ajustes = self.ajustes.clone().validar();
+            self.salvar();
+        }
+        self.avisar(format!("Tamanho da interface: {}%", self.ajustes.tamanho));
+    }
+
+    /// Na Estante, só o visual na janela: a pessoa pediu, ou a página saiu da frente.
+    pub(crate) fn so_visual_na_estante(&self) -> bool {
+        self.estante() && (self.expandido || self.descanso.dormindo())
+    }
+
+    /// A página sai da frente do visual quando ninguém mexe (só com ele e ela à vista) e volta quando alguém mexe.
+    fn descansar(&mut self, window: &Window, agora: Instant) {
+        let a = &self.arranjo;
+        let a_vista = self.estante()
+            && !a.so_visual
+            && !self.expandido
+            && a.visual.w >= 2.0
+            && a.painel.is_none()
+            && !self.letra_cheia
+            && !window.is_fullscreen();
+        let ocupado = !self.estante()
+            || self.campo_no_teclado().is_some()
+            || self.menu.is_some()
+            || self.paleta.is_some()
+            || self.ficha.is_some()
+            || self.janela_playlist.is_some()
+            || self.edicao
+            || self.arrasto.is_some()
+            || self.arrastando_volume
+            || self.arrastando_divisao;
+        let entrada = crate::descanso::Entrada {
+            espera_s: self.ajustes.descanso_s,
+            tocando: self.midia.tocando,
+            na_frente: window.is_window_active(),
+            a_vista,
+            ocupado,
+        };
+        self.descanso.passo(&entrada, agora);
+        if self.descanso.dormindo() {
+            self.dica = None;
+        }
+    }
+
+    /// No empilhado da Estante, rolar o Início encolhe o visual até a tira; no alto da página ele volta.
+    fn recolher_o_visual(&mut self) -> bool {
+        if self.arranjo.modo != Modo::Empilhado {
+            self.recolhido = false;
+            return false;
+        }
+        let rolagem = self.rolagem_da_pagina();
+        let (rolado, sobra) =
+            (-crate::ui::medidas::logico(rolagem.offset().y), crate::ui::medidas::logico(rolagem.max_offset().height));
+        let ganho = arranjo::ganho_ao_recolher(&self.arranjo.miolo);
+        self.recolhido = arranjo::recolhe(self.recolhido, rolado, sobra, ganho);
+        self.recolhido
     }
 
     /// Abre ou fecha a janela da Ilha conforme o ajuste. Abrir e fechar janelas fica para depois do quadro.
@@ -1456,6 +1625,22 @@ impl Player {
     }
 
     fn ao_teclar(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // Com a página fora da frente, qualquer tecla a traz de volta; Esc e X (que fariam outra coisa) só isso.
+        if self.descanso.atividade(Instant::now()) {
+            cx.notify();
+            let m = &ev.keystroke.modifiers;
+            let comando = Comando::do_atalho(ev.keystroke.key.as_str(), m.control || m.platform);
+            if matches!(comando, Some(Comando::Fechar | Comando::ExpandirVisual)) {
+                return;
+            }
+        }
+        if self.menu.is_some() {
+            self.tecla_no_menu(ev, window, cx);
+            return;
+        }
+        if self.tecla_de_foco(ev, window, cx) {
+            return;
+        }
         if self.paleta.is_some() {
             self.tecla_na_paleta(ev, window, cx);
             return;
@@ -1472,8 +1657,8 @@ impl Player {
             }
             return;
         }
-        if self.campo_de_busca_ativo() {
-            self.tecla_na_busca_de_musicas(ev, cx);
+        if let Some(campo) = self.campo_no_teclado() {
+            self.tecla_no_campo(campo, ev, window, cx);
             return;
         }
         if m.alt || m.shift {
@@ -1486,6 +1671,10 @@ impl Player {
             return;
         }
         if let Some(comando) = Comando::do_atalho(ev.keystroke.key.as_str(), m.control || m.platform) {
+            if comando == Comando::AbrirPaleta {
+                // A tecla que abre o campo (a barra "/") não pode ser a primeira letra dele.
+                cx.stop_propagation();
+            }
             self.executar(comando, window, cx);
         }
     }
@@ -1522,7 +1711,11 @@ fn filtro_de(exe: &str) -> String {
 
 /// Converte a capa decodificada (BGRA) para a imagem que o GPUI desenha.
 fn imagem_da_capa(capa: &Capa) -> Option<Arc<RenderImage>> {
-    let buffer = image::RgbaImage::from_raw(capa.largura, capa.altura, capa.bgra.clone())?;
+    let mut buffer = image::RgbaImage::from_raw(capa.largura, capa.altura, capa.bgra.clone())?;
+    // A capa de um vídeo é larga: fica o quadrado do meio.
+    if let Some((x, y, lado)) = crate::capas::recorte_quadrado(capa.largura, capa.altura) {
+        buffer = image::imageops::crop_imm(&buffer, x, y, lado, lado).to_image();
+    }
     Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_elem(image::Frame::new(buffer), 1))))
 }
 
@@ -1544,7 +1737,7 @@ pub(crate) fn hwnd_da_janela(window: &Window) -> Option<isize> {
 }
 
 /// Hora local do sistema (horas, minutos).
-fn hora_local() -> (u8, u8) {
+pub(crate) fn hora_local() -> (u8, u8) {
     #[cfg(windows)]
     {
         // SAFETY: função do Windows sem parâmetros, que só devolve a hora atual.
@@ -1569,8 +1762,8 @@ impl Render for Player {
             .relative()
             .font_family(crate::ui::FONTE)
             .text_color(c.texto)
-            .text_size(px(14.0))
-            .line_height(px(20.0))
+            .text_size(crate::ui::medidas::px(14.0))
+            .line_height(crate::ui::medidas::px(20.0))
             .track_focus(&self.foco)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.ao_teclar(ev, window, cx)));
         // Sem a camada de baixo ninguém pinta o fundo: a interface pinta.
@@ -1584,6 +1777,10 @@ impl Render for Player {
             raiz = raiz.child(self.ver_estante(cx));
         } else {
             raiz = raiz.child(self.ver_heroi(cx));
+        }
+        if self.descanso.dormindo() {
+            // Por cima de tudo: o cursor some, e nada embaixo recebe o mouse.
+            raiz = raiz.child(div().absolute().size_full().occlude().cursor(gpui::CursorStyle::None));
         }
         if !a.so_visual && !estante {
             raiz = raiz.child(self.ver_topo(cx)).child(self.ver_dock(cx));
@@ -1608,6 +1805,7 @@ impl Render for Player {
             raiz = raiz.child(self.ver_ficha_do_modulo(m, cx));
         }
         raiz = raiz.children(self.ver_janela_playlist(cx));
+        raiz = raiz.children(self.ver_menu(cx));
         // Por último, por cima de tudo.
         raiz = raiz.children(self.ver_dica());
 
@@ -1626,6 +1824,29 @@ impl Render for Player {
                                     cx.notify();
                                 }
                             });
+                        }
+                    });
+                    // Com a página fora da frente, o clique e a rodinha só a trazem de volta.
+                    let ao_clicar = entidade.clone();
+                    window.on_mouse_event(move |_: &gpui::MouseDownEvent, fase, _, cx| {
+                        if fase != DispatchPhase::Capture {
+                            return;
+                        }
+                        // O mouse tira do modo do teclado (o foco volta à raiz no quadro seguinte).
+                        let acordou = ao_clicar.update(cx, |this, _| {
+                            this.foco_pelo_teclado = false;
+                            this.descanso.atividade(Instant::now())
+                        });
+                        if acordou.unwrap_or(false) {
+                            cx.stop_propagation();
+                        }
+                    });
+                    let ao_rolar = entidade.clone();
+                    window.on_mouse_event(move |_: &gpui::ScrollWheelEvent, fase, _, cx| {
+                        if fase == DispatchPhase::Capture
+                            && ao_rolar.update(cx, |this, _| this.descanso.atividade(Instant::now())).unwrap_or(false)
+                        {
+                            cx.stop_propagation();
                         }
                     });
                     // Os botões "voltar" e "avançar" do mouse navegam as páginas, como no navegador.

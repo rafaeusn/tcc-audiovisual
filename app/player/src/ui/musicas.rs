@@ -1,74 +1,68 @@
-//! A aba Músicas da Biblioteca: as músicas das pastas escolhidas, com busca.
+//! A aba Pastas da Biblioteca: as músicas das pastas escolhidas, com filtro de texto.
 //!
 //! - Categorias: "Todas" (cada música uma vez), uma por pasta e uma por playlist.
 //! - Visões: as músicas, os álbuns ou os artistas da categoria. Escolher um álbum ou artista filtra a lista.
 //! - Clicar numa música toca, e a lista inteira vira a fila. Passando o mouse aparecem: tocar a seguir, pôr no
 //!   fim da fila, pôr numa playlist (e, dentro de uma playlist, tirar dela).
 //!
-//! - Com provedores instalados, a busca também vai a eles: o bloco "Nos serviços" mostra as faixas que chegam,
-//!   acima das músicas do computador. Clicar toca, e os resultados viram a fila.
+//! - Com provedores abertos, o texto do filtro também pode ir para a busca nos serviços.
 //!
 //! A lista pode ter milhares de linhas e a interface é redesenhada a cada quadro, então só as linhas visíveis
 //! são montadas (`uniform_list`).
 
-use super::{RAIO_CONTROLE, com_alfa, icone, mono, tempo, texto, titulo};
-use crate::app::{AbaBiblioteca, JanelaPlaylist, Player};
+use super::{RAIO_CONTROLE, com_alfa, icone, medidas, mono, tecla, tempo};
+use crate::app::{JanelaPlaylist, Player};
 use crate::local::Visao;
+use crate::navegacao::{Campo, Rota};
+use crate::ui::medidas::px;
 use biblioteca::Origem;
-use gpui::{
-    AnyElement, ClickEvent, Context, Div, FontWeight, SharedString, Stateful, div, prelude::*, px, uniform_list,
-};
-use nucleo::{Comando, Pagina};
+use gpui::{AnyElement, ClickEvent, Context, Div, FontWeight, SharedString, Stateful, div, prelude::*, uniform_list};
 use std::ops::Range;
 
+/// De onde é uma linha de música do computador.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ListaDeMusicas {
+    Biblioteca,
+    /// O que a busca do topo achou.
+    Busca,
+}
+
+/// Uma janela mais baixa que isto tem títulos de página menores.
+const JANELA_BAIXA: f32 = 640.0;
+
 /// Altura de cada música (ou álbum, ou artista) na lista.
-const LINHA: f32 = 52.0;
+const LINHA: f32 = medidas::LINHA;
 
 impl Player {
-    /// O seletor Músicas | Fila | Histórico, no alto da Biblioteca.
-    pub(crate) fn abas_da_biblioteca(&self, largura: f32, cx: &mut Context<Self>) -> Div {
-        const TODAS: [(AbaBiblioteca, &str); 3] = [
-            (AbaBiblioteca::Musicas, "Músicas"),
-            (AbaBiblioteca::Fila, "Fila"),
-            (AbaBiblioteca::Historico, "Histórico"),
-        ];
-        // Num espaço de serviço, "Músicas" seria a Biblioteca dele: ficam só a Fila e o Histórico.
-        let servico = matches!(self.nav.espaco(), crate::navegacao::Espaco::Servico(_));
-        let abas_: &[(AbaBiblioteca, &str)] = if servico { &TODAS[1..] } else { &TODAS };
-        let agora = self.aba_biblioteca();
-        let escolhida = abas_.iter().position(|(a, _)| *a == agora).unwrap_or(0);
-        let mut abas = self.seletor("seletor-biblioteca", largura.min(360.0), abas_.len(), escolhida);
-        for (i, &(aba, rotulo)) in abas_.iter().enumerate() {
-            abas = abas.child(self.opcao(("biblioteca-aba", i), rotulo, aba == agora).on_click(cx.listener(
+    /// O título da página: grande, ou do tamanho de uma seção em folha estreita ou janela baixa.
+    pub(super) fn titulo_da_pagina(&self, nome: &'static str) -> Div {
+        let a = &self.arranjo;
+        medidas::pagina(a.heroi.w >= 640.0 && a.janela.h >= JANELA_BAIXA).child(nome)
+    }
+
+    /// O alto da Biblioteca, igual em todas as abas: o título e as abas do filtro.
+    pub(crate) fn cabeca_da_biblioteca(&self, cx: &mut Context<Self>) -> Div {
+        let agora = self.nav.aba();
+        let todas = crate::navegacao::abas_da_biblioteca(self.nav.espaco());
+        let escolhida = todas.iter().position(|a| *a == agora).unwrap_or(0);
+        let mut abas = Vec::new();
+        for (i, &aba) in todas.iter().enumerate() {
+            let botao = self.aba_sublinhada(("biblioteca-aba", i), aba.nome(), aba == agora).on_click(cx.listener(
                 move |this, _: &ClickEvent, _, cx| {
                     this.abrir_aba_da_biblioteca(aba);
                     cx.notify();
                 },
-            )));
+            ));
+            abas.push(botao.into_any_element());
         }
-        abas
-    }
-
-    /// Título "Biblioteca", a frase e o botão de fechar: o mesmo em todas as abas.
-    pub(crate) fn cabeca_da_biblioteca(&self, largo: bool, frase: &'static str, cx: &mut Context<Self>) -> Div {
-        let c = self.cores();
         div()
             .flex()
-            .items_start()
-            .justify_between()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(titulo(if largo { 40.0 } else { 28.0 }).child("Biblioteca"))
-                    // Em janela estreita a descrição sai: a altura fica para a lista.
-                    .when(largo, |d| d.child(texto(14.0).text_color(c.texto_2).child(frase))),
-            )
-            .child(self.botao_icone("musicas-fechar", "icones/x.svg", false, Comando::AbrirPagina(Pagina::Inicio), cx))
+            .flex_none()
+            .flex_col()
+            .gap(px(8.0))
+            // Janela baixa: as abas bastam para dizer onde se está.
+            .when(self.arranjo.janela.h >= JANELA_BAIXA, |d| d.child(self.titulo_da_pagina("Biblioteca")))
+            .child(self.abas_sublinhadas("biblioteca-abas", 2_000_001, escolhida, abas))
     }
 
     /// Botão pequeno de ícone numa linha da lista (só aparece com o mouse na linha, ou sempre com `sempre`).
@@ -82,45 +76,50 @@ impl Player {
         let c = self.cores();
         div()
             .id(id)
-            .size(px(32.0))
+            .size(px(36.0))
             .flex_none()
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .cursor_pointer()
             .hover(|s| s.bg(c.sel))
             .when(!sempre, |d| d.invisible().group_hover(grupo, |s| s.visible()))
-            .child(icone(caminho, 18.0, c.texto_2))
+            .child(icone(caminho, medidas::ICONE_LINHA, c.texto_2))
     }
 
-    fn linha_de_musica(&self, i: usize, cx: &mut Context<Self>) -> AnyElement {
+    /// Uma música do computador: a posição `i` da lista da Biblioteca ou do que a busca do topo achou.
+    pub(super) fn linha_de_musica(&self, de: ListaDeMusicas, i: usize, cx: &mut Context<Self>) -> AnyElement {
         let c = self.cores();
-        let Some(m) = self.local.lista.musicas.get(i) else { return div().h(px(LINHA)).into_any_element() };
+        let lista = match de {
+            ListaDeMusicas::Biblioteca => &self.local.lista.musicas,
+            ListaDeMusicas::Busca => &self.local.lista.achadas,
+        };
+        let Some(m) = lista.get(i) else { return div().h(px(LINHA)).into_any_element() };
         let esta = self.local.atual().is_some_and(|a| a.caminho == m.caminho);
         let de_quem = match (m.artista.is_empty(), m.album.is_empty()) {
-            (false, false) => format!("{} · {}", m.artista, m.album),
+            (false, false) => format!("{}, {}", m.artista, m.album),
             (false, true) => m.artista.clone(),
             (true, false) => m.album.clone(),
             (true, true) => "Artista desconhecido".to_string(),
         };
+        let na_busca = de == ListaDeMusicas::Busca;
         let marca: AnyElement = if esta {
             let caminho = if self.local.situacao.tocando { "icones/wave.svg" } else { "icones/pause.svg" };
-            icone(caminho, 16.0, c.texto).into_any_element()
+            icone(caminho, medidas::ICONE_LINHA, c.texto).into_any_element()
         } else {
             mono().text_color(c.texto_3).child((i + 1).to_string()).into_any_element()
         };
         let playlist = match self.local.lista.filtro.origem {
-            Origem::Playlist(id) => Some(id),
+            Origem::Playlist(id) if de == ListaDeMusicas::Biblioteca => Some(id),
             _ => None,
         };
         let (a_seguir, no_fim, numa_lista, tirar) = (m.clone(), m.clone(), m.clone(), m.caminho.clone());
         let esta_linha = m.caminho.clone();
-        let acoes = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(2.0))
+        let da_linha = m.clone();
+        let do_menu = move || Player::alvo_da_musica(&da_linha, None);
+        let fundo = if esta { c.sel } else { c.hover };
+        let acoes = super::acoes_por_cima("musica-linha", fundo, if m.duracao_s > 0.0 { 110.0 } else { 54.0 })
             .child(self.acao_da_linha(("musica-a-seguir", i), "icones/play-next.svg", "musica-linha", false).on_click(
                 cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
@@ -158,48 +157,61 @@ impl Player {
                 ))
             });
         div()
-            .id(("musica", i))
+            .id((if de == ListaDeMusicas::Busca { "achada" } else { "musica" }, i))
             .group("musica-linha")
+            .relative()
             .w_full()
             .h(px(LINHA))
-            .px(px(10.0))
+            .px(px(if na_busca { 12.0 } else { 10.0 }))
             .flex()
             .items_center()
             .gap(px(12.0))
-            .rounded(px(RAIO_CONTROLE))
+            .rounded(px(medidas::RAIO_CARTAO))
             .cursor_pointer()
             .when(esta, |d| d.bg(c.sel))
             .when(!esta, |d| d.hover(|s| s.bg(c.hover)))
-            .child(div().w(px(36.0)).flex_none().flex().justify_center().child(marca))
+            // Na busca, ela fica ao lado das dos serviços: com a capa e o selo do computador, sem o número.
+            .when(na_busca, |d| {
+                let servicos: &[&str] = if self.mistura_servicos() { &[super::selo::COMPUTADOR] } else { &[] };
+                let capa = self.capa(None, biblioteca::TipoSalvo::Faixa, medidas::CAPA_DA_LINHA, false);
+                d.child(self.com_selo(capa, servicos, medidas::MARCA_DA_LINHA))
+            })
+            .when(!na_busca, |d| d.child(div().w(px(36.0)).flex_none().flex().justify_center().child(marca)))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.0))
                     .flex()
                     .flex_col()
-                    .child(
-                        texto(14.0)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .truncate()
-                            .child(SharedString::from(m.titulo.clone())),
-                    )
-                    .child(texto(12.0).text_color(c.texto_2).truncate().child(de_quem)),
+                    .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(super::linha(m.titulo.clone())))
+                    .child(medidas::apoio().text_color(c.texto_2).child(super::linha(de_quem))),
             )
-            .child(acoes)
+            // Uma faixa de serviço numa playlist do Player diz de onde é.
+            .children(
+                m.remota
+                    .as_ref()
+                    .map(|r| super::selo::disco(&self.marca_do_servico(&r.servico), medidas::MARCA_DA_LINHA)),
+            )
             .when(m.duracao_s > 0.0, |d| {
                 d.child(mono().w(px(44.0)).flex_none().text_right().text_color(c.texto_2).child(tempo(m.duracao_s)))
             })
+            .child(acoes)
+            .child(self.botao_mais(("musica-mais", i), 36.0, do_menu.clone(), cx).mr(px(-6.0)))
+            .on_mouse_down(gpui::MouseButton::Right, self.ao_menu(do_menu, cx))
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.tocar_musica(i, &esta_linha);
+                match de {
+                    ListaDeMusicas::Biblioteca => this.tocar_musica(i, &esta_linha),
+                    ListaDeMusicas::Busca => this.tocar_achada(&esta_linha),
+                }
                 cx.notify();
             }))
             .into_any_element()
     }
 
-    /// Com texto na busca e provedores abertos, o atalho para buscar nos serviços (a página Busca, com o mesmo
+    /// Com texto no filtro e provedores abertos, o atalho para buscar nos serviços (a página Buscar, com o mesmo
     /// texto).
     fn nos_servicos(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        let texto_ = self.busca_musicas.trim();
+        let texto_ = self.buscas.biblioteca.trim();
         if !self.local.remoto.tem_provedores() || texto_.is_empty() {
             return None;
         }
@@ -207,7 +219,7 @@ impl Player {
         Some(
             div()
                 .id("buscar-nos-servicos")
-                .h(px(40.0))
+                .h(px(medidas::BOTAO))
                 .px(px(10.0))
                 .mb(px(8.0))
                 .flex()
@@ -216,18 +228,18 @@ impl Player {
                 .rounded(px(RAIO_CONTROLE))
                 .cursor_pointer()
                 .hover(|s| s.bg(c.hover))
-                .child(icone("icones/globe.svg", 16.0, c.texto_2))
+                .child(icone("icones/globe.svg", medidas::ICONE_LINHA, c.texto_2))
                 .child(
-                    texto(13.0)
+                    medidas::apoio()
                         .flex_1()
                         .min_w(px(0.0))
-                        .truncate()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(SharedString::from(format!("Buscar \"{texto_}\" nos serviços"))),
+                        .child(super::linha(format!("Buscar \"{texto_}\" nos serviços"))),
                 )
-                .child(icone("icones/chev-r.svg", 16.0, c.texto_2))
+                .child(icone("icones/chev-r.svg", medidas::ICONE_LINHA, c.texto_2))
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.buscar_nos_servicos();
+                    let texto = this.buscas.biblioteca.clone();
+                    this.buscar_por(&texto);
                     cx.notify();
                 })),
         )
@@ -242,7 +254,7 @@ impl Player {
             1 => "1 música".to_string(),
             n => format!("{n} músicas"),
         };
-        let detalhe = if g.detalhe.is_empty() { quantas } else { format!("{} · {quantas}", g.detalhe) };
+        let detalhe = if g.detalhe.is_empty() { quantas } else { format!("{}, {quantas}", g.detalhe) };
         let nome = g.nome.clone();
         div()
             .id(("grupo", i))
@@ -252,19 +264,23 @@ impl Player {
             .flex()
             .items_center()
             .gap(px(12.0))
-            .rounded(px(RAIO_CONTROLE))
+            .rounded(px(medidas::RAIO_CARTAO))
             .cursor_pointer()
             .hover(|s| s.bg(c.hover))
             .child(
                 div()
-                    .size(px(36.0))
+                    .size(px(medidas::CAPA_DA_LINHA))
                     .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(if album { 6.0 } else { 999.0 }))
+                    .rounded(px(if album { medidas::RAIO_CONTROLE } else { medidas::PILULA }))
                     .bg(c.sel)
-                    .child(icone(if album { "icones/album.svg" } else { "icones/person.svg" }, 18.0, c.texto_2)),
+                    .child(icone(
+                        if album { "icones/album.svg" } else { "icones/person.svg" },
+                        medidas::ICONE_LINHA,
+                        c.texto_2,
+                    )),
             )
             .child(
                 div()
@@ -272,13 +288,8 @@ impl Player {
                     .min_w(px(0.0))
                     .flex()
                     .flex_col()
-                    .child(
-                        texto(14.0)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .truncate()
-                            .child(SharedString::from(g.nome.clone())),
-                    )
-                    .child(texto(12.0).text_color(c.texto_2).truncate().child(detalhe)),
+                    .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(super::linha(g.nome.clone())))
+                    .child(medidas::apoio().text_color(c.texto_2).child(super::linha(detalhe))),
             )
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if album {
@@ -293,58 +304,76 @@ impl Player {
 
     /// Abre a janela de playlist: pôr `musicas` numa playlist, ou só criar uma (`so_criar`).
     pub(crate) fn abrir_janela_playlist(&mut self, musicas: Vec<biblioteca::Musica>, so_criar: bool) {
-        self.buscando_musicas = false;
-        self.marcado = None;
+        self.largar_campo();
         self.janela_playlist = Some(JanelaPlaylist { musicas, nome: String::new(), so_criar });
     }
 
-    /// O campo de busca (o mesmo texto na Biblioteca e na página Busca): clicar põe o teclado nele; Esc ou Enter
-    /// devolvem os atalhos.
-    pub(crate) fn campo_de_busca(&self, exemplo: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// Um campo de texto da página: o da busca (no topo) ou o filtro da Biblioteca. Clicar põe o teclado nele; Esc ou
+    /// Enter devolvem os atalhos.
+    pub(crate) fn campo_de_texto(&self, campo: Campo, exemplo: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
         let c = self.cores();
-        let ativa = self.buscando_musicas;
+        let ativo = self.campo_no_teclado() == Some(campo);
+        // Fora da busca, o campo do topo só mantém o texto na página que saiu dela.
+        let mostra =
+            campo == Campo::Biblioteca || self.nav.atual().is_some_and(|r| r == &Rota::Busca || r.item().is_some());
+        let valor = if mostra { self.buscas.do_campo(campo).to_string() } else { String::new() };
+        let (id, id_limpar) = match campo {
+            Campo::Busca => ("campo-busca", "campo-busca-limpar"),
+            Campo::Biblioteca => ("campo-biblioteca", "campo-biblioteca-limpar"),
+        };
+        let cor = if ativo { c.texto } else { c.texto_2 };
         div()
-            .id("musicas-busca")
+            .id(id)
             .flex_1()
-            .min_w(px(160.0))
-            .h(px(40.0))
+            .min_w(px(96.0))
+            .h(px(48.0))
             .relative()
             .flex()
             .items_center()
             .gap(px(10.0))
             .px(px(14.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .border_1()
-            .border_color(if ativa { c.texto } else { c.linha_2 })
+            .border_color(if ativo { c.texto } else { c.linha_2 })
+            .when(campo == Campo::Busca && self.imersivo(), |d| d.bg(c.painel))
+            .when(!ativo, |d| d.hover(|s| s.bg(c.hover)))
             .cursor_text()
-            .child(icone("icones/search.svg", 18.0, if ativa { c.texto } else { c.texto_2 }))
-            .when(ativa, |d| d.child(self.receber_texto(cx)))
-            .child(Self::conteudo_do_campo(&c, &self.busca_musicas, exemplo, 14.0, ativa))
-            .when(!self.busca_musicas.is_empty(), |d| {
+            .child(icone("icones/search.svg", medidas::ICONE, cor))
+            .when(ativo, |d| d.child(self.receber_texto(cx)))
+            .child(Self::conteudo_do_campo(&c, &valor, exemplo, medidas::CORPO, ativo, ativo && self.campo_selecionado))
+            .when(valor.is_empty() && !ativo && campo == Campo::Busca && self.arranjo.topo.w >= 760.0, |d| {
+                d.child(div().flex().flex_none().gap(px(4.0)).child(tecla(&c, "Ctrl")).child(tecla(&c, "K")))
+            })
+            .when(!valor.is_empty(), |d| {
                 d.child(
                     div()
-                        .id("musicas-limpar")
-                        .size(px(24.0))
+                        .id(id_limpar)
+                        .size(px(28.0))
                         .flex_none()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .cursor_pointer()
-                        .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/x.svg", 14.0, c.texto_2))
-                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.busca_musicas.clear();
-                            this.marcado = None;
-                            this.local.buscar("");
-                            this.local.remoto.buscar("");
+                        .hover(|s| s.bg(c.sel))
+                        .child(icone("icones/x.svg", medidas::ICONE_MIUDO, c.texto_2))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            if campo == Campo::Busca {
+                                this.abrir_busca();
+                            }
+                            this.focar(campo);
+                            this.apagar_no_campo(true);
                             cx.stop_propagation();
                             cx.notify();
                         })),
                 )
             })
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.buscando_musicas = true;
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                if campo == Campo::Busca && this.nav.atual() != Some(&Rota::Busca) {
+                    this.abrir_busca();
+                } else {
+                    this.focar(campo);
+                }
                 cx.notify();
             }))
     }
@@ -352,29 +381,39 @@ impl Player {
     pub(crate) fn ver_musicas(&self, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
         let a = &self.arranjo;
-        let largo = a.heroi.w >= 640.0;
-        let lado = if largo { 32.0 } else { 16.0 };
-        let largura = a.heroi.w - 2.0 * lado;
+        // Janela baixa e larga: os controles cabem em duas linhas, e sobra altura para a lista.
+        let compacta = a.heroi.w >= 640.0 && a.janela.h < JANELA_BAIXA;
+        let largo = a.heroi.w >= 640.0 && !compacta;
+        let lado = self.lado_da_pagina();
+        let largura = a.heroi.w - 2.0 - 2.0 * lado;
         let lista = &self.local.lista;
         let filtro = &lista.filtro;
 
         // Em janela estreita, os botões de texto viram só o ícone (com a dica): sobra altura para a lista.
         let pilula = |id: &'static str, caminho: &'static str, rotulo: &'static str, cheia: bool| {
-            let b = texto(14.0)
+            let b = medidas::corpo()
                 .id(id)
-                .h(px(40.0))
-                .map(|d| if largo { d.px(px(16.0)) } else { d.w(px(40.0)).justify_center() })
+                .h(px(medidas::BOTAO))
+                .map(|d| if largo { d.px(px(16.0)) } else { d.w(px(medidas::BOTAO)).justify_center() })
                 .flex()
                 .flex_none()
                 .items_center()
                 .gap(px(8.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer();
             if cheia {
-                b.bg(c.inv).text_color(c.inv_texto).hover(|s| s.opacity(0.9)).child(icone(caminho, 18.0, c.inv_texto))
+                b.bg(c.inv).text_color(c.inv_texto).hover(|s| s.opacity(0.9)).child(icone(
+                    caminho,
+                    medidas::ICONE_LINHA,
+                    c.inv_texto,
+                ))
             } else {
-                b.border_1().border_color(c.linha_2).hover(|s| s.bg(c.hover)).child(icone(caminho, 18.0, c.texto))
+                b.border_1().border_color(c.linha_2).hover(|s| s.bg(c.hover)).child(icone(
+                    caminho,
+                    medidas::ICONE_LINHA,
+                    c.texto,
+                ))
             }
             .when(largo, |d| d.child(rotulo))
         };
@@ -382,7 +421,7 @@ impl Player {
             b.when(!largo, |d| d.child(self.marca(id)).on_hover(self.ao_pairar(id, None, rotulo, cx)))
         };
 
-        let busca = self.campo_de_busca("Buscar música, artista ou álbum", cx);
+        let busca = self.campo_de_texto(Campo::Biblioteca, "Filtrar as músicas", cx);
 
         // As categorias: "Todas", uma por pasta e uma por playlist.
         let categoria = |id: (&'static str, usize),
@@ -391,24 +430,24 @@ impl Player {
                          quantas: u32,
                          escolhida: bool| {
             let cor = if escolhida { c.inv_texto } else { c.texto_2 };
-            texto(13.0)
+            medidas::apoio()
                 .id(id)
-                .h(px(32.0))
+                .h(px(medidas::FICHA))
                 .px(px(12.0))
                 .flex()
                 .flex_none()
                 .items_center()
                 .gap(px(6.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .when(escolhida, |d| d.bg(c.inv).text_color(c.inv_texto))
                 .when(!escolhida, |d| d.bg(c.bloco).text_color(c.texto_2).hover(|s| s.bg(c.hover)))
-                .when_some(simbolo, |d, s| d.child(icone(s, 14.0, cor)))
+                .when_some(simbolo, |d, s| d.child(icone(s, medidas::ICONE_MIUDO, cor)))
                 .child(nome)
                 .child(
                     mono()
-                        .text_size(px(12.0))
+                        .text_size(px(medidas::MICRO))
                         .text_color(if escolhida { c.inv_texto } else { c.texto_3 })
                         .child(quantas.to_string()),
                 )
@@ -421,10 +460,10 @@ impl Player {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .cursor_pointer()
                 .hover(|s| s.bg(com_alfa(c.inv_texto, 0.15)))
-                .child(icone("icones/x.svg", 12.0, c.inv_texto))
+                .child(icone("icones/x.svg", medidas::ICONE_MIUDO, c.inv_texto))
         };
         let mut categorias = div().flex().flex_wrap().items_center().gap(px(8.0)).child(
             categoria(("categoria", 0), None, "Todas".into(), lista.total, filtro.origem == Origem::Todas).on_click(
@@ -441,12 +480,14 @@ impl Player {
                 .map_or_else(|| pasta.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
             let escolhida = filtro.origem == Origem::Pasta(pasta.clone());
             let (alvo, sai) = (pasta.clone(), pasta.clone());
-            let mut chip = categoria(("categoria-pasta", i), Some("icones/lib.svg"), nome.into(), *quantas, escolhida)
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.apagar_playlist = None;
-                    this.local.mostrar(Origem::Pasta(alvo.clone()));
-                    cx.notify();
-                }));
+            let mut chip =
+                categoria(("categoria-pasta", i), Some("icones/pasta.svg"), nome.into(), *quantas, escolhida).on_click(
+                    cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.apagar_playlist = None;
+                        this.local.mostrar(Origem::Pasta(alvo.clone()));
+                        cx.notify();
+                    }),
+                );
             // Só a categoria escolhida mostra o botão de tirar: menos chance de tirar a errada sem querer.
             if escolhida {
                 chip = chip.pr(px(4.0)).child(tirar(("pasta-tirar", i)).on_click(cx.listener(
@@ -481,13 +522,13 @@ impl Player {
             if escolhida {
                 chip = if self.apagar_playlist == Some(id) {
                     chip.pr(px(4.0)).child(
-                        texto(12.0)
+                        medidas::apoio()
                             .id(("playlist-apagar-sim", i))
-                            .h(px(24.0))
+                            .h(px(medidas::SELO))
                             .px(px(8.0))
                             .flex()
                             .items_center()
-                            .rounded(px(999.0))
+                            .rounded(px(medidas::PILULA))
                             .bg(c.alerta)
                             .text_color(c.inv_texto)
                             .cursor_pointer()
@@ -516,22 +557,22 @@ impl Player {
             categorias = categorias.child(chip);
         }
         categorias = categorias.child(
-            texto(13.0)
+            medidas::apoio()
                 .id("playlist-nova")
-                .h(px(32.0))
+                .h(px(medidas::FICHA))
                 .px(px(12.0))
                 .flex()
                 .flex_none()
                 .items_center()
                 .gap(px(6.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .border_1()
                 .border_color(c.linha_2)
                 .text_color(c.texto_2)
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|s| s.bg(c.hover))
-                .child(icone("icones/plus.svg", 14.0, c.texto_2))
+                .child(icone("icones/plus.svg", medidas::ICONE_MIUDO, c.texto_2))
                 .child("Playlist")
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.abrir_janela_playlist(Vec::new(), true);
@@ -553,22 +594,22 @@ impl Player {
             )));
         }
         let filtro_ativo = |id: &'static str, simbolo: &'static str, nome: String| {
-            texto(13.0)
+            medidas::apoio()
                 .id(id)
-                .h(px(32.0))
+                .h(px(medidas::FICHA))
                 .pl(px(10.0))
                 .pr(px(4.0))
                 .flex()
                 .flex_none()
                 .items_center()
                 .gap(px(6.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .bg(c.sel)
                 .font_weight(FontWeight::SEMIBOLD)
                 .max_w(px(260.0))
                 .cursor_pointer()
-                .child(icone(simbolo, 14.0, c.texto))
-                .child(div().min_w(px(0.0)).truncate().child(nome))
+                .child(icone(simbolo, medidas::ICONE_MIUDO, c.texto))
+                .child(div().min_w(px(0.0)).child(super::linha(nome)))
                 .child(
                     div()
                         .size(px(24.0))
@@ -576,19 +617,22 @@ impl Player {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/x.svg", 12.0, c.texto_2)),
+                        .child(icone("icones/x.svg", medidas::ICONE_MIUDO, c.texto_2)),
                 )
         };
         let quantas = lista.musicas.len();
         let fila_toda = lista.musicas.as_ref().clone();
+        let tem_algo = !lista.pastas.is_empty() || !lista.playlists.is_empty();
+        let (visoes_em_cima, visoes_embaixo) =
+            if compacta && tem_algo { (Some(visoes), None) } else { (None, Some(visoes)) };
         let barra = div()
             .flex()
             .flex_wrap()
             .items_center()
             .gap(px(8.0))
-            .child(visoes)
+            .children(visoes_embaixo)
             .when_some(filtro.artista.clone(), |d, nome| {
                 d.child(filtro_ativo("filtro-artista", "icones/person.svg", nome).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
@@ -605,7 +649,7 @@ impl Player {
                     },
                 )))
             })
-            .child(div().flex_1())
+            .when(!compacta, |d| d.child(div().flex_1()))
             .when(lista.visao == Visao::Musicas && quantas > 0, |d| {
                 d.child(
                     dica(
@@ -615,7 +659,7 @@ impl Player {
                         cx,
                     )
                     .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.buscando_musicas = false;
+                        this.largar_campo();
                         this.local.tocar_lista(fila_toda.clone(), 0);
                         cx.notify();
                     })),
@@ -631,16 +675,13 @@ impl Player {
             }),
         };
 
-        let tem_algo = !lista.pastas.is_empty() || !lista.playlists.is_empty();
         let cabeca = div()
             .flex()
             .flex_none()
             .flex_col()
-            .gap(px(14.0))
+            .gap(px(if compacta { 8.0 } else { 14.0 }))
             .px(px(lado))
-            .pt(px(lado.min(24.0)))
-            .child(self.cabeca_da_biblioteca(largo, "As músicas das suas pastas. Os arquivos ficam onde estão.", cx))
-            .child(self.abas_da_biblioteca(largura, cx))
+            .child(self.cabeca_da_biblioteca(cx))
             .child(
                 div()
                     .flex()
@@ -648,6 +689,7 @@ impl Player {
                     .items_center()
                     .gap(px(8.0))
                     .child(busca)
+                    .children(visoes_em_cima)
                     .when(!lista.pastas.is_empty(), |d| {
                         d.child(
                             dica(
@@ -674,8 +716,15 @@ impl Player {
                         })),
                     ),
             )
-            .when(tem_algo, |d| d.child(categorias).child(barra))
-            .children(situacao.map(|frase| texto(12.0).text_color(c.texto_3).child(frase)));
+            .when(tem_algo, |d| {
+                if compacta {
+                    let linha = div().flex().items_center().gap(px(8.0));
+                    d.child(linha.child(categorias.flex_1().min_w(px(0.0))).child(barra.flex_none()))
+                } else {
+                    d.child(categorias).child(barra)
+                }
+            })
+            .children(situacao.map(|frase| medidas::apoio().text_color(c.texto_3).child(frase)));
 
         let aviso = |caminho: &'static str, frase: &'static str| {
             div()
@@ -685,8 +734,8 @@ impl Player {
                 .flex_col()
                 .items_center()
                 .gap(px(12.0))
-                .child(icone(caminho, 28.0, c.texto_3))
-                .child(texto(14.0).max_w(px(420.0)).text_center().text_color(c.texto_2).child(frase))
+                .child(icone(caminho, medidas::ICONE_GRANDE, c.texto_3))
+                .child(medidas::apoio().max_w(px(420.0)).text_center().text_color(c.texto_2).child(frase))
         };
         let grupos = lista.grupos.len();
         let corpo: AnyElement = if !lista.disponivel {
@@ -698,7 +747,7 @@ impl Player {
         } else if !tem_algo {
             aviso(
                 "icones/lib.svg",
-                "Escolha uma pasta com as suas músicas (MP3, FLAC, WAV, OGG, M4A). O Player lê o que há nela e nas pastas de dentro.",
+                "Escolha uma pasta com as suas músicas (MP3, FLAC, WAV, OGG, M4A). O Player lê o que há nela e nas pastas de dentro; os arquivos ficam onde estão.",
             )
             .into_any_element()
         } else if lista.visao != Visao::Musicas {
@@ -738,9 +787,10 @@ impl Player {
                 "musicas-lista",
                 quantas,
                 cx.processor(|this, faixa: Range<usize>, _, cx| {
-                    faixa.map(|i| this.linha_de_musica(i, cx)).collect::<Vec<_>>()
+                    faixa.map(|i| this.linha_de_musica(ListaDeMusicas::Biblioteca, i, cx)).collect::<Vec<_>>()
                 }),
             )
+            .track_scroll(self.rolagem_da_lista())
             .flex_1()
             .min_h(px(0.0))
             .into_any_element()

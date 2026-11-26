@@ -3,9 +3,10 @@
 //! O nome usa o mesmo campo de texto do resto do app (`ui::campo`), então acentos e colar funcionam. Enter cria,
 //! Esc fecha, clicar fora fecha.
 
-use super::{RAIO_CONTROLE, RAIO_MODULO, icone, mono, texto, titulo};
+use super::{RAIO_CONTROLE, RAIO_MODULO, icone, medidas, mono};
 use crate::app::Player;
-use gpui::{AnyElement, ClickEvent, Context, FontWeight, KeyDownEvent, SharedString, div, prelude::*, px};
+use crate::ui::medidas::px;
+use gpui::{AnyElement, ClickEvent, Context, FontWeight, KeyDownEvent, SharedString, div, prelude::*};
 
 impl Player {
     fn fechar_janela_playlist(&mut self) {
@@ -69,14 +70,13 @@ impl Player {
                         .rounded(px(RAIO_CONTROLE))
                         .cursor_pointer()
                         .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/playlist.svg", 18.0, c.texto_2))
+                        .child(icone("icones/playlist.svg", medidas::ICONE_LINHA, c.texto_2))
                         .child(
-                            texto(14.0)
+                            medidas::corpo()
                                 .flex_1()
                                 .min_w(px(0.0))
-                                .truncate()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child(SharedString::from(p.nome.clone())),
+                                .child(super::linha(p.nome.clone())),
                         )
                         .child(mono().text_color(c.texto_3).child(p.quantas.to_string()))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -95,27 +95,27 @@ impl Player {
             .id("janela-playlist-nome")
             .flex_1()
             .min_w(px(0.0))
-            .h(px(40.0))
+            .h(px(medidas::BOTAO))
             .relative()
             .flex()
             .items_center()
             .gap(px(10.0))
             .px(px(14.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .border_1()
             .border_color(c.texto)
             .cursor_text()
-            .child(icone("icones/plus.svg", 16.0, c.texto))
+            .child(icone("icones/plus.svg", medidas::ICONE_LINHA, c.texto))
             .child(self.receber_texto(cx))
-            .child(Self::conteudo_do_campo(&c, &j.nome, "Nome da playlist nova", 14.0, true));
-        let criar = texto(14.0)
+            .child(Self::conteudo_do_campo(&c, &j.nome, "Nome da playlist nova", medidas::CORPO, true, false));
+        let criar = medidas::corpo()
             .id("janela-playlist-criar")
-            .h(px(40.0))
+            .h(px(medidas::BOTAO))
             .px(px(16.0))
             .flex()
             .flex_none()
             .items_center()
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .bg(c.inv)
             .text_color(c.inv_texto)
             .font_weight(FontWeight::SEMIBOLD)
@@ -167,8 +167,8 @@ impl Player {
                                 .flex()
                                 .flex_col()
                                 .gap(px(4.0))
-                                .child(titulo(24.0).child(titulo_janela))
-                                .child(texto(13.0).text_color(c.texto_2).child(frase)),
+                                .child(medidas::secao().child(titulo_janela))
+                                .child(medidas::apoio().text_color(c.texto_2).child(frase)),
                         )
                         .when(!j.so_criar && !self.local.lista.playlists.is_empty(), |d| {
                             d.child(

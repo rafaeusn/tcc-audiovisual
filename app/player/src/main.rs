@@ -13,6 +13,8 @@ mod cadeia;
 mod capas;
 mod catalogo;
 mod contas;
+mod descanso;
+mod detalhes;
 mod diagnostico;
 mod diario;
 mod escuta;
@@ -21,8 +23,10 @@ mod externo;
 mod fila;
 mod gravador;
 mod ilha;
+mod juntar;
 mod letrista;
 mod local;
+mod menu;
 mod mesa;
 mod navegacao;
 mod paginas;
@@ -38,7 +42,7 @@ use gpui::{App, Application, Bounds, TitlebarOptions, WindowBounds, WindowOption
 use nucleo::Ajustes;
 
 /// Menor janela em que o arranjo ainda cabe (ver `arranjo::calcular`).
-const JANELA_MINIMA: (f32, f32) = (360.0, 560.0);
+const JANELA_MINIMA: (f32, f32) = (360.0, 400.0);
 
 /// Garante uma instÃ¢ncia sÃ³: duas ouvindo e desenhando ao mesmo tempo sÃ³ gastariam a mÃ¡quina.
 /// Devolve `None` se o Player jÃ¡ estÃ¡ aberto. O guarda precisa viver atÃ© o fim do programa.

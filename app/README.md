@@ -81,46 +81,65 @@ mais recente das outras e nunca espera por elas.
   passar por todas. Tocar tenta outra vez.
 - **Configurações › Letras**: a ordem das fontes (setas), ligar e desligar cada uma (uma fica sempre ligada),
   preferir palavra por palavra, traduzir (e o idioma) e letras latinas.
-- **Espaços e navegação** (F2): a folha das páginas tem, no topo, voltar e avançar (também `Alt ←`/`Alt →` e os
-  botões laterais do mouse) e os espaços: **Tudo**, **Neste computador** e um por serviço ligado, com a logo e a cor
-  que o provedor manda. No espaço de um serviço a folha se tinge com a cor dele, numa transição curta, e abre em
-  "Para você" (as prateleiras do serviço: no YouTube Music, lançamentos, clipes novos, artistas em alta e paradas).
-  Cada espaço lembra as páginas dele; `Ctrl Tab` vai para o próximo e `Ctrl 1` a `Ctrl 9` abrem o da posição (1 é
-  Tudo, 2 o computador, depois os serviços). O espaço aberto fica guardado. `C` curte a faixa de serviço que toca, e
-  "Fixar na lateral o que está aberto" (na barra de comandos) fixa o álbum, a playlist, o artista ou a faixa da página.
-- **Spotify** (F6): o espaço do Spotify vem com o app. Sem entrar, ele mostra o cartão "Entre na sua conta
+- **Navegação** (remodelagem, parte 2): três destinos, **Início**, **Buscar** e **Biblioteca** (na lateral da Estante, no trilho com
+  nomes ou na barra de baixo), mais a Loja e as Configurações. O serviço é um **filtro** no alto deles: **Tudo**, cada serviço
+  ligado (com a marca) e **Neste PC**. Trocar o filtro não troca de página; `Ctrl Tab` passa para o próximo e `Ctrl 1` a `Ctrl 9`
+  escolhem o da posição (numa página sem filtro, abrem o Início nele). O filtro fica guardado. Voltar e avançar ficam no topo da
+  janela (também `Alt ←`/`Alt →` e os botões laterais do mouse): uma pilha só, em que cada passo lembra a página, o filtro e a
+  rolagem. A cor do serviço só aparece na marca. `C` curte a faixa de serviço que toca, e "Fixar na lateral o que está aberto"
+  (nos comandos) fixa o álbum, a playlist, o artista ou a faixa da página.
+- **Spotify** (F6): o Spotify vem com o app. Sem entrar, ele mostra o cartão "Entre na sua conta
   do Spotify": o botão abre o navegador, quem entra é você, e a senha não passa pelo Player. Depois disso o Player entra
-  sozinho (a credencial fica cifrada pelo Windows) e a Loja › Provedores mostra "Conectado como … · Premium" com Sair. Se
-  outro programa usa a porta do login (o Spotifast aberto), o aviso diz qual. Para você, Busca, álbuns, artistas,
+  sozinho (a credencial fica cifrada pelo Windows) e a Loja › Provedores mostra "Conectado como … (Premium)" com Sair. Se
+  outro programa usa a porta do login (o Spotifast aberto), o aviso diz qual. Início, Buscar, álbuns, artistas,
   playlists e a Biblioteca da conta (com as Músicas Curtidas) vêm da sua conta, na página Biblioteca e na lateral da
   Estante, junto com o que você salvou no Player. As músicas tocam pelo
   YouTube Music (a mesma música, escolhida por título, artista e duração; a página da faixa diz qual e tem "Procurar outra
   gravação") ou, se você ligar o **Soloist** em Configurações › Serviços, com o som do próprio Spotify: é o player oficial dele, baixado
   do Spotify, e pede Premium, uma chave pessoal sua e parear uma vez pelo app do Spotify. Se o Soloist não tocar, a música vai para o
   YouTube Music com um aviso. O Spotify toca num lugar por vez: tocar aqui para o outro aparelho ([F6](../docs/f6-spotify.md)).
-- **Páginas dos serviços**: "Para você" mostra as prateleiras em cartões com capa (as capas baixam em segundo plano e
+- **Tudo misturado e selos** (remodelagem, parte 3): em Tudo, as prateleiras dos serviços do mesmo tipo (lançamentos, feito para você,
+  artistas, paradas...) viram uma só, com os itens intercalados; as outras se intercalam, com o nome do serviço ao lado do título. O Início
+  abre com a saudação, os **atalhos** (o que você abriu há pouco e os do serviço) e "Tocadas há pouco". Cada capa leva o **selo** do serviço
+  (um disco escuro com a marca), também na lateral, na Biblioteca, na Fila, no Histórico, em "Nesta sessão", na barra de baixo e na Ilha.
+  Com o mouse em cima de um cartão, o selo cresce e vira o botão de **tocar** na cor do serviço: toca a faixa, ou o álbum, a playlist e o
+  artista sem abrir a página. A **mesma música em dois serviços** aparece uma vez, com os dois selos (o da frente é o que toca);
+  Configurações › Serviços escolhe por onde tocar. Na barra, dois selos dizem que a faixa é de um serviço e toca por outro.
+- **Páginas dos serviços**: o Início mostra as prateleiras em cartões com capa, que preenchem a largura da página (as capas baixam em segundo plano e
   ficam guardadas na pasta de dados, em `capas`); clicar numa faixa toca a fileira a partir dela, clicar num álbum,
-  playlist ou artista abre a página dele, que entra deslizando. Álbum e playlist: capa, título, o artista como link,
-  Tocar, Aleatório, curtir e a lista das faixas (a seguir e fila no hover, coração em cada uma). Artista: populares
-  (com "Ver mais") e os álbuns. Enquanto o serviço não responde, a página mostra um esqueleto; erro vira frase com
-  "Tentar de novo". **Biblioteca do serviço**: o que foi curtido e salvo dele, com filtro por tipo e fixar (o alfinete
-  aparece sobre a capa). No topo da folha, as abas do espaço: **Para você**, **Busca** e **Biblioteca**.
+  playlist ou artista abre a página dele. Álbum e playlist: a capa desfocada atrás do cabeçalho, a capa, o tipo, o
+  artista como link (ou o dono), o ano, quantas músicas, quanto tempo e quem segue, a descrição, Tocar, Aleatório, curtir
+  e as faixas (no álbum com o número, na playlist com a capa e o álbum); no pé do álbum, a data e a gravadora; embaixo,
+  mais do artista ou playlists parecidas. Artista: a foto larga atrás do nome, os ouvintes por mês (ou os seguidores),
+  Tocar, Aleatório, Seguir e as abas Visão geral (populares com quantas vezes foram ouvidas, o último lançamento, os
+  álbuns, singles e quem ouve também curte), Álbuns, Singles e EPs, Coletâneas e Sobre (os números, a biografia e as
+  fotos), só as que têm o que mostrar. "Ver no YouTube Music" ou "Ver no Spotify" abre o mesmo artista no outro serviço,
+  quando ele existe lá com o mesmo nome. Enquanto o serviço não responde, a página mostra um esqueleto; erro vira frase com
+  "Tentar de novo". Em Neste PC, o Início mostra as playlists feitas no Player e as pastas.
+- **Biblioteca**: uma só, com o filtro de serviço e as abas Tudo, Playlists, Álbuns, Artistas, Curtidas, Pastas (as músicas do
+  computador) e Histórico: o que está nas contas e o que foi salvo no Player, os fixados primeiro (o alfinete aparece sobre a
+  capa). Tem filtro de texto, ordem (recentes, nome, artista) e troca entre cartões e linhas.
 - **Layout Estante** (F2; Configurações › Aparência › Layout, a aba Layouts da Loja ou `Ctrl L`): a **lateral** com os
-  espaços (a marca de cada um; o aberto com o anel na cor dele), as páginas do espaço (Para você, Busca, Biblioteca) e
-  o que foi salvo nele, os fixados primeiro (no computador, as playlists só de músicas locais); Loja, Configurações,
-  personalizar e trocar o layout no pé. No meio, a **página**, com voltar, avançar e o título. À direita, o trilho
-  **Tocando**: o **visual ao vivo** no alto, com o nome do visual e a faixa, e os módulos do painel embaixo. Clicar no
-  visual (ou `X`) faz ele crescer até a janela inteira, com o título grande; `Esc` ou o botão encolher voltam para a
-  mesma página. Em janela média a lateral vira uma barra de ícones e o Tocando abre ao lado da página (`P` ou o botão
-  do dock); em janela estreita o visual vira uma faixa acima do dock e as páginas vão para a navegação de baixo. O
-  Palco (o layout de sempre) continua o padrão.
-- **Busca** (F2): o campo (o mesmo texto da Biblioteca) e o que os serviços acharam: o melhor resultado em destaque,
-  as faixas, e prateleiras de álbuns, artistas e playlists; chips filtram por tipo (faixas em lista, o resto em
-  grade). No espaço de um serviço, só ele; em Tudo, cada serviço no seu bloco e quantas músicas do computador batem.
-  Cada serviço aparece assim que responde; resultado de um texto antigo fica apagado até o novo chegar.
+  destinos e a sua biblioteca (os fixados, as playlists do Player, o que foi salvo e o que está nas contas, de todos os serviços).
+  No centro, o **visual ao vivo**, grande, com a música por cima e o BPM; ao lado dele, a **página**. Arraste a **divisória** entre os
+  dois (dois cliques voltam ao padrão; o lugar fica guardado). **Página larga** (`W`, ou o botão no canto da página): a página toma o
+  miolo e o visual vira uma tira no alto. **Só o visual** (`X`, o botão de expandir ou dois cliques no visual): a página sai para a direita e o
+  visual ocupa a janela; `Esc` ou o botão encolher voltam para a mesma página. O **painel** (`P`, `Q`, `U`) vem fechado: em janela
+  grande abre ao lado, nas outras toma o lugar da página até fechar ou abrir outra página. Em janela média a lateral vira um trilho com
+  nomes; em janela estreita o visual fica no alto (grande no Início, uma tira nas outras páginas e ao rolar) e os destinos vão para a
+  barra de baixo. O Palco (o layout de sempre) continua o padrão.
+- **A página sai da frente** (Estante; Configurações › Aparência: nunca, 15 s, 30 s, 1 min ou 2 min): com música tocando e ninguém
+  mexendo, fica só o visual com o nome da música, e o cursor some. Mexer o mouse, apertar uma tecla ou parar a música traz a página de
+  volta onde estava; o clique que acorda não aperta nada. Não acontece com o painel aberto, escrevendo num campo, com um menu ou no modo edição.
+- **Busca única**: o campo do topo (`Ctrl K`, `/`, clicar nele ou em Buscar) procura nos serviços do filtro e nas músicas do computador,
+  em abas: Principais (o melhor resultado, músicas, álbuns, artistas, playlists e até 3 comandos), Músicas, Álbuns, Artistas, Playlists
+  e Comandos. Começar com `>` mostra só comandos: as setas escolhem e o Enter executa; se a busca foi aberta pelo atalho, o comando
+  devolve a página de antes. Em Tudo, os resultados dos serviços e do computador vêm juntos, com selos; quem ainda não respondeu aparece em "Buscando no
+  …", e resultado de um texto antigo fica apagado até o novo chegar. Com o campo vazio: as buscas recentes (até 8, em `ajustes.toml`; "Limpar" apaga) e o que foi aberto há pouco. Abrir a
+  busca com texto nela o deixa selecionado: a próxima letra troca tudo. Em janela muito estreita o campo fica na própria página.
 - **Página da faixa**: o título de uma faixa (nas listas e no melhor resultado) abre a página dela: capa, artistas e
   álbum como links, Tocar (Pausar, se é ela que toca), A seguir, Na fila e curtir. Abas **Letra** (a letra da
-  faixa que toca, com a tela cheia; com o módulo Letra à vista no painel, ela fica lá), **Mapa** (a pré-análise:
+  faixa que toca, com a tela cheia; com a letra à vista no painel, ela fica lá), **Mapa** (a pré-análise:
   energia por trecho calma, agitada ou intensa, drops, a posição de agora, BPM, tom e duração) e **Parecidas** (só
   com provedor que tenha rádio).
 - **O que o Modo Escuta ouve** (Ajustes): "Todo o PC" (o padrão) ou um app só, escolhido entre os que estão
@@ -146,9 +165,17 @@ mais recente das outras e nunca espera por elas.
   nova). Cada playlist vira uma categoria, na ordem em que as músicas entraram; dentro dela, o X da linha tira a
   música. Apagar pede confirmação ("Apagar?"). Ficam no `biblioteca.db` (tabelas `playlists` e
   `playlist_itens`), guardando o caminho dos arquivos.
-- **Fila** (aba da Biblioteca, `Q`, ou o botão no dock; abre no espaço em que você está, e num serviço a Biblioteca
-  mostra só Fila e Histórico): o que já tocou (esmaecido), a de agora e o que vem
-  depois. Clicar pula para a música; com o mouse em cima, subir, descer e tirar. "Limpar a seguir" deixa só a de
+- **Barra de baixo**: a capa e o título da música do Player levam ao álbum (ou à página da faixa), o artista à página dele, e o coração
+  curte a faixa de serviço. À direita: letra, fila, painel, volume e **⋯** (tela cheia, letra em tela cheia, janela mini, Ilha, saída de som
+  do Windows; em janela estreita, também o que não coube na barra). O som de outro app (Modo Escuta) não tem links.
+- **Painel em abas**: **Agora** (os módulos), **Fila** e **Letra**. `Q` e `U` abrem a fila e a letra ao lado da página e voltam com a mesma
+  tecla. Sem lugar para elas (o Palco em janela estreita), abrem a página da Fila e a letra em tela cheia.
+- **Menu do botão direito** (ou o ⋯ das linhas e dos cartões): tocar, tocar em seguida, pôr no fim da fila ou numa playlist, curtir ou
+  salvar, fixar, ver a faixa, ir ao álbum ou ao artista, tocar ou procurar no outro serviço e, quando duas versões foram juntadas por engano,
+  "Não são a mesma música". Na fila, subir, descer e tirar; no visual, trocar de visual, as cores e o modo seguro. Só aparece o que vale
+  para o item; as setas, `Enter` e `Esc` funcionam nele.
+- **Fila** (`Q` ou o botão no dock): o que já tocou (esmaecido), a de agora e o que vem
+  depois. Clicar pula para a música; com o mouse em cima (ou no menu), subir, descer e tirar. "Limpar a seguir" deixa só a de
   agora. Tirar uma música, limpar a fila, tirar uma música de playlist, tirar uma pasta ou apagar uma playlist
   mostram um aviso com **Desfazer** (6 segundos; `Ctrl Z` também vale). **Aleatório** (`S`) embaralha o resto
   mantendo a de agora, e desligar volta à ordem original.
@@ -203,7 +230,7 @@ mais recente das outras e nunca espera por elas.
 - **Bandeja**: um ícone ao lado do relógio mostra o nome da música; clicar traz a janela, e o botão direito abre
   o menu (mostrar, tocar ou pausar, próxima, anterior, sair). Com "Continuar na bandeja" ligado nos Ajustes
   (desligado por padrão), fechar a janela só a esconde: o app segue ouvindo e contando o histórico.
-- **Ilha** (opcional, desligada por padrão: tecla `D`, o botão ao lado da janela mini no dock ou Configurações ›
+- **Ilha** (opcional, desligada por padrão: tecla `D`, o ⋯ da barra de baixo ou Configurações ›
   Ilha): um entalhe preto preso ao topo da tela, com "ombros" curvos que o ligam à borda (no estilo do Nusa e do
   island), por cima de tudo e sem roubar o foco. Fechada, mostra a capa e o som em barras na cor do visual. Avisa
   por um instante a música nova, o volume e, nas músicas pré-analisadas, a contagem "Drop em 3, 2, 1".
@@ -233,7 +260,7 @@ mais recente das outras e nunca espera por elas.
     cliques passam para o que está embaixo. O × da Ilha aberta a fecha. Respeita o modo seguro e o "Efeitos de
     animação" do Windows.
 - **Nos serviços** (F1): com provedores instalados em `<pasta de dados>/provedores/<nome>/` (o `provedor.toml` e o
-  programa), a busca também pergunta a eles. Na Biblioteca, "Buscar \"…\" nos serviços" leva à página Busca com o
+  programa), a busca também pergunta a eles. Na aba Pastas da Biblioteca, "Buscar \"…\" nos serviços" leva à página Buscar com o
   mesmo texto; lá, clicar numa faixa toca (os resultados viram a fila), e dá para pôr a seguir ou no fim da fila, ao
   lado das músicas do computador. A faixa toca pela rede, com a pré-análise (visual, BPM, drops) feita do mesmo endereço, e a
   seguinte entra sem intervalo. Um provedor que trava é reaberto sozinho.
@@ -244,7 +271,7 @@ mais recente das outras e nunca espera por elas.
   Visual, Som, Ilha, Atalhos, Sobre). Larga, as seções ficam numa coluna à esquerda; média, viram fichas no topo;
   estreita, a página vai para a área do painel e rola inteira, com o visual em cima. As mudanças valem na hora e
   ficam guardadas. Trocar o tema muda as cores na hora (o tom do dock acompanha em cerca de 0,15 s).
-- **Janela mini** (`N`, ou o botão no dock): a janela encolhe para o canto da tela e fica por cima das outras,
+- **Janela mini** (`N`, ou o ⋯ da barra de baixo): a janela encolhe para o canto da tela e fica por cima das outras,
   só com o visual e a faixa. Com o mouse em cima aparecem os controles (anterior, tocar/pausar, próxima) no
   canto de baixo à direita, o nome do visual (clicar troca) e o botão de voltar ao tamanho de antes; ao tirar o
   mouse eles somem na hora. Em janela estreita os controles sobem para o meio e o título fica com a largura
@@ -257,7 +284,8 @@ mais recente das outras e nunca espera por elas.
   desligar em Ajustes, "Dicas dos botões" (`ajuda.dicas` na barra de comandos).
 - **Relatório de diagnóstico** (Ajustes, em Sobre): copia versão, sistema, placa de vídeo, saída de som, ajustes
   e o fim do registro, com o nome do usuário do Windows apagado.
-- **Barra de comandos** (`Ctrl K`): busca e executa qualquer comando pelo nome, sem acento nem maiúscula.
+- **Comandos**: na busca do topo (`>` ou a aba Comandos), qualquer comando pelo nome, sem acento nem maiúscula. Com o visual sozinho na
+  tela (tela cheia, letra), `Ctrl K` abre a barra de comandos por cima.
 - **Loja**: temas, skins, layouts e pacotes se aplicam com um clique; os módulos do painel entram e saem por lá.
   A aba **Provedores** mostra os provedores instalados (situação, versão e o que cada um sabe fazer), liga e
   desliga cada um (desligado, o programa dele fecha e a busca não pergunta a ele; a escolha fica guardada), instala
@@ -290,6 +318,7 @@ mais recente das outras e nunca espera por elas.
   Valem as variáveis de ambiente presentes ao abrir o app; se não houver, as que existiam na compilação. Sem
   elas a ficha do módulo avisa que ele não está configurado.
 - **Skin imersiva** (`I`): o visual ocupa a janela inteira e o painel, o dock e o topo viram vidro por cima dele.
+- **Medidas**: texto de 16 px (14 no apoio), ícones de 24, linhas de 64 e capas arredondadas, iguais em todas as telas.
 - **Volume** no dock (e `Ctrl ↑/↓`, `M`): com uma música do Player na tela (arquivo, YouTube Music ou Spotify pelo Soloist), é o volume
   **só da música**: o jogo e o resto do PC não mudam, e o visual e a pré-análise não sentem, nem no 1 ou no mudo. Ele fica
   guardado, e mexer no misturador de volume do Windows também move a barra quando toca o Soloist. Com a música de outro app (Modo
@@ -336,11 +365,17 @@ tradução ligada, as linhas da letra para a Unison; só com o módulo Letra lig
 
 ## Atalhos
 
+**Tamanho da interface** (Configurações › Aparência, ou `Ctrl +` e `Ctrl −`): 90, 100, 110 ou 125%. Letras, ícones e espaços crescem
+juntos, e a janela muda de arranjo como se fosse menor (em 125%, uma janela de 1440 já mostra o trilho no lugar da lateral). A Ilha tem o tamanho dela.
+
+**Pelo teclado:** `Tab` e `Shift Tab` andam pelos botões, abas, filtros, cartões e linhas (navegação, topo, página, barra), com um anel em
+volta do que está focado; `Enter` ou espaço clicam nele, e `Esc` volta ao jeito de sempre. Um clique do mouse também volta.
+
 Espaço tocar/pausar · Ctrl ←/→ faixa anterior/próxima · Ctrl ↑/↓ volume · M mudo · F tela cheia · P painel ·
-Ctrl K comandos · Ctrl , ajustes · V próximo visual · 1/2/3 escolher o visual · T próximo tema · I imersivo ·
-E editar o layout · N janela mini · D Ilha · H Início · B Biblioteca · L Loja · S aleatório · R repetir · Q fila ·
-Y letra em tela cheia · Alt ←/→ voltar e avançar · Ctrl Tab próximo espaço · Ctrl 1–9 abrir o espaço da posição ·
-Ctrl L trocar o layout · X expandir o visual (Estante) · C curtir a faixa que toca · Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
+Ctrl K ou / buscar · Ctrl , ajustes · V próximo visual · 1/2/3 escolher o visual · T próximo tema · I imersivo ·
+E editar o layout · N janela mini · D Ilha · H Início · B Biblioteca · L Loja · S aleatório · R repetir · Q fila · U letra no painel ·
+Y letra em tela cheia · Alt ←/→ voltar e avançar · Ctrl Tab próximo filtro de serviço · Ctrl 1–9 o filtro da posição ·
+Ctrl L trocar o layout · X só o visual (Estante) · W página larga (Estante) · Ctrl +/− tamanho da interface · C curtir a faixa que toca · Esc fechar/voltar. As teclas de uma letra não valem enquanto um campo de texto está ativo. Cada atalho chama um comando com nome (`player.tocar-pausar`,
 `layout.editar`…), o mesmo que os botões e a barra de comandos usam. A lista inteira está em
 `crates/nucleo/src/comando.rs`.
 

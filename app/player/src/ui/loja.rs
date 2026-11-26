@@ -9,13 +9,14 @@
 //! aparecem com a ficha completa, mas sem o botão de instalar: a Loja não finge que instala.
 
 use super::painel::interruptor;
-use super::{RAIO_CONTROLE, RAIO_MODULO, com_alfa, icone, texto, titulo};
+use super::{RAIO_CONTROLE, RAIO_MODULO, com_alfa, icone, medidas};
 use crate::app::{AbaLoja, Player};
 use crate::contas::{botao_da_conta, frase_da_conta};
 use crate::remoto::Situacao;
 use crate::tema::{self, Cores};
-use gpui::{ClickEvent, Context, Div, FontWeight, Hsla, SharedString, Stateful, div, prelude::*, px};
-use nucleo::{Comando, Modulo, Pagina, Skin, Tema};
+use crate::ui::medidas::px;
+use gpui::{ClickEvent, Context, Div, FontWeight, Hsla, SharedString, Stateful, div, prelude::*};
+use nucleo::{Comando, Modulo, Skin, Tema};
 use provedores::Capacidade;
 
 const ABAS: [(AbaLoja, &str); 6] = [
@@ -94,18 +95,18 @@ fn nome_da_capacidade(c: Capacidade) -> &'static str {
 /// Miniatura da janela: o visual, o painel (de um lado ou de nenhum) e o dock, nas cores de um tema.
 fn miniatura(c: &Cores, contorno: Hsla, imersiva: bool, painel: Option<bool>) -> Div {
     let bloco_painel = || {
-        let b = div().w(px(44.0)).h_full().flex_none().rounded(px(5.0));
+        let b = div().w(px(44.0)).h_full().flex_none().rounded(px(medidas::raio_fino(10.0)));
         if imersiva { b.bg(com_alfa(c.texto, 0.16)) } else { b.border_1().border_color(c.linha_2) }
     };
     let visual = div()
         .flex_1()
         .h_full()
-        .rounded(px(5.0))
+        .rounded(px(medidas::raio_fino(10.0)))
         .flex()
         .items_center()
         .justify_center()
         .when(!imersiva, |d| d.bg(gpui::black()).border_1().border_color(c.linha))
-        .child(div().size(px(14.0)).rounded(px(999.0)).bg(c.ativa));
+        .child(div().size(px(14.0)).rounded(px(medidas::PILULA)).bg(c.ativa));
     div()
         .w_full()
         .h(px(104.0))
@@ -129,12 +130,12 @@ fn miniatura(c: &Cores, contorno: Hsla, imersiva: bool, painel: Option<bool>) ->
                 .child(visual)
                 .when(painel == Some(false), |d| d.child(bloco_painel())),
         )
-        .child(div().h(px(12.0)).flex_none().rounded(px(6.0)).bg(tema::cor_de(c.dock)))
+        .child(div().h(px(12.0)).flex_none().rounded(px(medidas::raio_fino(12.0))).bg(tema::cor_de(c.dock)))
 }
 
-/// A miniatura da Estante: a lateral, a folha e o trilho com o visual no alto.
+/// A miniatura da Estante: a lateral, o visual e a página.
 fn miniatura_da_estante(c: &Cores, contorno: Hsla) -> Div {
-    let coluna = |w: f32| div().w(px(w)).h_full().flex_none().rounded(px(5.0)).border_1().border_color(c.linha_2);
+    let regiao = || div().h_full().rounded(px(medidas::raio_fino(10.0)));
     div()
         .w_full()
         .h(px(104.0))
@@ -146,7 +147,7 @@ fn miniatura_da_estante(c: &Cores, contorno: Hsla) -> Div {
         .p(px(8.0))
         .flex()
         .gap(px(5.0))
-        .child(coluna(34.0))
+        .child(regiao().w(px(30.0)).flex_none().border_1().border_color(c.linha_2))
         .child(
             div()
                 .flex_1()
@@ -154,31 +155,26 @@ fn miniatura_da_estante(c: &Cores, contorno: Hsla) -> Div {
                 .flex()
                 .flex_col()
                 .gap(px(5.0))
-                .child(div().flex_1().rounded(px(5.0)).border_1().border_color(c.linha_2))
-                .child(div().h(px(12.0)).flex_none().rounded(px(6.0)).bg(tema::cor_de(c.dock))),
-        )
-        .child(
-            div()
-                .w(px(44.0))
-                .h_full()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .gap(px(5.0))
                 .child(
                     div()
-                        .h(px(30.0))
-                        .flex_none()
-                        .rounded(px(5.0))
-                        .bg(gpui::black())
-                        .border_1()
-                        .border_color(c.linha)
+                        .flex_1()
+                        .min_h(px(0.0))
                         .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().size(px(10.0)).rounded(px(999.0)).bg(c.ativa)),
+                        .gap(px(5.0))
+                        .child(
+                            regiao()
+                                .flex_1()
+                                .bg(gpui::black())
+                                .border_1()
+                                .border_color(c.linha)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(div().size(px(18.0)).rounded(px(medidas::PILULA)).bg(c.ativa)),
+                        )
+                        .child(regiao().flex_1().border_1().border_color(c.linha_2)),
                 )
-                .child(coluna(44.0).flex_1()),
+                .child(div().h(px(12.0)).flex_none().rounded(px(medidas::raio_fino(12.0))).bg(tema::cor_de(c.dock))),
         )
 }
 
@@ -193,13 +189,13 @@ impl Player {
         em_uso: bool,
     ) -> Stateful<Div> {
         let c = self.cores();
-        let selo = texto(12.0)
-            .h(px(24.0))
+        let selo = medidas::apoio()
+            .h(px(medidas::SELO))
             .px(px(10.0))
             .flex()
             .flex_none()
             .items_center()
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .font_weight(FontWeight::SEMIBOLD);
         let selo = if em_uso {
             selo.bg(c.inv).text_color(c.inv_texto).child("Em uso")
@@ -232,8 +228,8 @@ impl Player {
                             .min_w(px(0.0))
                             .flex()
                             .flex_col()
-                            .child(texto(14.0).font_weight(FontWeight::SEMIBOLD).truncate().child(nome))
-                            .child(texto(12.0).text_color(c.texto_2).child(descricao)),
+                            .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(super::linha(nome)))
+                            .child(medidas::apoio().text_color(c.texto_2).child(descricao)),
                     )
                     .child(selo),
             )
@@ -266,7 +262,7 @@ impl Player {
                     .justify_center()
                     .rounded(px(RAIO_CONTROLE + 2.0))
                     .bg(c.bloco)
-                    .child(icone(caminho, 22.0, c.texto)),
+                    .child(icone(caminho, medidas::ICONE, c.texto)),
             )
             .child(
                 div()
@@ -274,8 +270,8 @@ impl Player {
                     .min_w(px(0.0))
                     .flex()
                     .flex_col()
-                    .child(texto(14.0).font_weight(FontWeight::SEMIBOLD).child(nome))
-                    .child(texto(14.0).text_color(c.texto_2).child(descricao)),
+                    .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(nome))
+                    .child(medidas::apoio().text_color(c.texto_2).child(descricao)),
             )
             .child(acao)
     }
@@ -301,7 +297,7 @@ impl Player {
                     .justify_center()
                     .rounded(px(RAIO_CONTROLE + 2.0))
                     .bg(c.bloco)
-                    .child(icone(super::modulo::icone_da_categoria(m.categoria), 22.0, c.texto)),
+                    .child(icone(super::modulo::icone_da_categoria(m.categoria), medidas::ICONE, c.texto)),
             )
             .child(
                 div()
@@ -310,13 +306,12 @@ impl Player {
                     .flex()
                     .flex_col()
                     .child(
-                        texto(14.0)
+                        medidas::corpo()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .truncate()
-                            .child(gpui::SharedString::from(m.nome.clone())),
+                            .child(super::linha(gpui::SharedString::from(m.nome.clone()))),
                     )
                     .child(
-                        texto(14.0)
+                        medidas::apoio()
                             .text_color(c.texto_2)
                             .line_clamp(2)
                             .child(gpui::SharedString::from(m.descricao.clone())),
@@ -327,22 +322,32 @@ impl Player {
 
     /// Botão em pílula da Loja (cheio, para a ação principal; com contorno, para as outras).
     pub(super) fn pilula_da_loja(&self, id: (&'static str, usize), rotulo: &'static str, cheio: bool) -> Stateful<Div> {
+        self.pilula_da_loja_com(id, rotulo, cheio)
+    }
+
+    /// A mesma, com um nome que não é fixo (o de um serviço).
+    pub(super) fn pilula_da_loja_com(
+        &self,
+        id: (&'static str, usize),
+        rotulo: impl Into<SharedString>,
+        cheio: bool,
+    ) -> Stateful<Div> {
         let c = self.cores();
-        let b = texto(14.0)
+        let b = medidas::apoio()
             .id(id)
-            .h(px(36.0))
+            .h(px(medidas::FICHA))
             .px(px(14.0))
             .flex()
             .flex_none()
             .items_center()
             .gap(px(6.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .font_weight(FontWeight::SEMIBOLD)
             .cursor_pointer();
         if cheio {
-            b.bg(c.inv).text_color(c.inv_texto).hover(|s| s.opacity(0.9)).child(rotulo)
+            b.bg(c.inv).text_color(c.inv_texto).hover(|s| s.opacity(0.9)).child(rotulo.into())
         } else {
-            b.border_1().border_color(c.linha_2).text_color(c.texto_2).hover(|s| s.bg(c.hover)).child(rotulo)
+            b.border_1().border_color(c.linha_2).text_color(c.texto_2).hover(|s| s.bg(c.hover)).child(rotulo.into())
         }
     }
 
@@ -352,8 +357,8 @@ impl Player {
         let mut lista = div()
             .flex()
             .flex_col()
-            .child(texto(16.0).pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Provedores"))
-            .child(texto(14.0).text_color(c.texto_2).pb(px(12.0)).child(
+            .child(medidas::corpo().pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Provedores"))
+            .child(medidas::apoio().text_color(c.texto_2).pb(px(12.0)).child(
                 "Os serviços de música (YouTube Music, Spotify, SoundCloud...). Cada provedor é um programa à parte: instalado, ele entra na busca da Biblioteca e as faixas dele tocam aqui, com o visual e a análise.",
             ))
             .child(
@@ -384,8 +389,8 @@ impl Player {
                     .flex_col()
                     .items_center()
                     .gap(px(10.0))
-                    .child(icone("icones/globe.svg", 28.0, c.texto_3))
-                    .child(texto(14.0).max_w(px(460.0)).text_center().text_color(c.texto_2).child(
+                    .child(icone("icones/globe.svg", medidas::ICONE_GRANDE, c.texto_3))
+                    .child(medidas::apoio().max_w(px(460.0)).text_center().text_color(c.texto_2).child(
                         "Nenhum provedor instalado ainda. O do YouTube Music é o próximo a chegar; um provedor é uma pasta com o provedor.toml e o programa dele.",
                     )),
             );
@@ -434,7 +439,7 @@ impl Player {
                             .justify_center()
                             .rounded(px(RAIO_CONTROLE + 2.0))
                             .bg(c.bloco)
-                            .child(icone("icones/globe.svg", 22.0, if ligado { c.texto } else { c.texto_3 })),
+                            .child(icone("icones/globe.svg", medidas::ICONE, if ligado { c.texto } else { c.texto_3 })),
                     )
                     .child(
                         div()
@@ -443,17 +448,16 @@ impl Player {
                             .flex()
                             .flex_col()
                             .child(
-                                texto(14.0)
+                                medidas::corpo()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .truncate()
-                                    .child(SharedString::from(format!("{} ({})", p.nome, p.servico))),
+                                    .child(super::linha(format!("{} ({})", p.nome, p.servico))),
                             )
                             .child(
-                                texto(14.0)
+                                medidas::corpo()
                                     .text_color(cor_da_situacao)
                                     // Um erro de login precisa caber inteiro (diz qual programa fechar).
                                     .line_clamp(if p.conta.as_ref().is_some_and(|c| c.erro.is_some()) { 5 } else { 2 })
-                                    .child(SharedString::from(detalhes.join(" · "))),
+                                    .child(SharedString::from(detalhes.join(", "))),
                             ),
                     )
                     .when_some(botao_conta, |d, rotulo| {
@@ -468,7 +472,9 @@ impl Player {
                             },
                         )))
                     })
-                    .when(p.embutido, |d| d.child(texto(12.0).flex_none().text_color(c.texto_3).child("Vem com o app")))
+                    .when(p.embutido, |d| {
+                        d.child(medidas::apoio().flex_none().text_color(c.texto_3).child("Vem com o app"))
+                    })
                     .when(!p.embutido, |d| {
                         d.child(self.pilula_da_loja(("prov-remover", i), "Remover", false).on_click(cx.listener(
                             move |this, _: &ClickEvent, _, cx| {
@@ -496,18 +502,20 @@ impl Player {
         let c = self.cores();
         let a = &self.arranjo;
         let lado = if a.heroi.w >= 640.0 { 32.0 } else { 16.0 };
-        let largura = a.heroi.w - 2.0 * lado;
 
         let escolhida = ABAS.iter().position(|(aba, _)| *aba == self.aba_loja).unwrap_or(0);
-        let mut abas = self.seletor("seletor-loja", largura.min(520.0), ABAS.len(), escolhida);
+        let mut lista_de_abas = Vec::with_capacity(ABAS.len());
         for (i, (aba, rotulo)) in ABAS.into_iter().enumerate() {
-            abas = abas.child(self.opcao(("loja-aba", i), rotulo, aba == self.aba_loja).on_click(cx.listener(
-                move |this, _: &ClickEvent, _, cx| {
-                    this.aba_loja = aba;
-                    cx.notify();
-                },
-            )));
+            lista_de_abas.push(
+                self.aba_sublinhada(("loja-aba", i), rotulo, aba == self.aba_loja)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                        this.aba_loja = aba;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
         }
+        let abas = self.abas_sublinhadas("loja-abas", 2_000_003, escolhida, lista_de_abas);
 
         let cabeca = div()
             .flex()
@@ -529,21 +537,15 @@ impl Player {
                             .flex()
                             .flex_col()
                             .gap(px(4.0))
-                            .child(titulo(if a.heroi.w >= 640.0 { 40.0 } else { 28.0 }).child("Loja"))
+                            .child(medidas::pagina(a.heroi.w >= 640.0).child("Loja"))
                             // Em janela estreita a descrição sai: a altura fica para a lista.
                             .when(a.heroi.w >= 640.0, |d| {
-                                d.child(texto(14.0).text_color(c.texto_2).child(
+                                d.child(medidas::apoio().text_color(c.texto_2).child(
                                     "Módulos, provedores, temas, skins e layouts. O que já vem com o app se aplica com um clique.",
                                 ))
                             }),
                     )
-                    .child(self.botao_icone(
-                        "loja-fechar",
-                        "icones/x.svg",
-                        false,
-                        Comando::AbrirPagina(Pagina::Inicio),
-                        cx,
-                    )),
+                    .child(self.botao_fechar("loja-fechar", cx)),
             )
             .child(abas);
 
@@ -621,13 +623,13 @@ impl Player {
                         })),
                     );
                 }
-                // A Estante: a lateral, a página e o trilho Tocando com o visual.
+                // A Estante: a lateral, o visual e a página ao lado dele.
                 grade = grade.child(
                     self.cartao(
                         ("loja-layout", LAYOUTS.len()),
                         miniatura_da_estante(&ct, c.linha_2),
                         "Estante",
-                        "Espaços ao lado, página no meio, visual no trilho",
+                        "Biblioteca, visual no centro e página ao lado",
                         !palco,
                     )
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -663,19 +665,19 @@ impl Player {
                 }
             }
             AbaLoja::Modulos => {
-                lista =
-                    lista.child(texto(16.0).pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Módulos do painel"));
+                lista = lista
+                    .child(medidas::corpo().pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Módulos do painel"));
                 for m in Modulo::TODOS {
                     let no_painel = self.ajustes.modulos.contains(&m);
-                    let botao = texto(14.0)
+                    let botao = medidas::apoio()
                         .id(("loja-modulo", m as usize))
-                        .h(px(36.0))
+                        .h(px(medidas::FICHA))
                         .px(px(14.0))
                         .flex()
                         .flex_none()
                         .items_center()
                         .gap(px(6.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .font_weight(FontWeight::SEMIBOLD)
                         .cursor_pointer();
                     let botao = if no_painel {
@@ -684,7 +686,7 @@ impl Player {
                             .border_color(c.linha_2)
                             .text_color(c.texto_2)
                             .hover(|s| s.bg(c.hover))
-                            .child(icone("icones/check.svg", 16.0, c.texto_2))
+                            .child(icone("icones/check.svg", medidas::ICONE_LINHA, c.texto_2))
                             .child("No painel")
                     } else {
                         botao.bg(c.inv).text_color(c.inv_texto).hover(|s| s.opacity(0.9)).child("Adicionar")
@@ -717,18 +719,18 @@ impl Player {
                     );
                 }
                 lista = lista.child(
-                    texto(16.0).pt(px(24.0)).pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Para instalar"),
+                    medidas::corpo().pt(px(24.0)).pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Para instalar"),
                 );
                 for (i, m) in self.catalogo.iter().enumerate() {
                     let instalado = self.instalados.achar(&m.id).is_some();
-                    let selo = texto(12.0)
-                        .h(px(24.0))
+                    let selo = medidas::apoio()
+                        .h(px(medidas::SELO))
                         .px(px(10.0))
                         .flex()
                         .flex_none()
                         .items_center()
                         .gap(px(6.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .font_weight(FontWeight::SEMIBOLD);
                     let selo = if instalado {
                         selo.bg(c.inv).text_color(c.inv_texto).child("Instalado")
@@ -752,16 +754,20 @@ impl Player {
                     );
                 }
                 lista = lista.child(
-                    texto(16.0).pt(px(24.0)).pb(px(4.0)).font_weight(FontWeight::SEMIBOLD).child("Perfis de Escuta"),
+                    medidas::corpo()
+                        .pt(px(24.0))
+                        .pb(px(4.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Perfis de Escuta"),
                 );
                 for (nome, descricao) in EM_BREVE {
-                    let selo = texto(12.0)
-                        .h(px(24.0))
+                    let selo = medidas::apoio()
+                        .h(px(medidas::SELO))
                         .px(px(10.0))
                         .flex()
                         .flex_none()
                         .items_center()
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .border_1()
                         .border_color(c.linha_2)
                         .text_color(c.texto_2)
@@ -782,6 +788,7 @@ impl Player {
             .flex_1()
             .min_h(px(0.0))
             .overflow_y_scroll()
+            .track_scroll(&self.rolagem_da_pagina())
             .px(px(lado))
             .pt(px(20.0))
             .pb(px(lado))

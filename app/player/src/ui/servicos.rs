@@ -1,11 +1,12 @@
 //! Configurações › Serviços: por onde as músicas de cada serviço tocam, e o player próprio dos que têm um (o Soloist).
 
+use super::medidas;
 use super::painel::{bloco_ajuste, linha_ajuste};
-use super::texto;
 use crate::app::Player;
 use crate::contas::{BotaoDoTocador, frase_da_conta, por_onde_toca, tela_do_tocador};
-use gpui::{ClickEvent, Context, Div, SharedString, div, prelude::*, px, relative};
-use provedores::EstadoDoTocador;
+use crate::ui::medidas::px;
+use gpui::{ClickEvent, Context, Div, SharedString, div, prelude::*, relative};
+use provedores::{Capacidade, EstadoDoTocador};
 
 /// Onde a pessoa cria a chave pessoal dela.
 const PAGINA_DA_CHAVE: &str = "https://developer.spotify.com/dashboard/soloist";
@@ -15,6 +16,9 @@ impl Player {
         let c = self.cores();
         let provedores = &self.local.remoto.provedores;
         let mut blocos = Vec::new();
+        if provedores.iter().filter(|p| p.capacidades.contains(&Capacidade::Busca)).count() > 1 {
+            blocos.push(self.bloco_do_preferido(largura, cx));
+        }
         for (n, p) in provedores.iter().enumerate() {
             let quem = self.local.remoto.quem_toca(&p.servico);
             let toca = por_onde_toca(&quem, &p.situacao, |s| self.nome_do_servico(s));
@@ -42,13 +46,48 @@ impl Player {
         if blocos.is_empty() {
             blocos.push(
                 bloco_ajuste(&c, true).child(
-                    texto(14.0)
+                    medidas::apoio()
                         .text_color(c.texto_2)
                         .child("Nenhum serviço instalado. Eles ficam na aba Provedores da Loja."),
                 ),
             );
         }
         blocos
+    }
+
+    /// Por qual serviço tocar a música que está em mais de um (em Tudo, ela aparece uma vez, com os dois selos).
+    fn bloco_do_preferido(&self, largura: f32, cx: &mut Context<Self>) -> Div {
+        let c = self.cores();
+        let mut opcoes = vec![(String::new(), "Automático".to_string())];
+        opcoes.extend(
+            self.local
+                .remoto
+                .provedores
+                .iter()
+                .filter(|p| p.capacidades.contains(&Capacidade::Busca))
+                .map(|p| (p.servico.clone(), p.nome.clone())),
+        );
+        let mut fichas = div().flex().flex_wrap().gap(px(8.0));
+        for (i, (servico, nome)) in opcoes.into_iter().enumerate() {
+            let escolhida = self.ajustes.servico_preferido == servico;
+            fichas = fichas.child(self.pilula_da_loja_com(("preferido", i), nome, escolhida).on_click(cx.listener(
+                move |this, _: &ClickEvent, _, cx| {
+                    this.ajustes.servico_preferido.clone_from(&servico);
+                    this.salvar();
+                    cx.notify();
+                },
+            )));
+        }
+        let recuo = if largura < 340.0 { 0.0 } else { 44.0 };
+        bloco_ajuste(&c, false)
+            .child(linha_ajuste(
+                &c,
+                "icones/swap.svg",
+                "Música em mais de um serviço",
+                "Em Tudo, ela aparece uma vez, com os dois selos. Escolha por onde tocar; no automático, o primeiro que toca por ele mesmo."
+                    .into(),
+            ))
+            .child(div().pl(px(recuo)).child(fichas))
     }
 
     /// O player próprio do serviço: a situação, o que falta e os botões.
@@ -79,15 +118,15 @@ impl Player {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(texto(14.0).text_color(c.texto_2).child(SharedString::from(tela.frase)));
+            .child(medidas::apoio().text_color(c.texto_2).child(SharedString::from(tela.frase)));
         if let Some(p) = tela.progresso {
             corpo = corpo.child(
                 div()
                     .h(px(4.0))
                     .w_full()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .bg(c.sel)
-                    .child(div().h_full().w(relative(p)).rounded(px(999.0)).bg(c.texto)),
+                    .child(div().h_full().w(relative(p)).rounded(px(medidas::PILULA)).bg(c.texto)),
             );
         }
         corpo.child(botoes)

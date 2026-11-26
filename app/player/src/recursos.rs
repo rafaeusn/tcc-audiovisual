@@ -37,6 +37,8 @@ mod testes {
             "home-f",
             "info",
             "keyboard",
+            "lado",
+            "larga",
             "lib",
             "lib-f",
             "logo",

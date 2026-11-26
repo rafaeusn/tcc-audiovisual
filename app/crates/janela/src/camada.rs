@@ -81,12 +81,12 @@ impl Camada {
 
     /// Pinta o fundo e o visual dentro de `retangulo` (pixels físicos) com cantos de raio `raio`.
     pub fn desenhar(&mut self, fundo: [f32; 3], retangulo: (f32, f32, f32, f32), raio: f32, quadro: &Quadro) {
-        self.desenhar_esticado(fundo, retangulo, None, raio, quadro);
+        self.desenhar_recortado(fundo, retangulo, None, raio, quadro);
     }
 
-    /// Como [`desenhar`](Self::desenhar), mas desenha o visual no tamanho `interno` e o estica no retângulo (para um
-    /// retângulo que anima de tamanho sem recriar nada a cada quadro).
-    pub fn desenhar_esticado(
+    /// Como [`desenhar`](Self::desenhar), mas desenha o visual no tamanho `interno` e mostra o meio dele no retângulo (para
+    /// um retângulo que anima de tamanho sem recriar nada a cada quadro).
+    pub fn desenhar_recortado(
         &mut self,
         fundo: [f32; 3],
         retangulo: (f32, f32, f32, f32),

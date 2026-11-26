@@ -2,14 +2,13 @@
 //! fila, e as abas Letra (a da F4, quando a faixa toca), Mapa (a pré-análise: energia, trechos, drops, BPM e tom) e
 //! Parecidas (só quando o provedor sabe fazer rádio).
 
-use super::{com_alfa, icone, mono, tempo, texto, titulo};
-use crate::app::Player;
-use crate::arranjo::Modo;
+use super::{com_alfa, icone, medidas, mono, tempo};
+use crate::app::{AbaDoPainel, Player};
 use crate::paginas::{AbaDaFaixa, abas_da_faixa, rota_do_album, rota_do_artista};
+use crate::ui::medidas::px;
 use biblioteca::TipoSalvo;
 use gpui::{
-    AnyElement, Bounds, ClickEvent, Context, Div, FontWeight, Hsla, SharedString, canvas, div, fill, point, prelude::*,
-    px, size,
+    AnyElement, Bounds, ClickEvent, Context, Div, FontWeight, Hsla, canvas, div, fill, point, prelude::*, size,
 };
 use nucleo::Comando;
 use provedores::{Capacidade, Faixa, Item};
@@ -33,22 +32,22 @@ impl Player {
     pub(crate) fn ver_faixa(&self, item: &Item, cx: &mut Context<Self>) -> Div {
         let Item::Faixa(f) = item else { return div() };
         let c = self.cores();
-        let (p, dx) = self.entrada();
         let largura = self.arranjo.heroi.w;
-        let lado = if largura >= 720.0 { 168.0 } else { 120.0 };
-        let tamanho = if f.titulo.chars().count() > 28 { 28.0 } else { 38.0 };
+        let largo = largura >= 720.0;
+        let lado = if largo { 200.0 } else { 132.0 };
+        let curto = f.titulo.chars().count() <= 28;
         let tocando = self.faixa_tocando(f);
 
         // Artistas · álbum · duração; os nomes viram links quando o provedor deu o id e sabe abrir a página.
         let sabe_artista = self.sabe(&f.servico, Capacidade::Artista);
-        let mut linha = div().flex().flex_wrap().items_center().text_color(c.texto_2);
+        let mut linha = div().flex().flex_wrap().items_center().text_color(c.texto);
         let link = |id: (&'static str, usize),
                     rotulo: String,
                     rota: Option<crate::navegacao::Rota>,
                     cx: &mut Context<Self>|
          -> AnyElement {
             match rota {
-                Some(rota) => texto(14.0)
+                Some(rota) => medidas::corpo()
                     .id(id)
                     .text_color(c.texto)
                     .font_weight(FontWeight::SEMIBOLD)
@@ -60,23 +59,27 @@ impl Player {
                         cx.notify();
                     }))
                     .into_any_element(),
-                None => texto(14.0).child(rotulo).into_any_element(),
+                None => medidas::corpo().child(rotulo).into_any_element(),
             }
         };
         for (k, nome) in f.artistas.iter().enumerate() {
             if k > 0 {
-                linha = linha.child(texto(14.0).child(", "));
+                linha = linha.child(medidas::corpo().child(", "));
             }
             linha =
                 linha.child(link(("faixa-pagina-artista", k), nome.clone(), rota_do_artista(f, k, sabe_artista), cx));
         }
         if let Some(album) = f.album.as_ref().filter(|a| !a.is_empty()) {
             let rota = rota_do_album(f, self.sabe(&f.servico, Capacidade::Album));
-            linha =
-                linha.child(texto(14.0).child(" · ")).child(link(("faixa-pagina-album", 0), album.clone(), rota, cx));
+            linha = linha.child(medidas::corpo().child(", ")).child(link(
+                ("faixa-pagina-album", 0),
+                album.clone(),
+                rota,
+                cx,
+            ));
         }
         if let Some(d) = f.duracao_s {
-            linha = linha.child(texto(14.0).child(format!(" · {}", tempo(d))));
+            linha = linha.child(medidas::corpo().child(format!(", {}", tempo(d))));
         }
 
         let item_ = item.clone();
@@ -125,7 +128,13 @@ impl Player {
                     cx.notify();
                 },
             )))
-            .child(self.coracao(("faixa-pagina-coracao", 41_000), &item_, 20.0, cx));
+            .child(self.coracao(("faixa-pagina-coracao", 41_000), &item_, medidas::ICONE, cx))
+            .child(self.botao_mais(
+                ("faixa-pagina-mais", 0),
+                medidas::FICHA,
+                super::paginas::menu_do_cartao(&item_, &[], &Default::default()),
+                cx,
+            ));
 
         // Pelo Match: a pessoa vê o que toca de verdade e pode trocar.
         let musica = crate::remoto::musica_de(f, &self.nome_do_servico(&f.servico));
@@ -137,14 +146,13 @@ impl Player {
                 .items_center()
                 .gap(px(10.0))
                 .child(
-                    texto(13.0)
+                    medidas::apoio()
                         .max_w_full()
-                        .truncate()
-                        .text_color(c.texto_2)
-                        .child(format!("Toca pelo {nome}: {} · {}", par.titulo, par.artista)),
+                        .text_color(c.texto)
+                        .child(super::linha(format!("Toca pelo {nome}: {}, {}", par.titulo, par.artista))),
                 )
                 .child(
-                    texto(13.0)
+                    medidas::apoio()
                         .id("faixa-outro-par")
                         .text_color(c.texto)
                         .font_weight(FontWeight::SEMIBOLD)
@@ -158,10 +166,12 @@ impl Player {
                 )
         });
 
+        // Em folha estreita as ações não cabem ao lado da capa: ficam numa linha própria.
+        let (ao_lado, embaixo) = if largura < 640.0 { (None, Some(acoes)) } else { (Some(acoes), None) };
         let cabecalho = div()
             .flex()
             .items_end()
-            .gap(px(20.0))
+            .gap(px(24.0))
             .child(self.capa(f.capa.as_deref(), TipoSalvo::Faixa, lado, false).shadow_lg())
             .child(
                 div()
@@ -170,15 +180,19 @@ impl Player {
                     .flex()
                     .flex_col()
                     .gap(px(6.0))
-                    .child(texto(12.0).text_color(c.texto_2).font_weight(FontWeight::SEMIBOLD).child(if f.video {
-                        "CLIPE"
-                    } else {
-                        "FAIXA"
-                    }))
-                    .child(titulo(tamanho).line_clamp(2).child(SharedString::from(f.titulo.clone())))
+                    .child(medidas::pagina(largo && curto).child(super::linhas(f.titulo.clone(), 2)))
                     .child(linha)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(super::selo::disco(&self.marca_do_servico(&f.servico), medidas::MARCA_DA_BARRA))
+                            .child(medidas::apoio().text_color(c.texto).child(self.nome_do_servico(&f.servico)))
+                            .when(f.video, |d| d.child(medidas::apoio().text_color(c.texto).child("Clipe"))),
+                    )
                     .children(pelo_par)
-                    .child(div().mt(px(8.0)).child(acoes)),
+                    .children(ao_lado.map(|a| div().mt(px(8.0)).child(a))),
             );
 
         // As abas, num seletor como o da Biblioteca.
@@ -186,7 +200,7 @@ impl Player {
         let aba = if abas.contains(&self.aba_da_faixa) { self.aba_da_faixa } else { AbaDaFaixa::Letra };
         let escolhida = abas.iter().position(|a| *a == aba).unwrap_or(0);
         let mut seletor =
-            self.seletor("seletor-faixa", (110.0 * abas.len() as f32).min(largura - 48.0), abas.len(), escolhida);
+            self.seletor("seletor-faixa", (120.0 * abas.len() as f32).min(largura - 48.0), abas.len(), escolhida);
         for (i, a) in abas.into_iter().enumerate() {
             seletor = seletor.child(self.opcao(("faixa-aba", i), a.nome(), a == aba).on_click(cx.listener(
                 move |this, _: &ClickEvent, _, cx| {
@@ -203,21 +217,35 @@ impl Player {
             }
         };
 
+        // A capa desfocada atrás do cabeçalho, como no álbum.
+        let fundo = f.capa.as_deref().and_then(|u| self.capas.fundo(u, crate::capas::TipoDeFundo::Desfocado));
+        let lado = self.lado_da_pagina();
         div()
-            .relative()
-            .left(px(dx))
-            .opacity(p)
+            .opacity(self.entrada())
             .flex()
             .flex_col()
-            .gap(px(24.0))
-            .p(px(24.0))
-            .child(cabecalho)
-            .child(seletor)
-            .child(conteudo)
+            .child(
+                div()
+                    .relative()
+                    .child(self.fundo_do_cabecalho(fundo.as_ref(), crate::capas::TipoDeFundo::Desfocado, None))
+                    .child(
+                        div()
+                            .relative()
+                            .px(px(lado))
+                            .pt(px(32.0))
+                            .pb(px(48.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(24.0))
+                            .child(cabecalho)
+                            .children(embaixo),
+                    ),
+            )
+            .child(div().px(px(lado)).pb(px(24.0)).flex().flex_col().gap(px(24.0)).child(seletor).child(conteudo))
     }
 
     fn aviso_da_pagina(&self, frase: &'static str) -> Div {
-        div().child(texto(14.0).text_color(self.cores().texto_2).child(frase))
+        div().child(medidas::apoio().text_color(self.cores().texto_2).child(frase))
     }
 
     /// A letra é a da faixa que toca (a F4 busca só essa): de outra faixa, a frase diz quando ela aparece.
@@ -231,29 +259,33 @@ impl Player {
         }
         // O módulo Letra já está à vista no painel: a mesma letra nos dois lugares andaria em dobro (a mola e as
         // dicas são uma só). Aqui fica o aviso e a tela cheia.
-        let no_painel = match self.arranjo.modo {
-            Modo::Largo => self.ajustes.painel_aberto,
-            Modo::Gaveta => self.gaveta_aberta,
-            _ => false,
-        } && self.ajustes.modulos.contains(&nucleo::Modulo::Letra);
-        let letra =
-            if no_painel { self.aviso_da_pagina("A letra está no painel ao lado.") } else { self.corpo_letra(cx) };
+        let no_painel = self.painel_a_vista()
+            && match self.aba_do_painel {
+                AbaDoPainel::Agora => self.ajustes.modulos.contains(&nucleo::Modulo::Letra),
+                AbaDoPainel::Letra => true,
+                AbaDoPainel::Fila => false,
+            };
+        let letra = if no_painel {
+            self.aviso_da_pagina("A letra está no painel ao lado.")
+        } else {
+            self.corpo_letra(super::painel::TamanhoDaLetra::MODULO, cx)
+        };
         div().max_w(px(640.0)).flex().flex_col().items_start().gap(px(16.0)).child(letra).child(
-            texto(13.0)
+            medidas::apoio()
                 .id("faixa-letra-cheia")
-                .h(px(36.0))
+                .h(px(medidas::FICHA))
                 .px(px(14.0))
                 .flex()
                 .flex_none()
                 .items_center()
                 .gap(px(8.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .border_1()
                 .border_color(c.linha_2)
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|s| s.bg(c.hover))
-                .child(icone("icones/expand.svg", 16.0, c.texto))
+                .child(icone("icones/expand.svg", medidas::ICONE_LINHA, c.texto))
                 .child("Letra em tela cheia")
                 .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                     this.executar(Comando::LetraTelaCheia, window, cx);
@@ -274,7 +306,7 @@ impl Player {
                 "O mapa aparece quando a faixa é analisada: isso acontece quando ela toca ou é uma das próximas da fila."
             });
         };
-        let acento = self.paleta_do_espaco().acento;
+        let acento = c.texto;
         let cores: [Hsla; 3] = [com_alfa(c.texto, 0.32), com_alfa(acento, 0.62), acento];
         let marca = c.texto;
         let posicao =
@@ -295,23 +327,26 @@ impl Player {
                     let t = (i as f64 + 0.5) / n as f64 * duracao;
                     let h = 3.0 + e.clamp(0.0, 1.0) * (altura - 14.0);
                     let barra = Bounds::new(
-                        point(px(x0 + i as f32 * passo), px(base - h)),
-                        size(px((passo - 1.5).max(1.0)), px(h)),
+                        point(gpui::px(x0 + i as f32 * passo), gpui::px(base - h)),
+                        size(gpui::px((passo - 1.5).max(1.0)), gpui::px(h)),
                     );
-                    window.paint_quad(fill(barra, cores[nivel_em(t) as usize]).corner_radii(px(1.5)));
+                    window.paint_quad(fill(barra, cores[nivel_em(t) as usize]).corner_radii(gpui::px(1.5)));
                 }
                 // Os drops: um tracinho no alto.
                 for d in &a.drops {
                     let x = x0 + (d.t / duracao) as f32 * largura;
                     window.paint_quad(
-                        fill(Bounds::new(point(px(x - 1.5), area.origin.y), size(px(3.0), px(8.0))), marca)
-                            .corner_radii(px(1.5)),
+                        fill(
+                            Bounds::new(point(gpui::px(x - 1.5), area.origin.y), size(gpui::px(3.0), gpui::px(8.0))),
+                            marca,
+                        )
+                        .corner_radii(gpui::px(1.5)),
                     );
                 }
                 if let Some(p) = posicao {
                     let x = x0 + p * largura;
                     window.paint_quad(fill(
-                        Bounds::new(point(px(x - 1.0), area.origin.y), size(px(2.0), px(altura))),
+                        Bounds::new(point(gpui::px(x - 1.0), area.origin.y), size(gpui::px(2.0), gpui::px(altura))),
                         marca,
                     ));
                 }
@@ -325,10 +360,10 @@ impl Player {
                 .flex()
                 .flex_col()
                 .gap(px(2.0))
-                .child(texto(12.0).text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child(rotulo))
+                .child(medidas::apoio().text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child(rotulo))
                 .child(mono().text_color(c.texto).child(valor))
         };
-        let tom = analise.tom.as_ref().map_or_else(|| "—".to_string(), |t| format!("{} · {}", t.nome, t.camelot));
+        let tom = analise.tom.as_ref().map_or_else(|| "—".to_string(), |t| format!("{} ({})", t.nome, t.camelot));
         let bpm = if analise.bpm > 0.0 { format!("{:.0}", analise.bpm) } else { "—".to_string() };
         let mut legenda = div().flex().items_center().gap(px(14.0));
         for (nome, cor) in TRECHOS.iter().zip(cores) {
@@ -337,8 +372,8 @@ impl Player {
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .child(div().size(px(10.0)).rounded(px(3.0)).bg(cor))
-                    .child(texto(12.0).text_color(c.texto_2).child(*nome)),
+                    .child(div().size(px(10.0)).rounded(px(medidas::raio_fino(6.0))).bg(cor))
+                    .child(medidas::apoio().text_color(c.texto_2).child(*nome)),
             );
         }
         div()
@@ -353,8 +388,8 @@ impl Player {
                     .gap(px(28.0))
                     .child(dado("BPM", bpm))
                     .child(dado("TOM", tom))
-                    .child(dado("DROPS", analise.drops.len().to_string()))
-                    .child(dado("DURAÇÃO", tempo(analise.duracao_s))),
+                    .child(dado("Drops", analise.drops.len().to_string()))
+                    .child(dado("Duração", tempo(analise.duracao_s))),
             )
             .child(legenda)
     }

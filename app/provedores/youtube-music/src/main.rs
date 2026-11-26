@@ -16,7 +16,7 @@ mod visionos;
 use conversao::{album_item, artista_item, faixa, playlist_item};
 use provedores::{
     Apresentacao, Capacidade, Causa, CorpoDaResposta, CorpoDoPedido, Fonte, Identidade, Item, Prateleira, Servico,
-    VERSAO_DO_PROTOCOLO, servir,
+    TipoDaPrateleira, VERSAO_DO_PROTOCOLO, servir,
 };
 use rustypipe::client::RustyPipe;
 use rustypipe::error::Error;
@@ -50,6 +50,10 @@ fn erro(e: impl std::fmt::Display) -> CorpoDaResposta {
 }
 
 /// O erro do rustypipe, com a causa que ele deixa ver.
+fn com_detalhe(itens: Vec<Item>, detalhe: provedores::Detalhe) -> CorpoDaResposta {
+    CorpoDaResposta::Itens { itens, detalhe: Some(Box::new(detalhe)) }
+}
+
 fn erro_do_youtube(e: &Error) -> CorpoDaResposta {
     CorpoDaResposta::Erro { mensagem: e.to_string(), causa: causa_de(e) }
 }
@@ -125,34 +129,45 @@ impl YoutubeMusic {
         if falhas.len() == 5 {
             return CorpoDaResposta::Erro { mensagem: falhas.join("; "), causa };
         }
-        CorpoDaResposta::Itens { itens: conversao::juntar_busca(principal, por_tipo, limite as usize) }
+        CorpoDaResposta::itens(conversao::juntar_busca(principal, por_tipo, limite as usize))
     }
 
     /// O início: lançamentos, clipes novos e as paradas (faixas, artistas e playlists). Cada fonte é pedida à
     /// parte; a que falha ou vem vazia só fica de fora (as paradas, por exemplo, às vezes vêm vazias).
     fn inicio(&self) -> CorpoDaResposta {
-        let fileira = |titulo: &str, itens: Vec<Item>| Prateleira { titulo: titulo.into(), itens };
+        use TipoDaPrateleira as T;
+        let fileira = |titulo: &str, tipo: T, itens: Vec<Item>| Prateleira { titulo: titulo.into(), tipo, itens };
         let mut prateleiras = Vec::new();
         let mut falhas = Vec::new();
         match self.esperar(self.rp.query().music_new_albums()) {
-            Ok(a) => prateleiras.push(fileira("Lançamentos", a.iter().map(|x| Item::Album(album_item(x))).collect())),
+            Ok(a) => prateleiras.push(fileira(
+                "Lançamentos",
+                T::Lancamentos,
+                a.iter().map(|x| Item::Album(album_item(x))).collect(),
+            )),
             Err(e) => falhas.push(e.to_string()),
         }
         match self.esperar(self.rp.query().music_new_videos()) {
-            Ok(v) => prateleiras.push(fileira("Clipes novos", v.iter().map(|t| Item::Faixa(faixa(t))).collect())),
+            Ok(v) => {
+                prateleiras.push(fileira("Clipes novos", T::Clipes, v.iter().map(|t| Item::Faixa(faixa(t))).collect()))
+            }
             Err(e) => falhas.push(e.to_string()),
         }
         match self.esperar(self.rp.query().music_charts(None)) {
             Ok(c) => {
                 let faixas = |v: &[rustypipe::model::TrackItem]| v.iter().map(|t| Item::Faixa(faixa(t))).collect();
-                prateleiras.push(fileira("Mais tocadas", faixas(&c.top_tracks)));
-                prateleiras.push(fileira("Em alta", faixas(&c.trending_tracks)));
+                prateleiras.push(fileira("Mais tocadas", T::Paradas, faixas(&c.top_tracks)));
+                prateleiras.push(fileira("Em alta", T::Paradas, faixas(&c.trending_tracks)));
                 prateleiras.push(fileira(
                     "Artistas em alta",
+                    T::Artistas,
                     c.artists.iter().map(|a| Item::Artista(artista_item(a))).collect(),
                 ));
-                prateleiras
-                    .push(fileira("Paradas", c.playlists.iter().map(|p| Item::Playlist(playlist_item(p))).collect()));
+                prateleiras.push(fileira(
+                    "Paradas",
+                    T::Paradas,
+                    c.playlists.iter().map(|p| Item::Playlist(playlist_item(p))).collect(),
+                ));
             }
             Err(e) => falhas.push(e.to_string()),
         }
@@ -181,7 +196,7 @@ impl YoutubeMusic {
                         Item::Faixa(f)
                     })
                     .collect();
-                CorpoDaResposta::Itens { itens }
+                com_detalhe(itens, conversao::detalhe_do_album(&a))
             }
             Err(e) => erro_do_youtube(&e),
         }
@@ -189,7 +204,10 @@ impl YoutubeMusic {
 
     fn playlist(&self, id: &str) -> CorpoDaResposta {
         match self.esperar(self.rp.query().music_playlist(id)) {
-            Ok(p) => CorpoDaResposta::Itens { itens: p.tracks.items.iter().map(|t| Item::Faixa(faixa(t))).collect() },
+            Ok(p) => com_detalhe(
+                p.tracks.items.iter().map(|t| Item::Faixa(faixa(t))).collect(),
+                conversao::detalhe_da_playlist(&p),
+            ),
             Err(e) => erro_do_youtube(&e),
         }
     }
@@ -199,7 +217,7 @@ impl YoutubeMusic {
             Ok(a) => {
                 let mut itens: Vec<Item> = a.tracks.iter().map(|t| Item::Faixa(faixa(t))).collect();
                 itens.extend(a.albums.iter().map(|al| Item::Album(album_item(al))));
-                CorpoDaResposta::Itens { itens }
+                com_detalhe(itens, conversao::detalhe_do_artista(&a))
             }
             Err(e) => erro_do_youtube(&e),
         }
@@ -265,7 +283,7 @@ impl Servico for YoutubeMusic {
 
 /// O modo de teste: busca, mostra os resultados e resolve a primeira faixa.
 fn testar(yt: &mut YoutubeMusic, texto: &str) {
-    let CorpoDaResposta::Itens { itens } = yt.buscar(texto, 5) else {
+    let CorpoDaResposta::Itens { itens, .. } = yt.buscar(texto, 5) else {
         eprintln!("a busca falhou: {:?}", yt.buscar(texto, 5));
         return;
     };

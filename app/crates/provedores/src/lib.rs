@@ -13,7 +13,9 @@ pub mod servidor;
 
 pub use casador::{LIMIAR, melhor_par, nota};
 pub use cliente::Provedor;
-pub use modelo::{Album, Artista, Capacidade, Faixa, Item, Playlist, Prateleira};
+pub use modelo::{
+    Album, Artista, Capacidade, Detalhe, Faixa, Item, Playlist, Prateleira, TipoDaPrateleira, TipoDeAlbum,
+};
 pub use protocolo::{
     Acao, Apresentacao, Causa, Conta, CorpoDaResposta, CorpoDoPedido, EstadoDoTocador, Fonte, Identidade,
     MAXIMO_DA_LOGO, Segredo, SituacaoDaConta, SituacaoDaFaixa, SituacaoDoTocador, Tocando, VERSAO_DO_PROTOCOLO,

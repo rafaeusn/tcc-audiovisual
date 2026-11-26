@@ -173,8 +173,14 @@ impl PedidoDePagina {
 pub enum PaginaRemota {
     Carregando,
     Prateleiras(Vec<Prateleira>),
-    Itens(Vec<Item>),
+    /// Os itens e, nas páginas de álbum, artista e playlist, o que mais o serviço mandou.
+    Itens(Vec<Item>, Option<Arc<provedores::Detalhe>>),
     Erro(String),
+}
+
+/// A página com o detalhe que veio.
+fn com_detalhe((itens, detalhe): (Vec<Item>, Option<Box<provedores::Detalhe>>)) -> PaginaRemota {
+    PaginaRemota::Itens(itens, detalhe.map(Arc::from))
 }
 
 /// A página guardada há mais tempo que [`VALIDADE_DA_PAGINA`] é pedida de novo.
@@ -257,6 +263,13 @@ struct Estado {
     recarregar: bool,
     /// As páginas pedidas, com a hora em que chegaram (ou foram pedidas).
     paginas: HashMap<PedidoDePagina, (Instant, Arc<PaginaRemota>)>,
+    /// O mesmo artista noutro serviço (pela chave de [`chave_do_artista`]): `None` foi procurado e não achou, ou ainda procura.
+    artistas: HashMap<String, Option<provedores::Artista>>,
+}
+
+/// A chave do par de um artista noutro serviço (em `pares.json`, ao lado dos pares das faixas).
+fn chave_do_artista(origem: &provedores::Artista, destino: &str) -> String {
+    format!("artista:{}:{}:{destino}", origem.servico, origem.id)
 }
 
 enum Tarefa {
@@ -275,6 +288,11 @@ enum Tarefa {
         recusar: bool,
     },
     Pagina(PedidoDePagina),
+    /// Procura neste serviço o artista `nome` (o par fica na `chave`).
+    AcharArtista {
+        nome: String,
+        chave: String,
+    },
     Entrar,
     Sair,
     /// Só para reabrir um provedor que fechou.
@@ -310,6 +328,9 @@ pub fn musica_de(f: &Faixa, fonte: &str) -> Musica {
             isrc: f.isrc_limpo(),
             capa: f.capa.clone(),
             fonte: fonte.to_string(),
+            album_id: f.album_id.clone(),
+            artistas: f.artistas.clone(),
+            artistas_ids: f.artistas_ids.clone(),
         }),
         ..Default::default()
     }
@@ -754,6 +775,25 @@ impl Remoto {
         travar(&self.pares).de(m.caminho.to_string_lossy().as_ref()).filter(|p| p.servico == servico).cloned()
     }
 
+    /// O mesmo artista no serviço `destino`, quando já se sabe; se não, procura (uma vez por abertura: a resposta fica
+    /// guardada quando acha).
+    pub fn artista_em(&self, origem: &provedores::Artista, destino: &str) -> Option<provedores::Artista> {
+        let chave = chave_do_artista(origem, destino);
+        if let Some(par) = travar(&self.pares).de(&chave) {
+            let (id, nome) = (par.id.clone(), par.titulo.clone());
+            return Some(provedores::Artista { servico: destino.to_string(), id, nome, foto: None });
+        }
+        let mut e = travar(&self.estado);
+        if let Some(achado) = e.artistas.get(&chave) {
+            return achado.clone();
+        }
+        let t = self.trabalhadores.get(destino)?;
+        e.artistas.insert(chave.clone(), None);
+        drop(e);
+        let _ = t.tarefas.send(Tarefa::AcharArtista { nome: origem.nome.clone(), chave });
+        None
+    }
+
     /// Recusa o par de agora e procura outro.
     pub fn outro_par(&mut self, m: &Musica) {
         if let QuemToca::Outro(servico) = self.quem_toca_esta(m) {
@@ -828,7 +868,7 @@ impl Remoto {
         }
         // Uma página pronta que venceu fica na tela enquanto a nova não chega (não volta a "carregando").
         if let Some((_, pagina)) =
-            guardada.filter(|(_, p)| matches!(**p, PaginaRemota::Prateleiras(_) | PaginaRemota::Itens(_)))
+            guardada.filter(|(_, p)| matches!(**p, PaginaRemota::Prateleiras(_) | PaginaRemota::Itens(_, _)))
         {
             if let Some(t) = self.trabalhadores.get(pedido.servico()) {
                 let _ = t.tarefas.send(Tarefa::Pagina(pedido.clone()));
@@ -1147,17 +1187,17 @@ fn trabalhar(
                         let resposta = match &pedido {
                             PedidoDePagina::Inicio { .. } => p.inicio(PRAZO).map(PaginaRemota::Prateleiras),
                             PedidoDePagina::Biblioteca { .. } => {
-                                p.itens(CorpoDoPedido::Biblioteca, PRAZO).map(PaginaRemota::Itens)
+                                p.itens(CorpoDoPedido::Biblioteca, PRAZO).map(|i| PaginaRemota::Itens(i, None))
                             }
                             PedidoDePagina::Album { id, .. } => {
-                                p.itens(CorpoDoPedido::Album { album: id.clone() }, PRAZO).map(PaginaRemota::Itens)
+                                p.pagina(CorpoDoPedido::Album { album: id.clone() }, PRAZO).map(com_detalhe)
                             }
                             PedidoDePagina::Artista { id, .. } => {
-                                p.itens(CorpoDoPedido::Artista { artista: id.clone() }, PRAZO).map(PaginaRemota::Itens)
+                                p.pagina(CorpoDoPedido::Artista { artista: id.clone() }, PRAZO).map(com_detalhe)
                             }
-                            PedidoDePagina::Playlist { id, .. } => p
-                                .itens(CorpoDoPedido::Playlist { playlist: id.clone() }, PRAZO)
-                                .map(PaginaRemota::Itens),
+                            PedidoDePagina::Playlist { id, .. } => {
+                                p.pagina(CorpoDoPedido::Playlist { playlist: id.clone() }, PRAZO).map(com_detalhe)
+                            }
                         };
                         resposta.unwrap_or_else(|e| PaginaRemota::Erro(format!("{nome}: {}", motivo(&e))))
                     }
@@ -1169,7 +1209,7 @@ fn trabalhar(
                 let tinha = e
                     .paginas
                     .get(&pedido)
-                    .is_some_and(|(_, p)| matches!(**p, PaginaRemota::Prateleiras(_) | PaginaRemota::Itens(_)));
+                    .is_some_and(|(_, p)| matches!(**p, PaginaRemota::Prateleiras(_) | PaginaRemota::Itens(_, _)));
                 if matches!(resultado, PaginaRemota::Erro(_)) && tinha {
                     log::info!("{nome}: a página não renovou; fica a de antes");
                 } else {
@@ -1181,6 +1221,28 @@ fn trabalhar(
                 if errou && vivo.is_some_and(|p| p.apresentacao().sabe(Capacidade::Conta)) {
                     (duvidas, perguntou) = (DUVIDAS_DA_CONTA, Instant::now() - PERGUNTA_DA_CONTA);
                 }
+            }
+            Tarefa::AcharArtista { nome: procurado, chave } => {
+                let achado = match vivo {
+                    Some(p)
+                        if p.apresentacao().sabe(Capacidade::Busca) && p.apresentacao().sabe(Capacidade::Artista) =>
+                    {
+                        p.buscar(&procurado, 5, PRAZO)
+                            .ok()
+                            .and_then(|itens| crate::pares::mesmo_artista(&procurado, &itens))
+                    }
+                    _ => None,
+                };
+                if let Some(a) = &achado {
+                    let par =
+                        Par { servico: a.servico.clone(), id: a.id.clone(), titulo: a.nome.clone(), ..Par::default() };
+                    let a_gravar = travar(pares).guardar(&chave, par);
+                    if let Some(a_gravar) = a_gravar {
+                        a_gravar.gravar();
+                    }
+                }
+                travar(estado).artistas.insert(chave, achado);
+                versao.fetch_add(1, Ordering::Release);
             }
             Tarefa::Entrar => {
                 let conta = match vivo {
@@ -1420,7 +1482,7 @@ mod testes {
         r.abrir_pagina(pedido.clone());
         assert!(esperar(
             &mut r,
-            |r| matches!(r.pagina(&pedido).as_deref(), Some(PaginaRemota::Itens(i)) if i.len() == 1)
+            |r| matches!(r.pagina(&pedido).as_deref(), Some(PaginaRemota::Itens(i, _)) if i.len() == 1)
         ));
         drop(r);
         let _ = std::fs::remove_dir_all(&raiz);
@@ -1710,13 +1772,13 @@ mod testes {
         r.quadro();
         assert!(matches!(r.pagina(&p).as_deref(), Some(PaginaRemota::Erro(_))));
         // Como se o provedor tivesse respondido: a página chega no estado e a versão muda.
-        travar(&r.estado).paginas.insert(p.clone(), (Instant::now(), Arc::new(PaginaRemota::Itens(Vec::new()))));
+        travar(&r.estado).paginas.insert(p.clone(), (Instant::now(), Arc::new(PaginaRemota::Itens(Vec::new(), None))));
         r.versao.fetch_add(1, Ordering::Release);
         r.abrir_pagina(p.clone());
         r.quadro();
         assert_eq!(
             r.pagina(&p).as_deref(),
-            Some(&PaginaRemota::Itens(Vec::new())),
+            Some(&PaginaRemota::Itens(Vec::new(), None)),
             "guardada e válida: não pede de novo"
         );
         r.de_novo(&p);
@@ -1745,7 +1807,7 @@ mod testes {
         let mut r = Remoto::iniciar(None, &[]);
         let velha = PedidoDePagina::Inicio { servico: "velho".into() };
         let antes = Instant::now().checked_sub(Duration::from_secs(11 * 60)).expect("relógio");
-        travar(&r.estado).paginas.insert(velha.clone(), (antes, Arc::new(PaginaRemota::Itens(Vec::new()))));
+        travar(&r.estado).paginas.insert(velha.clone(), (antes, Arc::new(PaginaRemota::Itens(Vec::new(), None))));
         r.abrir_pagina(PedidoDePagina::Inicio { servico: "outro".into() });
         assert!(!travar(&r.estado).paginas.contains_key(&velha), "a vencida saiu");
     }
@@ -1755,11 +1817,11 @@ mod testes {
         let mut r = Remoto::iniciar(None, &[]);
         let p = PedidoDePagina::Inicio { servico: "nenhum".into() };
         let antes = Instant::now().checked_sub(Duration::from_secs(11 * 60)).expect("relógio");
-        travar(&r.estado).paginas.insert(p.clone(), (antes, Arc::new(PaginaRemota::Itens(Vec::new()))));
+        travar(&r.estado).paginas.insert(p.clone(), (antes, Arc::new(PaginaRemota::Itens(Vec::new(), None))));
         r.versao.fetch_add(1, Ordering::Release);
         r.abrir_pagina(p.clone());
         r.quadro();
-        assert_eq!(r.pagina(&p).as_deref(), Some(&PaginaRemota::Itens(Vec::new())), "não some para 'carregando'");
+        assert_eq!(r.pagina(&p).as_deref(), Some(&PaginaRemota::Itens(Vec::new(), None)), "não some para 'carregando'");
         let versao = r.versao.load(Ordering::Acquire);
         r.abrir_pagina(p.clone());
         assert_eq!(r.versao.load(Ordering::Acquire), versao, "renovada agora: não pede de novo a cada quadro");

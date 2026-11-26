@@ -3,9 +3,10 @@
 //! É aqui que a pessoa aceita (ou não) o que o módulo faz. Cada ação aparece com o motivo que o autor escreveu;
 //! as críticas vêm destacadas. Instalar só fica disponível depois de marcar a caixa de que leu.
 
-use super::{RAIO_CONTROLE, RAIO_MODULO, icone, mono, texto, titulo};
+use super::{RAIO_CONTROLE, RAIO_MODULO, icone, medidas, mono};
 use crate::app::Player;
-use gpui::{AnyElement, ClickEvent, Context, Div, FontWeight, SharedString, div, prelude::*, px};
+use crate::ui::medidas::px;
+use gpui::{AnyElement, ClickEvent, Context, Div, FontWeight, SharedString, div, prelude::*};
 use modulos::{Acao, Categoria, Manifesto};
 
 fn icone_da_acao(a: Acao) -> &'static str {
@@ -99,18 +100,18 @@ impl Player {
                 .rounded(px(RAIO_CONTROLE + 2.0))
                 .border_1()
                 .border_color(if problema { c.alerta } else { c.linha_2 })
-                .child(icone("icones/info.svg", 18.0, if problema { c.alerta } else { c.texto_2 }))
-                .child(texto(14.0).flex_1().min_w(px(0.0)).child(frase))
+                .child(icone("icones/info.svg", medidas::ICONE_LINHA, if problema { c.alerta } else { c.texto_2 }))
+                .child(medidas::corpo().flex_1().min_w(px(0.0)).child(frase))
                 .when_some(botao, |d, rotulo| {
                     d.child(
-                        texto(14.0)
+                        medidas::apoio()
                             .id("ficha-conta")
-                            .h(px(36.0))
+                            .h(px(medidas::FICHA))
                             .px(px(14.0))
                             .flex()
                             .flex_none()
                             .items_center()
-                            .rounded(px(999.0))
+                            .rounded(px(medidas::PILULA))
                             .font_weight(FontWeight::SEMIBOLD)
                             .cursor_pointer()
                             .when(conectado, |b| b.border_1().border_color(c.linha_2).hover(|s| s.bg(c.hover)))
@@ -154,7 +155,7 @@ impl Player {
                     .justify_center()
                     .rounded(px(RAIO_CONTROLE + 2.0))
                     .bg(c.sel)
-                    .child(icone(icone_da_categoria(m.categoria), 24.0, c.texto)),
+                    .child(icone(icone_da_categoria(m.categoria), medidas::ICONE, c.texto)),
             )
             .child(
                 div()
@@ -162,13 +163,13 @@ impl Player {
                     .min_w(px(0.0))
                     .flex()
                     .flex_col()
-                    .child(titulo(24.0).truncate().child(SharedString::from(m.nome.clone())))
-                    .child(texto(12.0).text_color(c.texto_2).truncate().child(format!(
-                        "{} · versão {} · por {}",
+                    .child(medidas::secao().child(super::linha(m.nome.clone())))
+                    .child(medidas::apoio().text_color(c.texto_2).child(super::linha(format!(
+                        "{}, versão {}, por {}",
                         m.categoria.nome(),
                         m.versao,
                         m.autor
-                    ))),
+                    )))),
             )
             .child(
                 div()
@@ -181,7 +182,7 @@ impl Player {
                     .rounded(px(RAIO_CONTROLE))
                     .cursor_pointer()
                     .hover(|s| s.bg(c.hover))
-                    .child(icone("icones/x.svg", 18.0, c.texto_2))
+                    .child(icone("icones/x.svg", medidas::ICONE_LINHA, c.texto_2))
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.fechar_ficha();
                         cx.notify();
@@ -203,16 +204,18 @@ impl Player {
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .child(texto(14.0).text_color(cor).font_weight(FontWeight::SEMIBOLD).child(p.acao.rotulo()))
+                        .child(
+                            medidas::corpo().text_color(cor).font_weight(FontWeight::SEMIBOLD).child(p.acao.rotulo()),
+                        )
                         .when(critica, |d| {
                             d.child(
-                                texto(12.0)
-                                    .h(px(20.0))
+                                medidas::apoio()
+                                    .h(px(medidas::SELO))
                                     .px(px(8.0))
                                     .flex()
                                     .flex_none()
                                     .items_center()
-                                    .rounded(px(999.0))
+                                    .rounded(px(medidas::PILULA))
                                     .border_1()
                                     .border_color(c.alerta)
                                     .text_color(c.alerta)
@@ -221,7 +224,7 @@ impl Player {
                             )
                         }),
                 )
-                .child(texto(14.0).text_color(c.texto_2).child(SharedString::from(p.motivo.clone())));
+                .child(medidas::apoio().text_color(c.texto_2).child(SharedString::from(p.motivo.clone())));
             if !p.enderecos.is_empty() {
                 let onde = if p.enderecos.iter().any(|e| e == "*") {
                     "qualquer site".to_string()
@@ -237,7 +240,7 @@ impl Player {
                     .items_start()
                     .gap(px(12.0))
                     .when(i + 1 < m.acoes.len(), |d| d.border_b_1().border_color(c.linha))
-                    .child(div().pt(px(2.0)).child(icone(icone_da_acao(p.acao), 18.0, cor)))
+                    .child(div().pt(px(2.0)).child(icone(icone_da_acao(p.acao), medidas::ICONE_LINHA, cor)))
                     .child(textos),
             );
         }
@@ -252,7 +255,7 @@ impl Player {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(texto(14.0).text_color(c.texto_2).child(SharedString::from(m.descricao.clone())))
+            .child(medidas::apoio().text_color(c.texto_2).child(SharedString::from(m.descricao.clone())))
             .when(!pendencias.is_empty(), |d| {
                 let lista: Vec<String> = pendencias
                     .iter()
@@ -272,8 +275,8 @@ impl Player {
                         .rounded(px(RAIO_CONTROLE))
                         .border_1()
                         .border_color(c.alerta)
-                        .child(icone("icones/info.svg", 18.0, c.alerta))
-                        .child(texto(14.0).flex_1().min_w(px(0.0)).child(format!(
+                        .child(icone("icones/info.svg", medidas::ICONE_LINHA, c.alerta))
+                        .child(medidas::corpo().flex_1().min_w(px(0.0)).child(format!(
                             "A versão {} pede mais do que você aceitou: {}. Até você aceitar, o módulo fica parado.",
                             m.versao,
                             lista.join("; ")
@@ -282,26 +285,26 @@ impl Player {
             })
             .children(self.situacao_do_servico(m, cx))
             .child(
-                texto(12.0)
+                medidas::apoio()
                     .pt(px(4.0))
                     .text_color(c.texto_3)
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("O que este módulo faz"),
             )
             .child(acoes)
-            .child(texto(12.0).text_color(c.texto_3).child(
+            .child(medidas::apoio().text_color(c.texto_3).child(
                 "O módulo só pode fazer o que está nesta lista. Se uma versão nova pedir algo a mais, ela espera você aceitar.",
             ));
 
         let botao = |id: &'static str, rotulo: &'static str, cheio: bool, ativo: bool| {
-            let b = texto(14.0)
+            let b = medidas::corpo()
                 .id(id)
-                .h(px(40.0))
+                .h(px(medidas::BOTAO))
                 .px(px(18.0))
                 .flex()
                 .flex_none()
                 .items_center()
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(rotulo);
             let b = if cheio {
@@ -314,7 +317,7 @@ impl Player {
         let rodape: Div =
             div().flex().flex_none().items_center().gap(px(12.0)).p(px(20.0)).border_t_1().border_color(c.linha_2);
         let rodape = if !m.pronto {
-            rodape.child(texto(14.0).flex_1().min_w(px(0.0)).text_color(c.texto_2).child(
+            rodape.child(medidas::apoio().flex_1().min_w(px(0.0)).text_color(c.texto_2).child(
                 "Ainda não dá para instalar: o código deste módulo não ficou pronto. A lista acima é o que ele vai pedir.",
             ))
         } else if instalado {
@@ -326,8 +329,8 @@ impl Player {
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .child(icone("icones/check.svg", 18.0, c.texto))
-                        .child(texto(14.0).font_weight(FontWeight::SEMIBOLD).child("Instalado")),
+                        .child(icone("icones/check.svg", medidas::ICONE_LINHA, c.texto))
+                        .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child("Instalado")),
                 )
                 .child(botao("ficha-desinstalar", "Desinstalar", false, true).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
@@ -355,12 +358,14 @@ impl Player {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(px(6.0))
+                                .rounded(px(medidas::raio_fino(12.0)))
                                 .border_1()
                                 .border_color(if marcado { c.inv } else { c.texto_2 })
-                                .when(marcado, |d| d.bg(c.inv).child(icone("icones/check.svg", 16.0, c.inv_texto))),
+                                .when(marcado, |d| {
+                                    d.bg(c.inv).child(icone("icones/check.svg", medidas::ICONE_LINHA, c.inv_texto))
+                                }),
                         )
-                        .child(texto(14.0).child("Li o que este módulo faz"))
+                        .child(medidas::corpo().child("Li o que este módulo faz"))
                         .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                             this.aceite_marcado = !this.aceite_marcado;
                             cx.notify();

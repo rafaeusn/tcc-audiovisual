@@ -26,6 +26,11 @@ pub struct Remota {
     pub capa: Option<String>,
     /// O nome do provedor, para mostrar ("YouTube Music").
     pub fonte: String,
+    /// O id do álbum e os artistas com o id de cada um (`""` quando não tem), para os links. Só na memória: uma faixa lida
+    /// de uma playlist guardada não os tem.
+    pub album_id: Option<String>,
+    pub artistas: Vec<String>,
+    pub artistas_ids: Vec<String>,
 }
 
 /// Uma música do acervo, ou uma faixa de provedor (com `remota`). Na faixa de provedor, `caminho` não é um

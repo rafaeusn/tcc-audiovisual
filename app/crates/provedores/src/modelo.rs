@@ -29,6 +29,9 @@ pub struct Faixa {
     pub capa: Option<String>,
     /// Um vídeo (clipe, ao vivo gravado, envio de fã), e não a faixa do álbum.
     pub video: bool,
+    /// Quantas vezes foi ouvida no serviço.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ouvidas: Option<u64>,
 }
 
 impl Faixa {
@@ -69,6 +72,20 @@ pub struct Album {
     pub ano: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capa: Option<String>,
+    #[serde(rename = "tipo_de_album", skip_serializing_if = "Option::is_none")]
+    pub tipo: Option<TipoDeAlbum>,
+}
+
+/// O que um lançamento é. Um tipo que o Player não conhece vale como `Outro`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TipoDeAlbum {
+    Album,
+    Single,
+    Ep,
+    Coletanea,
+    #[serde(other)]
+    Outro,
 }
 
 impl Album {
@@ -136,12 +153,84 @@ impl Item {
     }
 }
 
+/// O que uma prateleira traz: em Tudo, as do mesmo tipo de serviços diferentes aparecem juntas. Um tipo que o Player ainda
+/// não conhece vale como `Outras`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TipoDaPrateleira {
+    /// O que a pessoa mais abre (os botões do alto do app).
+    Atalhos,
+    ParaVoce,
+    Lancamentos,
+    /// O que tocou há pouco.
+    Recentes,
+    Artistas,
+    Clipes,
+    Paradas,
+    /// Na página de um artista: o lançamento mais novo e os artistas parecidos.
+    UltimoLancamento,
+    Parecidos,
+    /// Na página de um álbum: outros do mesmo artista.
+    MaisDoArtista,
+    #[default]
+    #[serde(other)]
+    Outras,
+}
+
 /// Uma fileira da página inicial do serviço ("Para você", "Lançamentos"...).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prateleira {
     pub titulo: String,
+    #[serde(skip_serializing_if = "outras")]
+    pub tipo: TipoDaPrateleira,
     pub itens: Vec<Item>,
+}
+
+fn outras(tipo: &TipoDaPrateleira) -> bool {
+    *tipo == TipoDaPrateleira::Outras
+}
+
+/// O que se sabe de um álbum, artista ou playlist além das faixas. Tudo opcional: cada serviço manda o que tem.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Detalhe {
+    /// O item completo (a página pode ter sido aberta por um link, só com o id e o nome).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<Item>,
+    /// Uma imagem larga, para o fundo do cabeçalho.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imagem: Option<String>,
+    /// A cor da imagem, `#RRGGBB`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cor: Option<String>,
+    /// A biografia do artista, a descrição da playlist ou do álbum (texto puro).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descricao: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fotos: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seguidores: Option<u64>,
+    /// Ouvintes no último mês.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ouvintes: Option<u64>,
+    /// Quantas faixas tem ao todo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duracao_s: Option<f64>,
+    /// `AAAA`, `AAAA-MM` ou `AAAA-MM-DD`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gravadora: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tipo: Option<TipoDeAlbum>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dono: Option<String>,
+    /// As outras prateleiras da página (o último lançamento, os parecidos, mais do artista).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub secoes: Vec<Prateleira>,
 }
 
 /// O que um provedor sabe fazer. Uma capacidade nova que o Player ainda não conhece é ignorada.
@@ -198,7 +287,30 @@ mod testes {
         let minimo: Item =
             serde_json::from_str(r#"{"tipo":"faixa","servico":"s","id":"9","titulo":"T","novo":1}"#).expect("mínimo");
         assert_eq!(minimo.faixa().map(|f| f.titulo.as_str()), Some("T"));
+        // A prateleira de um provedor antigo não tem tipo; a de um mais novo pode ter um que não conhecemos.
+        let sem: Prateleira = serde_json::from_str(r#"{"titulo":"P","itens":[]}"#).expect("sem tipo");
+        assert_eq!(sem.tipo, TipoDaPrateleira::Outras);
+        assert!(!serde_json::to_string(&sem).expect("json").contains("tipo"));
+        let novo: Prateleira = serde_json::from_str(r#"{"titulo":"P","tipo":"para-dormir","itens":[]}"#).expect("novo");
+        assert_eq!(novo.tipo, TipoDaPrateleira::Outras);
+        let conhecido: Prateleira =
+            serde_json::from_str(r#"{"titulo":"P","tipo":"para-voce","itens":[]}"#).expect("tipo");
+        assert_eq!(conhecido.tipo, TipoDaPrateleira::ParaVoce);
         assert_eq!(minimo.servico(), "s");
+    }
+
+    #[test]
+    fn detalhe_e_tipo_de_album_opcionais() {
+        let d: Detalhe = serde_json::from_str(r#"{"ouvintes":28289213,"novo":[1]}"#).expect("campos a mais");
+        assert_eq!(d, Detalhe { ouvintes: Some(28_289_213), ..Default::default() });
+        assert_eq!(serde_json::to_string(&Detalhe::default()).expect("json"), "{}", "vazio não pesa");
+        let a: Item = serde_json::from_str(r#"{"tipo":"album","id":"1","tipo_de_album":"ep"}"#).expect("álbum");
+        assert!(matches!(&a, Item::Album(a) if a.tipo == Some(TipoDeAlbum::Ep)));
+        assert_eq!(serde_json::from_str::<Item>(&serde_json::to_string(&a).expect("vai")).expect("volta"), a);
+        let novo: Item = serde_json::from_str(r#"{"tipo":"album","id":"1","tipo_de_album":"fita"}"#).expect("novo");
+        assert!(matches!(novo, Item::Album(a) if a.tipo == Some(TipoDeAlbum::Outro)));
+        let velho: Item = serde_json::from_str(r#"{"tipo":"album","id":"1"}"#).expect("velho");
+        assert!(matches!(velho, Item::Album(a) if a.tipo.is_none()));
     }
 
     #[test]

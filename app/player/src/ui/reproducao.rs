@@ -4,11 +4,12 @@
 //! dos outros apps não passa pelo tocador do Player.
 
 use super::painel::{bloco_ajuste, interruptor, linha_ajuste};
-use super::{mono, texto};
+use super::{medidas, mono};
 use crate::app::Player;
+use crate::ui::medidas::px;
 use gpui::{
     Bounds, ClickEvent, Context, Div, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point,
-    SharedString, canvas, div, prelude::*, px,
+    SharedString, canvas, div, prelude::*,
 };
 use nucleo::{BANDAS_EQ, PRESETS_EQ};
 
@@ -97,13 +98,13 @@ impl Player {
         for (i, (nome, ganhos)) in PRESETS_EQ.iter().enumerate() {
             let escolhido = aj.eq_ligado && preset_atual == Some(i);
             presets = presets.child(
-                texto(13.0)
+                medidas::apoio()
                     .id(("eq-preset", i))
-                    .h(px(32.0))
+                    .h(px(medidas::FICHA))
                     .px(px(12.0))
                     .flex()
                     .items_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .border_1()
                     .border_color(if escolhido { c.texto } else { c.linha_2 })
                     .when(escolhido, |d| d.bg(c.sel))
@@ -138,7 +139,7 @@ impl Player {
                     .flex_col()
                     .items_center()
                     .gap(px(4.0))
-                    .child(mono().text_size(px(11.0)).text_color(c.texto_3).child(if ganho > 0.0 {
+                    .child(mono().text_color(c.texto_3).child(if ganho > 0.0 {
                         format!("+{ganho:.0}")
                     } else {
                         format!("{ganho:.0}")
@@ -171,7 +172,7 @@ impl Player {
                                     .top(px(0.0))
                                     .w(px(2.0))
                                     .h_full()
-                                    .rounded(px(1.0))
+                                    .rounded(px(medidas::raio_fino(2.0)))
                                     .bg(c.linha_2),
                             )
                             .child(
@@ -192,7 +193,7 @@ impl Player {
                                     .top(px(topo))
                                     .w(px(8.0))
                                     .h(px(altura))
-                                    .rounded(px(4.0))
+                                    .rounded(px(medidas::raio_fino(8.0)))
                                     .bg(cor_barra),
                             )
                             .on_mouse_down(
@@ -209,7 +210,7 @@ impl Player {
                                 }
                             })),
                     )
-                    .child(mono().text_size(px(11.0)).text_color(c.texto_2).child(ROTULOS_EQ[i])),
+                    .child(mono().text_color(c.texto_2).child(ROTULOS_EQ[i])),
             );
         }
         let equalizador = linha_ajuste(
@@ -245,7 +246,9 @@ impl Player {
         );
 
         bloco_ajuste(&c, false)
-            .child(texto(12.0).text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child("Músicas do computador"))
+            .child(
+                medidas::apoio().text_color(c.texto_3).font_weight(FontWeight::SEMIBOLD).child("Músicas do computador"),
+            )
             .child(analise)
             .child(linha_ajuste(&c, "icones/swap.svg", "Crossfade", frase_crossfade))
             .child(div().pl(px(recuo)).child(crossfades))

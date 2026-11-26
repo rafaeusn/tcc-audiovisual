@@ -84,7 +84,7 @@ impl Player {
         {
             partes.push(t);
         }
-        (!partes.is_empty()).then(|| partes.join("  ·  "))
+        (!partes.is_empty()).then(|| partes.join(" / "))
     }
 
     /// O texto de baixo das linhas perto do instante `t` (as que a tela mostra), por linha.
@@ -179,7 +179,8 @@ impl Player {
         Some((p.agora(self.midia.tocando) + f64::from(self.atraso_letra), p.duracao_s))
     }
 
-    /// Pede a letra da faixa atual quando o módulo Letra está no painel. Sem o módulo, nada vai para a rede.
+    /// Pede a letra da faixa atual quando o módulo Letra está no painel ou a letra está à vista. Sem o módulo na Loja, nada vai
+    /// para a rede.
     pub(super) fn atualizar_letra(&mut self, dt: f32) {
         let versao = self.letrista.versao();
         if versao != self.versao_letra {
@@ -204,7 +205,10 @@ impl Player {
         self.t_letra = 0.0;
         let faixa = self.midia.faixa.as_ref().filter(|f| !f.titulo.is_empty());
         // A letra da Ilha também pede: só quando a pessoa abre a letra nela.
-        let ligada = (self.ajustes.modulos.contains(&Modulo::Letra) || self.letra_pela_ilha || self.letra_cheia)
+        let ligada = (self.ajustes.modulos.contains(&Modulo::Letra)
+            || self.letra_pela_ilha
+            || self.letra_cheia
+            || self.letra_na_aba())
             && self.modulo_ativo(crate::catalogo::ID_LETRA);
         let (Some(faixa), true) = (faixa, ligada) else {
             self.chave_letra = None;

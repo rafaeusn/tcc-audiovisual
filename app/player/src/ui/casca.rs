@@ -1,21 +1,40 @@
-//! A casca: barra lateral, topo (busca, modo edição e os botões da janela) e a navegação de baixo das janelas
-//! estreitas.
+//! O topo da janela: voltar e avançar, a busca, a situação do Modo Escuta, o modo edição e os botões da janela.
 
-use super::{Botao, RAIO_MODULO, caixa, icone, tecla, texto};
+use super::{caixa, icone, medidas};
 use crate::app::Player;
-use crate::arranjo::{Modo, Ret};
+use crate::arranjo::Modo;
 use crate::escuta::Situacao;
-use gpui::{
-    AnyElement, Context, Div, FontWeight, MouseButton, SharedString, Stateful, WindowControlArea, div, prelude::*, px,
-};
-use nucleo::{Comando, Pagina};
+use crate::navegacao::Campo;
+use crate::ui::medidas::px;
+use gpui::{AnyElement, Context, Div, FontWeight, MouseButton, SharedString, WindowControlArea, div, prelude::*};
+use nucleo::Comando;
 
-/// (página, rótulo, ícone normal, ícone da página ativa, id na barra lateral, id na navegação de baixo)
-const PAGINAS: [(Pagina, &str, &str, &str, &str, &str); 3] = [
-    (Pagina::Inicio, "Início", "icones/home.svg", "icones/home-f.svg", "nav-inicio", "bnav-inicio"),
-    (Pagina::Biblioteca, "Biblioteca", "icones/lib.svg", "icones/lib-f.svg", "nav-biblioteca", "bnav-biblioteca"),
-    (Pagina::Loja, "Loja", "icones/store.svg", "icones/store-f.svg", "nav-loja", "bnav-loja"),
-];
+/// A largura dos botões da janela (minimizar, maximizar, fechar).
+const CONTROLES: f32 = 3.0 * 46.0;
+/// O que sempre sobra no topo para arrastar a janela.
+const ARRASTE: f32 = 48.0;
+/// A busca não fica mais larga que isto, e mais estreita que isto vira o campo da própria página.
+const BUSCA: f32 = 560.0;
+const BUSCA_MINIMA: f32 = 200.0;
+
+/// A largura do campo do topo (`None` quando não cabe): o que sobra das setas, da situação e dos botões da janela.
+fn largura_da_busca(topo: f32) -> Option<f32> {
+    let setas = if topo >= DUAS_SETAS { 2.0 * medidas::ALVO } else { medidas::ALVO };
+    let situacao = if topo >= SITUACAO_INTEIRA {
+        260.0
+    } else if topo >= SITUACAO_CURTA {
+        180.0
+    } else {
+        0.0
+    };
+    let sobra = topo - setas - situacao - ARRASTE - CONTROLES - 24.0;
+    (sobra >= BUSCA_MINIMA).then(|| sobra.min(BUSCA).floor())
+}
+
+/// A partir de que largura do topo cabem as duas setas, a situação só com o estado e a situação com o nome da saída.
+const DUAS_SETAS: f32 = 480.0;
+const SITUACAO_CURTA: f32 = 760.0;
+const SITUACAO_INTEIRA: f32 = 1000.0;
 
 /// O sistema descreve a saída com detalhes que não cabem no topo ("Alto-falantes (Realtek) [Speaker] via ...").
 /// Fica só o começo, até o primeiro colchete.
@@ -25,76 +44,18 @@ fn nome_curto(dispositivo: &str) -> &str {
 }
 
 impl Player {
-    fn pagina_ativa(&self, p: Pagina) -> bool {
-        self.pagina() == p
+    /// O campo da busca está no topo? (Sem lugar para ele, a página Buscar o mostra.)
+    pub(crate) fn campo_no_topo(&self) -> bool {
+        !self.edicao && largura_da_busca(self.arranjo.topo.w).is_some()
     }
 
-    fn item_do_trilho(
-        &self,
-        id: &'static str,
-        caminho: &'static str,
-        ativo: bool,
-        comando: Comando,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let c = self.cores();
-        self.botao(
-            Botao {
-                id,
-                icone: caminho,
-                tamanho: 48.0,
-                tamanho_icone: 24.0,
-                raio: RAIO_MODULO,
-                cor: if ativo { c.texto } else { c.texto_2 },
-                fundo: ativo.then_some(c.sel),
-                realce: c.hover,
-                afunda: 0.94,
-            },
-            cx,
-        )
-        .on_click(self.ao_clicar(comando, cx))
-        .on_hover(self.ao_pairar(id, Some(comando), "", cx))
-    }
-
-    pub(crate) fn ver_trilho(&self, r: Ret, cx: &mut Context<Self>) -> Div {
-        let c = self.cores();
-        // O logo pulsa uma vez por compasso (não em toda batida), e nunca no modo seguro.
-        let logo = 24.0 * (1.0 + 0.08 * self.pulso_compasso);
-        let mut coluna = caixa(r).flex().flex_col().items_center().gap(px(4.0)).pb(px(16.0));
-        coluna = coluna.child(div().size(px(52.0)).flex_none().flex().items_center().justify_center().child(icone(
-            "icones/logo.svg",
-            logo,
-            c.texto,
-        )));
-        coluna = coluna.child(div().h(px(12.0)));
-        for (pagina, _, normal, cheio, id, _) in PAGINAS {
-            let ativo = self.pagina_ativa(pagina);
-            coluna = coluna.child(self.item_do_trilho(
-                id,
-                if ativo { cheio } else { normal },
-                ativo,
-                Comando::AbrirPagina(pagina),
-                cx,
-            ));
-        }
-        coluna
-            .child(div().flex_1())
-            .child(self.item_do_trilho("nav-editar", "icones/grid.svg", self.edicao, Comando::EditarLayout, cx))
-            .child(self.item_do_trilho(
-                "nav-ajustes",
-                "icones/sliders.svg",
-                self.pagina() == Pagina::Configuracoes,
-                Comando::AbrirAjustes,
-                cx,
-            ))
-    }
-
-    /// Topo: área de arrastar a janela, a situação do Modo Escuta, a busca e os botões de minimizar, maximizar e
-    /// fechar. No modo edição a busca dá lugar aos controles da edição.
+    /// Topo: voltar e avançar, a busca, a situação do Modo Escuta (na área de arrastar a janela) e os botões da janela.
+    /// No modo edição a busca dá lugar aos controles da edição.
     pub(crate) fn ver_topo(&self, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
         let a = &self.arranjo;
-        let curto = a.topo.w < 600.0;
+        let largura = a.topo.w;
+        let curto = largura < SITUACAO_INTEIRA;
         let (ponto, frase): (gpui::Hsla, SharedString) = match &self.situacao {
             Situacao::Iniciando => (c.texto_3, "Iniciando o Modo Escuta".into()),
             Situacao::Ouvindo { dispositivo } => {
@@ -109,12 +70,11 @@ impl Player {
             Situacao::SemAudio { .. } if curto => (c.alerta, "Sem saída de áudio".into()),
             Situacao::SemAudio { .. } => (c.alerta, "Sem saída de áudio. Tentando de novo...".into()),
         };
-        let estreito = a.modo == Modo::Empilhado;
         let controle = |nome: &'static str, area: WindowControlArea, caminho: &'static str, fechar: bool| {
             div()
                 .id(nome)
                 .w(px(46.0))
-                .h(px(32.0))
+                .h(px(medidas::FICHA))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -122,80 +82,72 @@ impl Player {
                 .rounded(px(super::RAIO_CONTROLE))
                 .hover(|s| if fechar { s.bg(c.alerta) } else { s.bg(c.hover) })
                 .window_control_area(area)
-                .child(icone(caminho, 16.0, c.texto_2))
+                .child(icone(caminho, medidas::ICONE_LINHA, c.texto_2))
         };
-
+        // Com a busca e sem lugar para a frase, fica o ponto (a cor dele diz se há som).
+        let busca = largura_da_busca(largura);
+        let com_frase = largura >= SITUACAO_CURTA || busca.is_none();
         let situacao = div()
-            .h(px(32.0))
+            .h(px(medidas::FICHA))
             .max_w_full()
             .min_w(px(0.0))
             .flex()
             .items_center()
             .gap(px(8.0))
-            .px(px(12.0))
-            .rounded(px(999.0))
-            .border_1()
-            .border_color(c.linha_2)
-            .when(self.imersivo(), |d| d.bg(c.painel))
-            .child(div().size(px(6.0)).flex_none().rounded(px(999.0)).bg(ponto))
-            .child(
-                texto(14.0)
-                    .min_w(px(0.0))
-                    .truncate()
-                    .text_color(c.texto_2)
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(frase),
-            );
-
-        // O meio do topo: controles da edição, ou a busca (que vira só um ícone quando não cabe).
-        let cabe_busca = a.topo.w >= 720.0;
-        let meio: Option<AnyElement> = if self.edicao {
-            Some(self.ver_barra_de_edicao(cx).into_any_element())
-        } else if cabe_busca {
-            let largura = (a.topo.w * 0.44).min(440.0);
-            Some(
-                div()
-                    .id("busca")
-                    .w(px(largura))
-                    .h(px(40.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .pl(px(14.0))
-                    .pr(px(8.0))
-                    .rounded(px(999.0))
+            .when(com_frase, |d| {
+                d.px(px(16.0))
+                    .rounded(px(medidas::PILULA))
                     .border_1()
                     .border_color(c.linha_2)
-                    .cursor_pointer()
                     .when(self.imersivo(), |d| d.bg(c.painel))
-                    .hover(|s| s.bg(c.hover))
-                    .child(icone("icones/search.svg", 18.0, c.texto_2))
-                    .child(
-                        texto(14.0)
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .truncate()
-                            .text_color(c.texto_2)
-                            .child("Buscar ou executar um comando"),
-                    )
-                    .child(div().flex().flex_none().gap(px(4.0)).child(tecla(&c, "Ctrl")).child(tecla(&c, "K")))
-                    .on_click(self.ao_clicar(Comando::AbrirPaleta, cx))
-                    .into_any_element(),
-            )
-        } else {
-            None
-        };
-        let busca_pequena = (!self.edicao && !cabe_busca)
-            .then(|| self.botao_icone("busca-pequena", "icones/search.svg", false, Comando::AbrirPaleta, cx));
+            })
+            .child(div().size(px(8.0)).flex_none().rounded(px(medidas::PILULA)).bg(ponto))
+            .when(com_frase, |d| {
+                d.child(
+                    medidas::apoio()
+                        .min_w(px(0.0))
+                        .text_color(c.texto_2)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(super::linha(frase)),
+                )
+            });
 
+        // Uma página atrás ou à frente, como no navegador.
+        let estante = self.estante();
+        let seta = |id: &'static str, caminho: &'static str, pode: bool, comando: Comando, cx: &mut Context<Self>| {
+            self.botao_icone(id, caminho, false, comando, cx).opacity(if pode { 1.0 } else { 0.4 })
+        };
+        let pode = (self.nav.pode_voltar(estante), self.nav.pode_avancar(estante));
+        let setas = div()
+            .flex()
+            .flex_none()
+            .child(seta("pagina-voltar", "icones/chev-l.svg", pode.0, Comando::Voltar, cx))
+            .when(largura >= DUAS_SETAS, |d| {
+                d.child(seta("pagina-avancar", "icones/chev-r.svg", pode.1, Comando::Avancar, cx))
+            });
+        // O meio: a busca ou os controles da edição.
+        let meio: Option<AnyElement> = match busca {
+            _ if self.edicao => Some(self.ver_barra_de_edicao(cx).into_any_element()),
+            Some(w) => Some(
+                div()
+                    .w(px(w))
+                    .flex()
+                    .flex_none()
+                    .child(self.campo_de_texto(Campo::Busca, "Buscar músicas ou comandos", cx))
+                    .into_any_element(),
+            ),
+            // Sem lugar para ele, o campo fica na página Buscar (que está na barra de baixo).
+            None => None,
+        };
         caixa(a.topo)
             // Sem isto, o foco do teclado (na raiz) marca o clique como tratado e o Windows não recebe o clique
             // nos botões da janela nem o arrasto.
             .occlude()
             .flex()
             .items_center()
-            .gap(px(12.0))
+            .gap(px(8.0))
+            .child(setas)
+            .children(meio)
             .child(
                 // Tudo o que não é botão arrasta a janela.
                 div()
@@ -203,23 +155,17 @@ impl Player {
                     .flex_basis(px(0.0))
                     .h_full()
                     .min_w(px(0.0))
+                    .pl(px(4.0))
                     .flex()
                     .items_center()
-                    .when(estreito, |d| d.child(icone("icones/logo.svg", 24.0, c.texto)).gap(px(12.0)))
                     .window_control_area(WindowControlArea::Drag)
                     .child(situacao),
             )
-            .children(meio)
             .child(
                 div()
-                    .flex_1()
-                    .flex_basis(px(0.0))
-                    .h_full()
-                    .min_w(px(0.0))
                     .flex()
+                    .flex_none()
                     .items_center()
-                    .child(div().flex_1().h_full().window_control_area(WindowControlArea::Drag))
-                    .children(busca_pequena)
                     .child(controle("Minimizar", WindowControlArea::Min, "icones/min.svg", false))
                     .child(controle("Maximizar", WindowControlArea::Max, "icones/max.svg", false))
                     .child(controle("Fechar", WindowControlArea::Close, "icones/x.svg", true)),
@@ -231,15 +177,15 @@ impl Player {
         let c = self.cores();
         let a = &self.arranjo;
         let pilula = |id: &'static str| {
-            texto(14.0)
+            medidas::corpo()
                 .id(id)
-                .h(px(40.0))
+                .h(px(medidas::BOTAO))
                 .px(px(16.0))
                 .flex()
                 .flex_none()
                 .items_center()
                 .gap(px(8.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
         };
@@ -250,16 +196,16 @@ impl Player {
             .gap(px(8.0))
             .when(a.topo.w >= 900.0, |d| {
                 d.child(
-                    texto(14.0)
-                        .h(px(40.0))
+                    medidas::corpo()
+                        .h(px(medidas::BOTAO))
                         .px(px(16.0))
                         .flex()
                         .items_center()
                         .gap(px(8.0))
-                        .rounded(px(999.0))
+                        .rounded(px(medidas::PILULA))
                         .bg(c.sel)
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child(icone("icones/grid.svg", 18.0, c.texto))
+                        .child(icone("icones/grid.svg", medidas::ICONE_LINHA, c.texto))
                         .child("Modo edição"),
                 )
             })
@@ -270,7 +216,7 @@ impl Player {
                         .border_color(c.linha_2)
                         .text_color(c.texto_2)
                         .hover(|s| s.bg(c.hover))
-                        .child(icone("icones/swap.svg", 18.0, c.texto_2))
+                        .child(icone("icones/swap.svg", medidas::ICONE_LINHA, c.texto_2))
                         .child("Trocar de lado")
                         .on_mouse_down(MouseButton::Left, self.ao_apertar("edicao-lado", cx))
                         .on_click(self.ao_clicar(Comando::TrocarLado, cx)),
@@ -285,59 +231,22 @@ impl Player {
                     .on_click(self.ao_clicar(Comando::EditarLayout, cx)),
             )
     }
-
-    /// Navegação de baixo (janelas estreitas): os mesmos destinos da barra lateral, com rótulo.
-    pub(crate) fn ver_nav(&self, r: Ret, cx: &mut Context<Self>) -> Div {
-        let c = self.cores();
-        let mut linha = caixa(r).flex().items_center().gap(px(4.0)).px(px(12.0)).border_t_1().border_color(c.linha);
-        if self.imersivo() {
-            linha = linha.bg(c.painel);
-        }
-        let mut itens: Vec<(&'static str, &'static str, &'static str, bool, Comando)> = Vec::with_capacity(4);
-        for (pagina, rotulo, normal, cheio, _, id) in PAGINAS {
-            let ativo = self.pagina_ativa(pagina);
-            itens.push((id, rotulo, if ativo { cheio } else { normal }, ativo, Comando::AbrirPagina(pagina)));
-        }
-        itens.push((
-            "bnav-ajustes",
-            "Configurações",
-            "icones/sliders.svg",
-            self.pagina() == Pagina::Configuracoes,
-            Comando::AbrirAjustes,
-        ));
-        for (id, rotulo, caminho, ativo, comando) in itens {
-            let e = self.pressao(id, 0.96);
-            let cor = if ativo { c.texto } else { c.texto_2 };
-            linha = linha.child(
-                div()
-                    .id(id)
-                    .flex_1()
-                    .h(px(52.0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(2.0))
-                    .rounded(px(RAIO_MODULO))
-                    .cursor_pointer()
-                    .when(ativo, |d| d.bg(c.sel))
-                    .child(div().size(px(22.0)).flex().items_center().justify_center().child(icone(
-                        caminho,
-                        22.0 * e,
-                        cor,
-                    )))
-                    .child(texto(12.0).text_color(cor).font_weight(FontWeight::SEMIBOLD).child(rotulo))
-                    .on_mouse_down(MouseButton::Left, self.ao_apertar(id, cx))
-                    .on_click(self.ao_clicar(comando, cx)),
-            );
-        }
-        linha
-    }
 }
 
 #[cfg(test)]
 mod testes {
-    use super::nome_curto;
+    use super::{BUSCA, BUSCA_MINIMA, largura_da_busca, nome_curto};
+
+    #[test]
+    fn a_busca_cabe_no_topo_com_o_resto() {
+        assert_eq!(largura_da_busca(1900.0), Some(BUSCA));
+        for topo in [500.0, 676.0, 760.0, 846.0, 1000.0, 1160.0] {
+            let busca = largura_da_busca(topo).unwrap_or_default();
+            assert!((BUSCA_MINIMA..=BUSCA).contains(&busca), "{topo}: {busca}");
+            assert!(busca + super::CONTROLES + super::ARRASTE < topo, "{topo}: sobra para arrastar");
+        }
+        assert_eq!(largura_da_busca(386.0), None, "estreito demais: o campo fica na página");
+    }
 
     #[test]
     fn nome_da_saida_fica_curto() {

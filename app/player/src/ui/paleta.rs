@@ -1,11 +1,13 @@
-//! A barra de comandos (Ctrl+K): buscar e executar qualquer comando pelo nome.
+//! A barra de comandos: executar qualquer comando pelo nome. Com páginas na tela, os comandos moram na busca do topo
+//! (`ui::busca`); a barra por cima só abre com o visual sozinho (tela cheia, letra). Também é a busca manual da letra.
 //!
 //! Ela aparece e some sem animação de propósito: é aberta pelo teclado muitas vezes, e qualquer animação viraria
 //! espera. As letras chegam pelo campo de texto do app (`ui::campo`); aqui ficam as teclas que escolhem e executam.
 
-use super::{RAIO_CONTROLE, RAIO_MODULO, icone, mono, tecla, texto};
+use super::{RAIO_CONTROLE, RAIO_MODULO, icone, medidas, mono, tecla};
 use crate::app::Player;
-use gpui::{AnyElement, ClickEvent, Context, FontWeight, KeyDownEvent, Window, div, prelude::*, px};
+use crate::ui::medidas::px;
+use gpui::{AnyElement, ClickEvent, Context, Div, FontWeight, KeyDownEvent, Stateful, Window, div, prelude::*};
 use nucleo::Comando;
 
 /// Minúsculas e sem acento, para "visual" achar "Visual" e "proximo" achar "Próximo".
@@ -116,6 +118,40 @@ impl Player {
         cx.notify();
     }
 
+    /// Um comando numa lista: o ícone do grupo, o nome e as teclas. No escolhido, também o nome estável dele (o mesmo que
+    /// atalhos e skins usam).
+    pub(super) fn linha_de_comando(&self, i: usize, comando: Comando, ativo: bool, largura: f32) -> Stateful<Div> {
+        let c = self.cores();
+        let cor = if ativo { c.texto } else { c.texto_2 };
+        let mut teclas = div().flex().flex_none().gap(px(4.0));
+        for t in comando.teclas() {
+            teclas = teclas.child(tecla(&c, t));
+        }
+        div()
+            .id(("comando", i))
+            .h(px(crate::app::ALTURA_DO_COMANDO))
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(12.0))
+            .px(px(12.0))
+            .rounded(px(RAIO_CONTROLE))
+            .cursor_pointer()
+            .when(ativo, |d| d.bg(c.sel))
+            .when(!ativo, |d| d.hover(|s| s.bg(c.hover)))
+            .child(icone(icone_do_grupo(comando.grupo()), medidas::ICONE_LINHA, cor))
+            .child(
+                medidas::corpo()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .text_color(cor)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(super::linha(comando.nome())),
+            )
+            .when(ativo && largura >= 560.0, |d| d.child(mono().flex_none().text_color(c.texto_2).child(comando.id())))
+            .child(teclas)
+    }
+
     pub(crate) fn ver_paleta(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.paleta.as_ref().is_some_and(|p| p.letra) {
             return self.ver_busca_de_letra(cx);
@@ -140,7 +176,7 @@ impl Player {
             if comando.grupo() != grupo_atual {
                 grupo_atual = comando.grupo();
                 lista = lista.child(
-                    texto(12.0)
+                    medidas::apoio()
                         .flex_none()
                         .px(px(12.0))
                         .pt(px(12.0))
@@ -150,73 +186,37 @@ impl Player {
                         .child(grupo_atual),
                 );
             }
-            let ativo = i == selecionado;
-            let mut teclas = div().flex().flex_none().gap(px(4.0));
-            for t in comando.teclas() {
-                teclas = teclas.child(tecla(&c, t));
-            }
-            lista = lista.child(
-                div()
-                    .id(("paleta-item", i))
-                    .min_h(px(44.0))
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap(px(12.0))
-                    .px(px(12.0))
-                    .rounded(px(RAIO_CONTROLE))
-                    .cursor_pointer()
-                    .when(ativo, |d| d.bg(c.sel))
-                    .when(!ativo, |d| d.hover(|s| s.bg(c.hover)))
-                    .child(icone(icone_do_grupo(comando.grupo()), 18.0, if ativo { c.texto } else { c.texto_2 }))
-                    .child(
-                        texto(14.0)
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .truncate()
-                            .text_color(if ativo { c.texto } else { c.texto_2 })
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(comando.nome()),
-                    )
-                    // O nome estável do comando aparece no item escolhido: é o mesmo que atalhos e skins usam.
-                    .when(ativo && a.janela.w >= 560.0, |d| {
-                        d.child(mono().flex_none().text_color(c.texto_2).child(comando.id()))
-                    })
-                    .child(teclas)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.paleta = None;
-                        this.executar(comando, window, cx);
-                    })),
-            );
+            lista = lista.child(self.linha_de_comando(i, comando, i == selecionado, a.janela.w).on_click(cx.listener(
+                move |this, _: &ClickEvent, window, cx| {
+                    this.paleta = None;
+                    this.executar(comando, window, cx);
+                },
+            )));
         }
         if itens.is_empty() {
             lista = lista.child(
-                texto(14.0).px(px(14.0)).py(px(28.0)).text_color(c.texto_2).child("Nenhum comando com esse nome."),
+                medidas::apoio().px(px(14.0)).py(px(28.0)).text_color(c.texto_2).child("Nenhum comando com esse nome."),
             );
         }
 
-        let entrada = div()
-            .h(px(60.0))
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(12.0))
-            .pl(px(20.0))
-            .pr(px(16.0))
-            .border_b_1()
-            .border_color(c.linha_2)
-            .child(icone("icones/search.svg", 20.0, c.texto_3))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h_full()
-                    .relative()
-                    .flex()
-                    .child(self.receber_texto(cx))
-                    .child(Self::conteudo_do_campo(&c, &consulta, "Buscar ou executar um comando", 16.0, true)),
-            )
-            .child(tecla(&c, "Esc"));
+        let entrada =
+            div()
+                .h(px(60.0))
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(12.0))
+                .pl(px(20.0))
+                .pr(px(16.0))
+                .border_b_1()
+                .border_color(c.linha_2)
+                .child(icone("icones/search.svg", medidas::ICONE, c.texto_3))
+                .child(
+                    div().flex_1().min_w(px(0.0)).h_full().relative().flex().child(self.receber_texto(cx)).child(
+                        Self::conteudo_do_campo(&c, &consulta, "Executar um comando", medidas::CORPO, true, false),
+                    ),
+                )
+                .child(tecla(&c, "Esc"));
 
         let rodape = div()
             .flex()
@@ -236,7 +236,7 @@ impl Player {
                     .gap(px(6.0))
                     .child(tecla(&c, "↑"))
                     .child(tecla(&c, "↓"))
-                    .child(texto(12.0).text_color(c.texto_2).child("escolher")),
+                    .child(medidas::apoio().text_color(c.texto_2).child("escolher")),
             )
             .child(
                 div()
@@ -245,7 +245,7 @@ impl Player {
                     .items_center()
                     .gap(px(6.0))
                     .child(tecla(&c, "Enter"))
-                    .child(texto(12.0).text_color(c.texto_2).child("executar")),
+                    .child(medidas::apoio().text_color(c.texto_2).child("executar")),
             );
 
         let largura = 640.0f32.min(a.janela.w - 32.0).max(240.0);

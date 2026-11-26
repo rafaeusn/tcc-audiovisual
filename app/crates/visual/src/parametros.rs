@@ -149,8 +149,8 @@ impl Spectral {
         impulso: f32,
         p: &Dirigidos,
         luz: &Luz,
-        largura: f32,
-        altura: f32,
+        (largura, altura): (f32, f32),
+        aspecto_visivel: f32,
     ) -> QuadroSpectral {
         let b = &r.bandas;
         // "Slow Spectral Density" do original, mais a morfose rápida conduzida pelo áudio.
@@ -174,7 +174,7 @@ impl Spectral {
         let amplitude = (0.12 + 0.25 * r.loud) * p.motion * r.gate;
         let meia_altura = CAM[2] * (22.5f32).to_radians().tan() * 0.75;
         let desloc = [
-            (self.passeio * 0.9).sin() * amplitude * 0.9 * meia_altura,
+            (self.passeio * 0.9).sin() * amplitude * 0.9 * meia_altura * passeio_que_cabe(aspecto_visivel),
             (self.passeio * 1.3 + 1.1).sin() * amplitude * 0.6 * meia_altura,
         ];
         let mut escala = p.scale * (1.0 + p.spread * (0.5 * r.loud + 0.4 * r.atividade) * r.gate);
@@ -183,6 +183,7 @@ impl Spectral {
 
         // O pump dá um estalo na forma (movimento): vale com ou sem modo seguro. O brilho usa `luz.pulso`.
         escala *= 1.0 + 0.07 * r.pulso * luz.movimento;
+        escala *= escala_que_cabe(aspecto_visivel);
         // Subida (antes do drop): a forma se contrai e treme, acumulando tensão; o drop solta tudo.
         escala *= 1.0 - 0.12 * r.build;
         tremor += r.build * 0.03 + p.spread * r.build * 0.02;
@@ -217,6 +218,16 @@ impl Spectral {
     }
 }
 
+/// Num visual estreito a forma passeia menos para os lados (senão sai cortada): inteiro em 16:9, quase nada em pé.
+fn passeio_que_cabe(aspecto: f32) -> f32 {
+    if aspecto.is_finite() { ((aspecto - 0.55) / (1.6 - 0.55)).clamp(0.1, 1.0) } else { 1.0 }
+}
+
+/// Mais estreito que 4:5, a forma encolhe junto.
+fn escala_que_cabe(aspecto: f32) -> f32 {
+    if aspecto.is_finite() { (aspecto / 0.8).clamp(0.5, 1.0) } else { 1.0 }
+}
+
 /// Matrizes 4x4 em ordem de colunas (como o WGSL espera).
 fn perspectiva(fov_y: f32, aspecto: f32, perto: f32, longe: f32) -> [f32; 16] {
     let f = 1.0 / (fov_y / 2.0).tan();
@@ -242,6 +253,17 @@ fn mat_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn a_forma_cabe_num_visual_estreito() {
+        // O formato do gabarito (16:9) e a tira continuam como eram.
+        for a in [16.0 / 9.0, 10.0] {
+            assert_eq!((passeio_que_cabe(a), escala_que_cabe(a)), (1.0, 1.0));
+        }
+        assert!(passeio_que_cabe(0.7) < 0.2 && passeio_que_cabe(1.05) > 0.4);
+        assert!(escala_que_cabe(0.6) < 0.8 && escala_que_cabe(1.0) == 1.0);
+        assert_eq!((passeio_que_cabe(f32::NAN), escala_que_cabe(f32::NAN)), (1.0, 1.0));
+    }
 
     fn luz(exposicao: f32, cor: [f32; 3]) -> Luz {
         Luz { pulso: 0.9, drop: 0.8, batida: 1.0, exposicao, bloom: 1.5, cor_a: cor, cor_b: cor, movimento: 1.0 }
@@ -306,7 +328,7 @@ mod testes {
         };
         r.bandas.level = 1.0;
         for _ in 0..2000 {
-            let q = s.quadro(1.0 / 60.0, &r, 0.5, &Dirigidos::para(1.0), &l, 1920.0, 1080.0);
+            let q = s.quadro(1.0 / 60.0, &r, 0.5, &Dirigidos::para(1.0), &l, (1920.0, 1080.0), 16.0 / 9.0);
             assert!((0.3..=0.7).contains(&q.offset));
             assert!(q.mvp.iter().all(|v| v.is_finite()));
             assert!(q.escala.is_finite() && q.escala > 0.5 && q.escala < 6.0);
@@ -319,7 +341,7 @@ mod testes {
         let mut s = Spectral::default();
         let l = luz(0.8, [1.0, 1.0, 1.0]);
         let r = Retrato::default();
-        let q = s.quadro(1.0 / 60.0, &r, 0.0, &Dirigidos::para(0.0), &l, 1280.0, 720.0);
+        let q = s.quadro(1.0 / 60.0, &r, 0.0, &Dirigidos::para(0.0), &l, (1280.0, 720.0), 16.0 / 9.0);
         assert_eq!(q.desloc, [0.0, 0.0]);
         assert_eq!(q.explosao, 0.0);
     }

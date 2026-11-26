@@ -101,7 +101,13 @@ impl Player {
     /// O ponteiro se moveu em qualquer lugar da janela. Devolve se algo mudou.
     pub(super) fn ao_mover(&mut self, pos: Point<Pixels>) -> bool {
         self.ponteiro_em = Instant::now();
-        let mut mudou = false;
+        let (x, y) = (f32::from(pos.x), f32::from(pos.y));
+        let mut mudou = self.descanso.mexeu(x, y, self.ponteiro_em);
+        if self.arrastando_divisao {
+            let x = x / crate::ui::medidas::escala();
+            self.ajustes.divisao = Some(crate::arranjo::divisao_no_ponto(&self.arranjo.miolo, x));
+            mudou = true;
+        }
         // O botão da dica saiu de baixo do ponteiro sem avisar (a tela mudou, por exemplo): a dica some.
         if let Some(d) = &self.dica
             && !self.areas.borrow().get(d.id).is_some_and(|a| a.contains(&pos))
@@ -125,6 +131,9 @@ impl Player {
     pub(super) fn ao_soltar(&mut self) -> bool {
         let mudou = self.pressionado.is_some() || self.arrastando_volume || self.arrasto.is_some();
         self.pressionado = None;
+        if std::mem::take(&mut self.arrastando_divisao) {
+            self.salvar();
+        }
         if self.arrastando_volume {
             self.arrastando_volume = false;
             // A barra volta do ponto em que estava esticada.

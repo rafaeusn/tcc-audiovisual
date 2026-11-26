@@ -17,15 +17,21 @@ mod busca_letra;
 mod campo;
 mod casca;
 pub mod configuracoes;
+mod destinos;
+mod detalhe;
 mod dock;
 mod espacos;
 mod estante;
 mod faixa;
 mod fila;
 mod heroi;
+mod historico;
 pub mod ilha;
 mod letra_cheia;
+mod linha;
 mod loja;
+pub mod medidas;
+mod menu;
 mod modulo;
 mod musicas;
 mod paginas;
@@ -33,14 +39,19 @@ mod painel;
 mod paleta;
 mod playlist;
 mod reproducao;
+pub(crate) mod selo;
 mod servicos;
+
+pub(crate) use linha::{linha, linhas};
+pub use paleta::{comandos_para, normalizar};
 
 use crate::app::Player;
 use crate::arranjo::Ret;
 use crate::tema::Cores;
+use crate::ui::medidas::px;
 use gpui::{
     App, ClickEvent, Context, Div, Hsla, MouseButton, MouseDownEvent, Stateful, Svg, Window, canvas, div, prelude::*,
-    px, svg,
+    svg,
 };
 use nucleo::Comando;
 use std::time::Duration;
@@ -50,8 +61,8 @@ pub const FONTE_TITULO: &str = "Instrument Sans Titulo";
 pub const FONTE_NUMERO: &str = "Doto";
 pub const FONTE_MONO: &str = "Fragment Mono";
 
-pub const RAIO_MODULO: f32 = 16.0;
-pub const RAIO_CONTROLE: f32 = 10.0;
+pub use medidas::RAIO_CARTAO as RAIO_MODULO;
+pub use medidas::RAIO_CONTROLE;
 
 /// Uma região posicionada pelo arranjo.
 pub fn caixa(r: Ret) -> Div {
@@ -83,7 +94,7 @@ pub fn numero(tamanho: f32) -> Div {
 
 /// Texto pequeno de largura fixa (tempos, nomes de comando).
 pub fn mono() -> Div {
-    div().font_family(FONTE_MONO).text_size(px(12.0)).line_height(px(16.0))
+    div().font_family(FONTE_MONO).text_size(px(medidas::MICRO)).line_height(px(16.0))
 }
 
 /// Ícone embutido (`icones/<nome>.svg`), pintado com `cor`.
@@ -93,7 +104,7 @@ pub fn icone(caminho: &'static str, tamanho: f32, cor: Hsla) -> Svg {
 
 /// Tecla de atalho, como aparece na tela.
 pub fn tecla(c: &Cores, nome: &'static str) -> Div {
-    texto(12.0)
+    medidas::apoio()
         .h(px(22.0))
         .min_w(px(22.0))
         .px(px(7.0))
@@ -101,7 +112,7 @@ pub fn tecla(c: &Cores, nome: &'static str) -> Div {
         .flex_none()
         .items_center()
         .justify_center()
-        .rounded(px(999.0))
+        .rounded(px(medidas::PILULA))
         .border_1()
         .border_color(c.linha_2)
         .text_color(c.texto_2)
@@ -243,12 +254,29 @@ pub(crate) struct Botao {
     pub afunda: f32,
 }
 
-/// Largura aproximada da dica, em pixels (texto de 12 px em negrito, mais as teclas do atalho). Serve só para
+/// Largura aproximada da dica, em pixels (texto de 14 px em negrito, mais as teclas do atalho). Serve só para
 /// ela não sair da janela; o centro exato quem dá é o layout.
 fn largura_estimada(rotulo: &str, teclas: &[&str]) -> f32 {
-    let texto = 7.2 * rotulo.chars().count() as f32;
+    let texto = 8.4 * rotulo.chars().count() as f32;
     let atalho: f32 = teclas.iter().map(|t| (14.0 + 7.2 * t.chars().count() as f32).max(22.0) + 3.0).sum();
     22.0 + texto + if teclas.is_empty() { 0.0 } else { 8.0 + atalho }
+}
+
+/// As ações de uma linha de lista, por cima dela e só com o mouse em cima: escondidas, não ocupam lugar. `direita` é quanto
+/// deixar livre à direita (o tempo, o coração).
+pub(crate) fn acoes_por_cima(grupo: &'static str, fundo: Hsla, direita: f32) -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .h_full()
+        .right(px(direita))
+        .flex()
+        .items_center()
+        .gap(px(2.0))
+        .pl(px(8.0))
+        .bg(fundo)
+        .invisible()
+        .group_hover(grupo, |s| s.visible())
 }
 
 /// Tamanho de um botão enquanto afunda, arredondado para um número par de pixels: assim o desenho encolhe
@@ -291,6 +319,7 @@ impl Player {
                 nucleo::Repetir::Faixa => "Não repetir",
             },
             Comando::AbrirFila => "Fila",
+            Comando::AbrirLetra => "Letra",
             outro => outro.nome(),
         }
     }
@@ -339,11 +368,16 @@ impl Player {
     pub(crate) fn ver_dica(&self) -> Option<Div> {
         /// Quanto o mouse precisa ficar parado no botão.
         const ESPERA: f32 = 0.45;
-        const ALTURA: f32 = 30.0;
+        const ALTURA: f32 = 32.0;
         const VAO: f32 = 8.0;
         const MARGEM: f32 = 8.0;
         let d = self.dica.as_ref()?;
-        if !self.ajustes.dicas || self.mini || self.paleta.is_some() || self.pressionado.is_some() {
+        if !self.ajustes.dicas
+            || self.mini
+            || self.paleta.is_some()
+            || self.menu.is_some()
+            || self.pressionado.is_some()
+        {
             return None;
         }
         let parado = d.desde.elapsed().as_secs_f32();
@@ -355,10 +389,11 @@ impl Player {
         let janela = self.arranjo.janela;
         let rotulo = d.comando.map_or(d.rotulo, |k| self.rotulo_curto(k));
         let teclas = d.comando.map_or(&[][..], Comando::teclas);
-        let (x0, y0) = (f32::from(area.origin.x), f32::from(area.origin.y));
-        let (x1, y1) = (x0 + f32::from(area.size.width), y0 + f32::from(area.size.height));
+        // A área foi medida em pixels de verdade; a dica é posta na medida das telas.
+        let (x0, y0) = (medidas::logico(area.origin.x), medidas::logico(area.origin.y));
+        let (x1, y1) = (x0 + medidas::logico(area.size.width), y0 + medidas::logico(area.size.height));
 
-        let mut pilula = texto(12.0)
+        let mut pilula = medidas::apoio()
             .h(px(ALTURA))
             .px(px(10.0))
             .flex()
@@ -429,12 +464,25 @@ impl Player {
         self.anim.seguir((id, u32::MAX), if apertado { fundo } else { 1.0 }, if apertado { 0.1 } else { 0.16 })
     }
 
+    /// Um elemento que o Tab alcança (Enter e espaço clicam nele). O anel (2 px) aparece só depois de um Tab: o clique do
+    /// mouse também foca, e ali o anel só atrapalharia.
+    pub(crate) fn focavel<E: InteractiveElement + FluentBuilder>(&self, el: E, raio: f32) -> E {
+        let cor = self.cores().texto;
+        let el = el.tab_index(0);
+        if !self.foco_pelo_teclado {
+            return el;
+        }
+        // Uma borda, e não uma sombra: a sombra pinta também por baixo dos elementos sem fundo.
+        el.focus(move |s| s.rounded(px(raio)).border_2().border_color(cor))
+    }
+
     /// Botão de ícone que afunda ao ser pressionado. A área de clique não muda de tamanho; só o desenho encolhe.
     /// Quem chama liga o clique (`on_click`).
     pub(crate) fn botao(&self, b: Botao, cx: &mut Context<Self>) -> Stateful<Div> {
         let e = self.pressao(b.id, b.afunda);
         div()
             .id(b.id)
+            .map(|d| self.focavel(d, b.raio))
             .group(b.id)
             .size(px(b.tamanho))
             .flex_none()
@@ -457,7 +505,7 @@ impl Player {
             .on_mouse_down(MouseButton::Left, self.ao_apertar(b.id, cx))
     }
 
-    /// Botão só com ícone (40x40, alvo confortável), ligado a um comando.
+    /// Botão só com ícone (alvo confortável), ligado a um comando.
     pub(crate) fn botao_icone(
         &self,
         id: &'static str,
@@ -471,8 +519,8 @@ impl Player {
             Botao {
                 id,
                 icone: caminho,
-                tamanho: 40.0,
-                tamanho_icone: 20.0,
+                tamanho: medidas::ALVO,
+                tamanho_icone: medidas::ICONE,
                 raio: RAIO_CONTROLE,
                 cor: if ativo { c.texto } else { c.texto_2 },
                 fundo: ativo.then_some(c.sel),
@@ -485,6 +533,30 @@ impl Player {
         .on_hover(self.ao_pairar(id, Some(comando), "", cx))
     }
 
+    /// O × que fecha a página (no Palco, volta ao visual; na Estante, ao Início).
+    pub(crate) fn botao_fechar(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
+        let c = self.cores();
+        self.botao(
+            Botao {
+                id,
+                icone: "icones/x.svg",
+                tamanho: medidas::ALVO,
+                tamanho_icone: medidas::ICONE,
+                raio: medidas::PILULA,
+                cor: c.texto_2,
+                fundo: None,
+                realce: c.hover,
+                afunda: 0.94,
+            },
+            cx,
+        )
+        .on_click(cx.listener(|this, _: &gpui::ClickEvent, _, cx| {
+            this.fechar_folha();
+            cx.notify();
+        }))
+        .on_hover(self.ao_pairar(id, None, "Fechar a página", cx))
+    }
+
     /// Seletor em pílula com o marcador que desliza até a opção escolhida. Devolve a moldura (já com o marcador);
     /// quem chama põe dentro uma [`opcao`] por item, na ordem.
     pub(crate) fn seletor(&self, chave: &'static str, largura: f32, n: usize, ativo: usize) -> Div {
@@ -494,11 +566,11 @@ impl Player {
         div()
             .relative()
             .w(px(largura))
-            .h(px(40.0))
+            .h(px(medidas::BOTAO))
             .flex_none()
             .flex()
             .p(px(3.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .border_1()
             .border_color(c.linha_2)
             .child(
@@ -507,8 +579,8 @@ impl Player {
                     .left(px(3.0 + i * cada))
                     .top(px(3.0))
                     .w(px(cada))
-                    .h(px(32.0))
-                    .rounded(px(999.0))
+                    .h(px(medidas::BOTAO - 8.0))
+                    .rounded(px(medidas::PILULA))
                     .bg(c.inv),
             )
     }
@@ -516,16 +588,17 @@ impl Player {
     /// Uma opção de um [`seletor`](Self::seletor). O fundo da opção escolhida é o marcador do seletor.
     pub(crate) fn opcao(&self, id: (&'static str, usize), rotulo: &'static str, ativa: bool) -> Stateful<Div> {
         let c = self.cores();
-        texto(14.0)
+        medidas::apoio()
             .id(id)
+            .map(|d| self.focavel(d, medidas::PILULA))
             .relative()
             .flex_1()
             .min_w(px(0.0))
-            .h(px(32.0))
+            .h(px(medidas::BOTAO - 8.0))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .cursor_pointer()
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(if ativa { c.inv_texto } else { c.texto_2 })
@@ -539,7 +612,7 @@ impl Player {
         let c = self.cores();
         let a = &self.arranjo;
         let base = if a.so_visual { 32.0 } else { a.janela.h - a.dock.y + 16.0 };
-        let mut pilula = texto(14.0)
+        let mut pilula = medidas::corpo()
             .id("aviso")
             .max_w(px((a.janela.w - 32.0).max(200.0)))
             .pl(px(16.0))
@@ -548,22 +621,22 @@ impl Player {
             .flex()
             .items_center()
             .gap(px(12.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .bg(c.inv)
             .text_color(c.inv_texto)
             .font_weight(gpui::FontWeight::SEMIBOLD)
-            .child(div().min_w(px(0.0)).truncate().child(aviso.texto.clone()));
+            .child(div().min_w(px(0.0)).child(linha(aviso.texto.clone())));
         if aviso.desfazer.is_some() {
             // O aviso só bloqueia cliques quando tem o botão; sem ele, não atrapalha o que está embaixo.
             pilula = pilula.occlude().child(
-                texto(14.0)
+                medidas::apoio()
                     .id("aviso-desfazer")
                     .flex_none()
-                    .h(px(30.0))
+                    .h(px(medidas::FICHA))
                     .px(px(12.0))
                     .flex()
                     .items_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .bg(com_alfa(c.inv_texto, 0.14))
                     .cursor_pointer()
                     .hover(|s| s.bg(com_alfa(c.inv_texto, 0.24)))

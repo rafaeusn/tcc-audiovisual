@@ -1,6 +1,7 @@
 //! O corpo de cada módulo do painel: Ritmo, Energia, Estrutura da faixa, Nesta sessão, Visual e Relógio.
 
 use super::*;
+use crate::ui::medidas;
 
 impl Player {
     /// Dígitos do BPM em matriz de pontos. Cada dígito rola até o valor novo em 240 ms (o BPM muda pouco).
@@ -43,14 +44,17 @@ impl Player {
         let tem_pulso = r.gate > 0.5 && r.conf_batida > 0.15 && bpm >= 1.0;
         if !tem_pulso {
             let frase = if r.gate > 0.5 { "Sem pulso firme neste trecho." } else { "Sem som agora." };
-            return div().child(texto(14.0).text_color(c.texto_2).child(frase));
+            return div().child(medidas::apoio().text_color(c.texto_2).child(frase));
         }
         let cor = tema::cor_da_energia(&c, r.energia);
         let mut batidas = div().h(px(14.0)).flex().items_center().gap(px(10.0));
         for i in 0..4 {
             let acesa = i == self.batida;
-            let ponto =
-                div().size(px(if acesa { 12.0 } else { 10.0 })).rounded(px(999.0)).bg(if acesa { cor } else { c.sel });
+            let ponto = div().size(px(if acesa { 12.0 } else { 10.0 })).rounded(px(medidas::PILULA)).bg(if acesa {
+                cor
+            } else {
+                c.sel
+            });
             // O primeiro tempo do compasso tem um anel em volta.
             batidas = batidas.child(
                 div()
@@ -59,7 +63,7 @@ impl Player {
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .when(i == 0, |d| d.border_1().border_color(c.texto_3))
                     .child(ponto.when(i == 0, |d| d.size(px(if acesa { 10.0 } else { 8.0 })))),
             );
@@ -68,23 +72,21 @@ impl Player {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(
-                div().flex().items_end().gap(px(6.0)).child(self.digitos_do_bpm(bpm.round() as u32)).child(
-                    texto(12.0).pb(px(6.0)).text_color(c.texto_2).font_weight(FontWeight::SEMIBOLD).child("BPM"),
-                ),
-            )
+            .child(div().flex().items_end().gap(px(6.0)).child(self.digitos_do_bpm(bpm.round() as u32)).child(
+                medidas::apoio().pb(px(6.0)).text_color(c.texto_2).font_weight(FontWeight::SEMIBOLD).child("BPM"),
+            ))
             .child(batidas)
-            .children(self.tom_da_musica().map(|tom| texto(12.0).text_color(c.texto_2).child(tom)))
+            .children(self.tom_da_musica().map(|tom| medidas::apoio().text_color(c.texto_2).child(tom)))
     }
 
-    /// O tom da música local pré-analisada ("Tom: Lá menor · 8A"), quando a análise tem confiança.
+    /// O tom da música local pré-analisada ("Lá menor (8A)"), quando a análise tem confiança.
     pub(crate) fn tom_da_musica(&self) -> Option<SharedString> {
         if !self.origem_local {
             return None;
         }
         let a = self.local.analise_atual()?;
         let tom = a.tom.as_ref().filter(|t| t.confianca >= 0.15)?;
-        Some(format!("Tom: {} · {}", tom.nome, tom.camelot).into())
+        Some(format!("{} ({})", tom.nome, tom.camelot).into())
     }
 
     pub(super) fn corpo_energia(&self) -> (Option<AnyElement>, Div) {
@@ -108,7 +110,11 @@ impl Player {
             let mut coluna = div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(3.0));
             for p in (0..PONTOS).rev() {
                 coluna =
-                    coluna.child(div().w_full().h(px(6.0)).rounded(px(2.0)).bg(if p < acesos { cor } else { c.ponto }));
+                    coluna.child(div().w_full().h(px(6.0)).rounded(px(medidas::raio_fino(4.0))).bg(if p < acesos {
+                        cor
+                    } else {
+                        c.ponto
+                    }));
             }
             grade = grade.child(coluna);
         }
@@ -127,7 +133,7 @@ impl Player {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(div().size(px(ponto)).rounded(px(999.0)).bg(cor_palavra)),
+                        .child(div().size(px(ponto)).rounded(px(medidas::PILULA)).bg(cor_palavra)),
                 )
                 .into_any_element()
         });
@@ -135,7 +141,7 @@ impl Player {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(titulo(24.0).text_color(cor_palavra).child(palavra))
+            .child(medidas::secao().text_color(cor_palavra).child(palavra))
             .child(grade);
         (direita, corpo)
     }
@@ -160,7 +166,8 @@ impl Player {
             } else {
                 0.22
             };
-            barra = barra.child(div().w(px(w)).h(px(8.0)).flex_none().rounded(px(999.0)).bg(com_alfa(cor, alfa)));
+            barra =
+                barra.child(div().w(px(w)).h(px(8.0)).flex_none().rounded(px(medidas::PILULA)).bg(com_alfa(cor, alfa)));
         }
         // As marcas dos drops, por cima da barra.
         let mut marcas = div().absolute().left(px(0.0)).top(px(-3.0)).w_full().h(px(14.0));
@@ -173,7 +180,7 @@ impl Player {
                     .top(px(0.0))
                     .w(px(2.0))
                     .h(px(14.0))
-                    .rounded(px(1.0))
+                    .rounded(px(medidas::raio_fino(2.0)))
                     .bg(if d <= t { com_alfa(c.texto, 0.4) } else { c.texto }),
             );
         }
@@ -195,12 +202,12 @@ impl Player {
                     .items_end()
                     .justify_between()
                     .gap(px(12.0))
-                    .child(texto(16.0).font_weight(FontWeight::SEMIBOLD).child(atual.nome()))
-                    .child(texto(12.0).flex_none().text_color(c.texto_2).child(format!("desde {}", tempo(desde)))),
+                    .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(atual.nome()))
+                    .child(medidas::apoio().flex_none().text_color(c.texto_2).child(format!("desde {}", tempo(desde)))),
             )
             .child(div().relative().child(barra.overflow_hidden()).child(marcas))
-            .child(texto(12.0).text_color(c.texto_2).child(proximo));
-        let direita = texto(12.0)
+            .child(medidas::apoio().text_color(c.texto_2).child(proximo));
+        let direita = medidas::apoio()
             .flex_none()
             .text_color(c.texto_2)
             .font_weight(FontWeight::MEDIUM)
@@ -221,7 +228,9 @@ impl Player {
             return (
                 None,
                 div().child(
-                    texto(14.0).text_color(c.texto_2).child("Os trechos da música aparecem aqui enquanto ela toca."),
+                    medidas::apoio()
+                        .text_color(c.texto_2)
+                        .child("Os trechos da música aparecem aqui enquanto ela toca."),
                 ),
             );
         };
@@ -241,13 +250,13 @@ impl Player {
                     .w(px(w))
                     .h(px(8.0))
                     .flex_none()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .bg(com_alfa(cor, if ultimo { 1.0 } else { 0.5 })),
             );
         }
         // O que ainda não tocou (só dá para saber o tamanho quando o app informa a duração).
         if duracao.is_some_and(|d| d - agora > 1.0) {
-            barra = barra.child(div().flex_1().min_w(px(4.0)).h(px(8.0)).rounded(px(999.0)).bg(c.ponto));
+            barra = barra.child(div().flex_1().min_w(px(4.0)).h(px(8.0)).rounded(px(medidas::PILULA)).bg(c.ponto));
         }
         let corpo = div()
             .flex()
@@ -259,13 +268,16 @@ impl Player {
                     .items_end()
                     .justify_between()
                     .gap(px(12.0))
-                    .child(texto(16.0).font_weight(FontWeight::SEMIBOLD).child(atual.rotulo.nome()))
+                    .child(medidas::corpo().font_weight(FontWeight::SEMIBOLD).child(atual.rotulo.nome()))
                     .child(
-                        texto(12.0).flex_none().text_color(c.texto_2).child(format!("desde {}", tempo(atual.inicio_s))),
+                        medidas::apoio()
+                            .flex_none()
+                            .text_color(c.texto_2)
+                            .child(format!("desde {}", tempo(atual.inicio_s))),
                     ),
             )
             .child(barra.overflow_hidden());
-        let direita = texto(12.0)
+        let direita = medidas::apoio()
             .flex_none()
             .text_color(c.texto_2)
             .font_weight(FontWeight::MEDIUM)
@@ -283,7 +295,9 @@ impl Player {
         for (i, v) in niveis.into_iter().enumerate() {
             let alvo = if tocando { 3.0 + 11.0 * v.clamp(0.0, 1.0) } else { 3.0 };
             let h = self.anim.seguir(("equalizador", i as u32), alvo, if tocando { 0.08 } else { 0.22 });
-            barras = barras.child(div().w(px(3.0)).h(px(h)).rounded(px(2.0)).bg(tema::cor_da_energia(&c, r.energia)));
+            barras = barras.child(
+                div().w(px(3.0)).h(px(h)).rounded(px(medidas::raio_fino(4.0))).bg(tema::cor_da_energia(&c, r.energia)),
+            );
         }
         barras
     }
@@ -297,20 +311,20 @@ impl Player {
             let esta = i == 0 && self.midia.faixa.as_ref().is_some_and(|f| f.chave() == o.faixa.chave());
             let capa = match &o.capa {
                 Some(imagem) => img(imagem.clone())
-                    .size(px(44.0))
+                    .size(px(medidas::CAPA_DA_LINHA))
                     .flex_none()
-                    .rounded(px(RAIO_CONTROLE))
+                    .rounded(px(medidas::raio_da_capa(medidas::CAPA_DA_LINHA)))
                     .grayscale(cinza)
                     .into_any_element(),
                 None => div()
-                    .size(px(44.0))
+                    .size(px(medidas::CAPA_DA_LINHA))
                     .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
                     .rounded(px(RAIO_CONTROLE))
                     .bg(c.bloco)
-                    .child(icone("icones/wave.svg", 20.0, c.texto_3))
+                    .child(icone("icones/wave.svg", medidas::ICONE, c.texto_3))
                     .into_any_element(),
             };
             let artista: SharedString =
@@ -318,7 +332,7 @@ impl Player {
             let direita = if esta {
                 self.equalizador(self.midia.tocando && self.retrato.gate > 0.5).into_any_element()
             } else {
-                texto(12.0)
+                medidas::apoio()
                     .flex_none()
                     .text_color(c.texto_2)
                     .font_weight(FontWeight::MEDIUM)
@@ -327,12 +341,16 @@ impl Player {
             };
             lista = lista.child(
                 div()
-                    .min_h(px(56.0))
+                    .min_h(px(medidas::LINHA))
                     .py(px(6.0))
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(capa)
+                    .child({
+                        let servico = self.servico_do_app(&o.faixa.app);
+                        let servicos: Vec<&str> = servico.as_deref().into_iter().collect();
+                        self.com_selo(capa, &servicos, medidas::MARCA_DA_LINHA)
+                    })
                     .child(
                         div()
                             .flex_1()
@@ -340,22 +358,22 @@ impl Player {
                             .flex()
                             .flex_col()
                             .child(
-                                texto(14.0)
+                                medidas::corpo()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .truncate()
-                                    .child(SharedString::from(o.faixa.titulo.clone())),
+                                    .child(crate::ui::linha(o.faixa.titulo.clone())),
                             )
-                            .child(texto(14.0).text_color(c.texto_2).truncate().child(artista)),
+                            .child(medidas::apoio().text_color(c.texto_2).child(crate::ui::linha(artista))),
                     )
                     .child(direita),
             );
         }
         if total == 0 {
-            lista = lista
-                .child(texto(14.0).py(px(8.0)).text_color(c.texto_2).child("As músicas desta sessão aparecem aqui."));
+            lista = lista.child(
+                medidas::apoio().py(px(8.0)).text_color(c.texto_2).child("As músicas desta sessão aparecem aqui."),
+            );
         }
         let direita = (total > 0).then(|| {
-            texto(12.0)
+            medidas::apoio()
                 .flex_none()
                 .text_color(c.texto_2)
                 .font_weight(FontWeight::MEDIUM)
@@ -378,12 +396,14 @@ impl Player {
                 .items_center()
                 .justify_center()
                 .gap(px(8.0))
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .cursor_pointer()
                 .when(ligado, |d| d.bg(c.inv))
                 .when(!ligado, |d| d.border_1().border_color(c.linha_2).hover(|s| s.bg(c.hover)))
-                .child(icone(caminho, 18.0, cor))
-                .child(texto(14.0).text_color(cor).font_weight(FontWeight::SEMIBOLD).truncate().child(rotulo))
+                .child(icone(caminho, medidas::ICONE_LINHA, cor))
+                .child(
+                    medidas::apoio().text_color(cor).font_weight(FontWeight::SEMIBOLD).child(crate::ui::linha(rotulo)),
+                )
         };
         let corpo = div()
             .flex()
@@ -396,7 +416,7 @@ impl Player {
                 botao("rapido-seguro", "icones/shield.svg", "Modo seguro", self.ajustes.modo_seguro)
                     .on_click(self.ao_clicar(Comando::AlternarModoSeguro, cx)),
             );
-        let direita = texto(12.0)
+        let direita = medidas::apoio()
             .flex_none()
             .text_color(c.texto_2)
             .font_weight(FontWeight::MEDIUM)
@@ -412,8 +432,8 @@ impl Player {
             .flex()
             .items_center()
             .gap(px(2.0))
-            .child(numero(44.0).child(format!("{h:02}")))
-            .child(numero(44.0).text_color(c.texto_3).child(":"))
-            .child(numero(44.0).child(format!("{m:02}")))
+            .child(numero(medidas::PAGINA).child(format!("{h:02}")))
+            .child(numero(medidas::PAGINA).text_color(c.texto_3).child(":"))
+            .child(numero(medidas::PAGINA).child(format!("{m:02}")))
     }
 }

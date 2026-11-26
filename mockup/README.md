@@ -11,6 +11,10 @@ artefato continua sendo a versão publicada; o caminho de volta está na seção
 - Plano do app de verdade (Rust + GPUI): [docs/plano-v1.md](../docs/plano-v1.md). O mockup é só referência visual e
   de comportamento; nada daqui vira código do app diretamente.
 
+A remodelagem das telas de streaming (25/11/2026) tem um protótipo à parte, em HTML comum, na pasta
+[`remodelagem/`](remodelagem/index.html), publicado em https://claude.ai/artifact/EGKMxFWu6fMk1rAwpzCuUF (privado). Ela não faz
+parte do canvas do mockup v4.
+
 ## 1. Estrutura
 
 | Caminho | O que é |

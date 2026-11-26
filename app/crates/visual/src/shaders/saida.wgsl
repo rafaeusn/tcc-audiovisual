@@ -5,6 +5,7 @@
 // U.v[0] = (largura, altura, raio dos cantos em px, tempo)
 // U.v[1] = (batida, aberração, granulação, vinheta)
 // U.v[2] = (exposição, cinza 0..1, _, _)
+// U.v[3] = o pedaço da cena que aparece: (u0, v0, largura, altura); inteira = (0, 0, 1, 1)
 // t0 = cena
 
 fn hash_px(p0: vec2<f32>) -> f32 {
@@ -19,7 +20,10 @@ fn fs_saida(in: VsOut) -> @location(0) vec4<f32> {
     let raio = U.v[0].z;
     let d = in.uv - 0.5;
     let ab = U.v[1].y * (0.003 + U.v[1].x * 0.01);
-    var c = vec3(tex(t0, in.uv + d * ab).r, tex(t0, in.uv).g, tex(t0, in.uv - d * ab).b);
+    // A aberração cresce a partir do centro da cena; a vinheta, do centro do retângulo.
+    let uv = U.v[3].xy + in.uv * U.v[3].zw;
+    let dc = uv - 0.5;
+    var c = vec3(tex(t0, uv + dc * ab).r, tex(t0, uv).g, tex(t0, uv - dc * ab).b);
 
     // Compressão pela luminância máxima: segura o brilho sem lavar a cor para branco.
     let m = max(max(c.r, c.g), c.b);

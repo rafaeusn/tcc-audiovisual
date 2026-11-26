@@ -1,11 +1,12 @@
 //! O herói: a moldura do visual, com a faixa que está tocando por cima. As páginas Biblioteca e Loja abrem
 //! como uma folha sobre ele, e o visual continua rodando por baixo.
 
-use super::{Botao, caixa, icone, saida, texto, titulo};
+use super::{Botao, caixa, icone, medidas, saida, texto, titulo};
 use crate::app::Player;
 use crate::arranjo::RAIO;
-use crate::navegacao::Rota;
-use gpui::{Context, Div, FontWeight, Hsla, SharedString, WindowControlArea, div, prelude::*, px, rgba};
+use crate::navegacao::{AbaDaBiblioteca, Rota};
+use crate::ui::medidas::px;
+use gpui::{Context, Div, FontWeight, Hsla, SharedString, WindowControlArea, div, prelude::*, rgba};
 use nucleo::{Comando, Pagina};
 
 /// Sobre o visual o texto é sempre claro: o fundo do visual é preto em qualquer tema.
@@ -37,6 +38,9 @@ impl Player {
             16.0
         };
         let mut heroi = caixa(a.heroi).overflow_hidden();
+        if self.nav.atual().is_none() || a.so_visual {
+            heroi = heroi.on_mouse_down(gpui::MouseButton::Right, self.ao_menu(|| crate::menu::Alvo::Visual, cx));
+        }
         // Na skin imersiva o visual é o fundo da janela inteira: o herói não tem moldura.
         if !a.so_visual && !self.imersivo() {
             heroi = heroi.rounded(px(RAIO)).border_1().border_color(if self.edicao { c.linha_2 } else { c.linha });
@@ -53,9 +57,9 @@ impl Player {
                 .justify_center()
                 .gap(px(8.0))
                 .p(px(24.0))
-                .child(texto(16.0).text_color(claro(0xff)).font_weight(FontWeight::SEMIBOLD).child(erro.clone()))
+                .child(medidas::corpo().text_color(claro(0xff)).font_weight(FontWeight::SEMIBOLD).child(erro.clone()))
                 .child(
-                    texto(14.0)
+                    medidas::apoio()
                         .text_color(claro(0xc2))
                         .child("O som continua sendo analisado. Atualize o driver de vídeo e abra o app de novo."),
                 );
@@ -64,23 +68,26 @@ impl Player {
         // Em cima: qual visual está rodando (clique troca) e o atalho para os ajustes.
         let chip = div()
             .id("visual-chip")
-            .h(px(32.0))
+            .h(px(medidas::FICHA))
             .flex()
             .items_center()
             .gap(px(8.0))
             .px(px(12.0))
-            .rounded(px(999.0))
+            .rounded(px(medidas::PILULA))
             .bg(rgba(0x0a0a0c99))
             .border_1()
             .border_color(claro(0x1f))
             .cursor_pointer()
             .hover(|s| s.bg(rgba(0x1c1c20cc)))
-            .child(icone("icones/wave.svg", 16.0, claro(0xc2)))
+            .child(icone("icones/wave.svg", medidas::ICONE_LINHA, claro(0xc2)))
             .child(
-                texto(14.0).text_color(claro(0xf2)).font_weight(FontWeight::SEMIBOLD).child(self.ajustes.modelo.nome()),
+                medidas::apoio()
+                    .text_color(claro(0xf2))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(self.ajustes.modelo.nome()),
             )
             // Na janela mini (e expandido na Estante) o visual inteiro arrasta a janela: o botão fica "por cima".
-            .when(self.mini || self.expandido, |d| d.occlude())
+            .when(self.mini || self.so_visual_na_estante(), |d| d.occlude())
             .child(self.marca("visual-chip"))
             .on_hover(self.ao_pairar("visual-chip", Some(Comando::ProximoVisual), "", cx))
             .on_click(self.ao_clicar(Comando::ProximoVisual, cx));
@@ -98,7 +105,7 @@ impl Player {
                         icone: caminho,
                         tamanho,
                         tamanho_icone: tamanho * 0.5,
-                        raio: 999.0,
+                        raio: medidas::PILULA,
                         cor: claro(0xf2),
                         fundo: Some(rgba(0x16161acc).into()),
                         realce: rgba(0x3a3a40e6).into(),
@@ -114,12 +121,12 @@ impl Player {
         if self.edicao {
             // No modo edição o herói só mostra o que ele é.
             topo = topo.child(
-                texto(14.0)
-                    .h(px(32.0))
+                medidas::apoio()
+                    .h(px(medidas::FICHA))
                     .px(px(12.0))
                     .flex()
                     .items_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .bg(rgba(0x0a0a0c99))
                     .border_1()
                     .border_color(claro(0x1f))
@@ -134,9 +141,9 @@ impl Player {
                         Botao {
                             id: "visual-ajustes",
                             icone: "icones/sliders.svg",
-                            tamanho: 40.0,
-                            tamanho_icone: 20.0,
-                            raio: 999.0,
+                            tamanho: medidas::ALVO,
+                            tamanho_icone: medidas::ICONE,
+                            raio: medidas::PILULA,
                             cor: claro(0xf2),
                             fundo: Some(rgba(0x2a2a2e99).into()),
                             realce: rgba(0x3a3a40cc).into(),
@@ -153,8 +160,8 @@ impl Player {
                     )),
                 )
             });
-            if a.so_visual && self.estante() && self.expandido {
-                // Estante com o visual expandido: o botão encolher leva de volta ao trilho (Esc também).
+            if a.so_visual && self.so_visual_na_estante() {
+                // Estante só com o visual: o botão encolher traz a página de volta (Esc também).
                 topo = topo.child(redondo("visual-encolher", "icones/shrink.svg", 40.0, Comando::ExpandirVisual, cx));
             }
             if self.mini {
@@ -215,7 +222,7 @@ impl Player {
         };
         let ao_vivo = self.midia.tocando || self.retrato.gate > 0.5;
         let tamanho = tamanho_do_titulo(a.titulo, nome.chars().count());
-        let tamanho_sub = if tamanho >= 40.0 { 20.0 } else { 14.0 };
+        let tamanho_sub = if tamanho >= 36.0 { medidas::DESTAQUE } else { medidas::APOIO };
         // Troca de faixa: o título novo sobe 8 px e aparece em 260 ms; o artista chega 40 ms depois.
         let desde = self.troca_de_faixa.elapsed().as_secs_f32();
         let (entra_titulo, entra_sub) = (saida(desde / 0.26), saida((desde - 0.04) / 0.26));
@@ -238,16 +245,15 @@ impl Player {
                     .items_center()
                     .gap(px(8.0))
                     .when(mini_minima, |d| d.hidden())
-                    .child(icone("icones/headphones.svg", 16.0, claro(0xcc)))
+                    .child(icone("icones/headphones.svg", medidas::ICONE_LINHA, claro(0xcc)))
                     .child(
-                        texto(14.0)
+                        medidas::apoio()
                             .min_w(px(0.0))
-                            .truncate()
                             .text_color(claro(0xcc))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(origem),
+                            .child(super::linha(origem)),
                     )
-                    .when(ao_vivo, |d| d.child(div().size(px(6.0)).rounded(px(999.0)).bg(claro(0xf4)))),
+                    .when(ao_vivo, |d| d.child(div().size(px(6.0)).rounded(px(medidas::PILULA)).bg(claro(0xf4)))),
             )
             .child(
                 titulo(tamanho)
@@ -269,8 +275,7 @@ impl Player {
                         .opacity(entra_sub)
                         .text_color(claro(0xc2))
                         .font_weight(FontWeight::MEDIUM)
-                        .truncate()
-                        .child(sub),
+                        .child(super::linha(sub)),
                 )
             });
 
@@ -282,12 +287,13 @@ impl Player {
             self.anim.definir(("folha", 0), 0.0);
             // Na janela mini não há topo: o visual inteiro arrasta a janela (os botões ficam por cima).
             heroi
-                .when(self.mini || (a.so_visual && self.estante() && self.expandido), |h| {
+                .when(self.mini || (a.so_visual && self.so_visual_na_estante()), |h| {
                     h.child(div().absolute().size_full().occlude().window_control_area(WindowControlArea::Drag))
                 })
                 .child(rodape)
                 // Com os controles escondidos, eles também saem da frente do arrasto.
-                .when(!self.mini || mostra > 0.02, |h| h.child(topo))
+                // Com a página fora da frente, fica só a música.
+                .when((!self.mini || mostra > 0.02) && !self.descanso.dormindo(), |h| h.child(topo))
                 .children(controles)
         }
     }
@@ -296,7 +302,6 @@ impl Player {
     /// fechar é imediato.
     fn ver_folha(&self, cx: &mut Context<Self>) -> Div {
         let c = self.cores();
-        let paleta = self.paleta_do_espaco();
         let p = self.anim.seguir(("folha", 0), 1.0, 0.24);
         let folha = div()
             .absolute()
@@ -306,76 +311,52 @@ impl Player {
             .h(px((self.arranjo.heroi.h - 24.0 * (1.0 - p)).max(0.0)))
             .opacity(p)
             .rounded(px(RAIO))
-            .bg(paleta.folha)
+            .bg(c.folha)
             .border_1()
-            .border_color(paleta.filete)
+            .border_color(c.linha)
             .overflow_hidden()
             .occlude()
             .flex()
-            .flex_col()
-            // O degradê da cor do espaço no topo, por baixo do conteúdo.
-            .child(div().absolute().top_0().left_0().w_full().h(px(160.0)).bg(gpui::linear_gradient(
-                180.0,
-                gpui::linear_color_stop(paleta.topo, 0.0),
-                gpui::linear_color_stop(crate::ui::com_alfa(paleta.topo, 0.0), 1.0),
-            )))
-            .child(self.ver_topo_da_folha(cx));
-        // As páginas dos serviços.
-        let pagina_de_servico: Option<Div> = match self.nav.atual() {
-            Some(Rota::ParaVoce) => Some(self.ver_para_voce(cx)),
-            Some(Rota::Faixa(item)) => Some(self.ver_faixa(item, cx)),
-            Some(Rota::Busca) => Some(self.ver_busca(cx)),
-            Some(rota @ (Rota::Album(_) | Rota::Playlist(_) | Rota::Artista(_))) => Some(self.ver_detalhe(rota, cx)),
-            Some(Rota::Biblioteca) => match self.nav.espaco() {
-                crate::navegacao::Espaco::Servico(s) => Some(self.ver_biblioteca_do_servico(s, cx)),
-                _ => None,
-            },
-            _ => None,
+            .flex_col();
+        let Some(rota) = self.nav.atual() else { return folha };
+        let folha = folha.when(rota.tem_filtro(), |d| d.child(self.ver_filtro(cx)));
+        // Cada passo da navegação guarda a própria rolagem (abrir um álbum começa do topo; voltar volta onde estava).
+        let rolando = |pagina: Div| {
+            div()
+                .id(("folha-pagina", self.nav.passo() as usize))
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_y_scroll()
+                .track_scroll(&self.rolagem_da_pagina())
+                .child(pagina)
         };
-        if let Some(pagina) = pagina_de_servico {
-            // Cada página guarda a própria rolagem (abrir um álbum começa do topo; voltar volta onde estava).
-            let chave = self.nav.atual().map_or(0, crate::paginas::chave_da_rota);
-            return folha
-                .child(div().id(("folha-servico", chave)).flex_1().min_h(px(0.0)).overflow_y_scroll().child(pagina));
-        }
-        let folha = folha;
-        if self.pagina() == Pagina::Loja {
-            return folha.child(self.ver_loja(cx));
-        }
-        if self.pagina() == Pagina::Biblioteca {
-            return folha.child(self.ver_biblioteca(cx));
-        }
-        if self.pagina() == Pagina::Configuracoes {
-            return folha.child(self.ver_configuracoes(cx));
-        }
-        // Página sem conteúdo próprio: diz o que vem, sem inventar dados.
-        folha
-            .items_center()
-            .justify_center()
-            .gap(px(12.0))
-            .p(px(24.0))
-            .child(icone("icones/lib.svg", 32.0, c.texto_2))
-            .child(titulo(28.0).child("Biblioteca"))
-            .child(texto(14.0).max_w(px(440.0)).text_color(c.texto_2).text_center().child(
-                "Aqui vão entrar as suas pastas de música, com fila e busca. Por enquanto o Player funciona no Modo Escuta: toque em qualquer app e o visual acompanha.",
-            ))
-            .child(
-                texto(14.0)
-                    .id("folha-voltar")
-                    .mt(px(8.0))
-                    .h(px(40.0))
-                    .px(px(16.0))
-                    .flex()
-                    .items_center()
-                    .rounded(px(999.0))
-                    .bg(c.inv)
-                    .text_color(c.inv_texto)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .cursor_pointer()
-                    .hover(|s| s.opacity(0.9))
-                    .child("Voltar ao visual")
-                    .on_click(self.ao_clicar(Comando::AbrirPagina(Pagina::Inicio), cx)),
-            )
+        // As páginas de detalhe e a Fila não têm a faixa do filtro: no Palco, o × fica por cima delas.
+        // Na Estante, no mesmo canto, a página larga.
+        let no_canto = (rota.item().is_some() || rota == &Rota::Fila).then(|| {
+            let fundo = crate::ui::com_alfa(c.parede, 0.72);
+            if self.estante() {
+                self.botao_da_pagina_larga(cx).map(|b| b.bg(fundo).into_any_element())
+            } else {
+                Some(self.botao_fechar("folha-fechar", cx).bg(fundo).into_any_element())
+            }
+        });
+        let fechar = no_canto.flatten().map(|b| div().absolute().top(px(10.0)).right(px(10.0)).child(b));
+        let folha = match rota {
+            Rota::Inicio => folha.child(rolando(self.ver_inicio(cx))),
+            Rota::Busca => folha.child(rolando(self.ver_busca(cx))),
+            Rota::Faixa(item) => folha.child(rolando(self.ver_faixa(item, cx))),
+            Rota::Album(_) | Rota::Playlist(_) | Rota::Artista(_) => folha.child(rolando(self.ver_detalhe(rota, cx))),
+            Rota::Biblioteca(_) => match self.nav.aba() {
+                AbaDaBiblioteca::Pastas => folha.child(self.ver_musicas(cx)),
+                AbaDaBiblioteca::Historico => folha.child(self.ver_historico(cx)),
+                _ => folha.child(rolando(self.ver_biblioteca(cx))),
+            },
+            Rota::Fila => folha.child(self.ver_fila(cx)),
+            Rota::Loja => folha.child(self.ver_loja(cx)),
+            Rota::Configuracoes => folha.child(self.ver_configuracoes(cx)),
+        };
+        // Por cima de tudo, os cantos: a imagem do alto de uma página não sai pela curva da folha.
+        folha.children(fechar).when(!self.imersivo(), |f| f.child(self.cantos_da_folha()))
     }
 }
 
@@ -391,6 +372,7 @@ mod testes {
         assert_eq!(tamanho_do_titulo(64.0, 80), 36.0);
         // Nunca fica ilegível, nem em janela pequena com nome enorme.
         assert_eq!(tamanho_do_titulo(28.0, 80), 22.0);
+        assert_eq!(tamanho_do_titulo(72.0, 200), 40.0, "um nome de 200 letras");
         assert!(tamanho_do_titulo(40.0, 30) < tamanho_do_titulo(40.0, 10));
     }
 }

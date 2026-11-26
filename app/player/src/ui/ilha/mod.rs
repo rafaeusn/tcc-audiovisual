@@ -72,6 +72,8 @@ struct Dados {
     artista: String,
     origem: String,
     capa: Option<Arc<RenderImage>>,
+    /// O selo de onde a música toca (o da frente primeiro).
+    marcas: Vec<crate::ui::selo::Marca>,
     tocando: bool,
     barras: [f32; 4],
     tom: Hsla,
@@ -127,6 +129,7 @@ impl Dados {
             titulo: faixa.titulo,
             artista: faixa.artista,
             capa: p.capa.clone(),
+            marcas: p.marcas_do_tocando(),
             tocando: p.midia.tocando,
             barras,
             tom: tema::cor_de(p.tom),
@@ -945,6 +948,18 @@ fn risco(modo: Modo, s: f32) -> Medidas {
 
 impl Render for VistaIlha {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A Ilha tem o tamanho dela: o da interface vale só na janela principal. Os tamanhos são calculados aqui, ao montar
+        // os elementos; depois a escala da principal volta (os eventos dela convertem as posições do mouse por ela).
+        let antes = crate::ui::medidas::escala();
+        crate::ui::medidas::definir_escala(1.0);
+        let vista = self.montar(window, cx);
+        crate::ui::medidas::definir_escala(antes);
+        vista
+    }
+}
+
+impl VistaIlha {
+    fn montar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let agora = Instant::now();
         let dt = agora.duration_since(self.anterior).as_secs_f32().clamp(0.0, 0.1);
         self.anterior = agora;

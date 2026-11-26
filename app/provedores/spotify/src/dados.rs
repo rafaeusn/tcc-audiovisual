@@ -4,7 +4,7 @@
 use crate::conta::Login;
 use crate::conversao::{self, Pagina};
 use crate::pathfinder::Falha;
-use provedores::{Faixa, Item, Prateleira};
+use provedores::{Detalhe, Faixa, Item, Prateleira};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,6 +24,9 @@ const POR_PAGINA_DA_BIBLIOTECA: u32 = 50;
 const POR_PAGINA_DA_DISCOGRAFIA: u32 = 50;
 
 pub type Pedido = (&'static str, Value);
+
+/// Os itens de uma página e o que mais se sabe dela.
+pub type ComDetalhe = (Vec<Item>, Detalhe);
 
 /// Quem responde as consultas: o Pathfinder com a sessão de verdade, ou um de mentira nos testes.
 pub trait Consultas: Send + Sync {
@@ -144,20 +147,38 @@ impl Dados {
         conversao::inicio(&data)
     }
 
-    pub fn album(&self, id: &str) -> Result<Vec<Item>, String> {
+    pub fn album(&self, id: &str) -> Result<ComDetalhe, String> {
         conferir(id)?;
         let lista = Lista { op: "getAlbum", por_pagina: POR_PAGINA_DE_ALBUM, maximo: MAXIMO };
         let pagina = |de: u32| json!({"uri": format!("spotify:album:{id}"), "locale": "", "offset": de, "limit": POR_PAGINA_DE_ALBUM});
-        self.em_paginas(&lista, Self::prazo(), pagina, conversao::album).map(em_itens)
+        self.com_detalhe(&lista, pagina, conversao::album, conversao::detalhe_do_album)
+    }
+
+    /// As faixas de todas as páginas, com o detalhe tirado da primeira.
+    fn com_detalhe(
+        &self,
+        lista: &Lista,
+        variaveis: impl Fn(u32) -> Value,
+        ler: impl Fn(&Value) -> Result<Pagina<Faixa>, String>,
+        detalhar: impl Fn(&Value) -> Detalhe,
+    ) -> Result<ComDetalhe, String> {
+        let detalhe = std::cell::OnceCell::new();
+        let faixas = self.em_paginas(lista, Self::prazo(), variaveis, |v| {
+            detalhe.get_or_init(|| detalhar(v));
+            ler(v)
+        })?;
+        Ok((em_itens(faixas), detalhe.into_inner().unwrap_or_default()))
     }
 
     /// As populares e os lançamentos. Sem os lançamentos, as populares valem sozinhas.
-    pub fn artista(&self, id: &str) -> Result<Vec<Item>, String> {
+    pub fn artista(&self, id: &str) -> Result<ComDetalhe, String> {
         conferir(id)?;
         let ate = Self::prazo();
         let endereco = format!("spotify:artist:{id}");
         let variaveis = json!({"uri": endereco, "locale": "", "preReleaseV2": false});
-        let mut itens = em_itens(conversao::populares(&self.uma("queryArtistOverview", variaveis, ate)?)?);
+        let resumo = self.uma("queryArtistOverview", variaveis, ate)?;
+        let mut itens = em_itens(conversao::populares(&resumo)?);
+        let detalhe = conversao::detalhe_do_artista(&resumo);
         let lista = Lista {
             op: "queryArtistDiscographyAll",
             por_pagina: POR_PAGINA_DA_DISCOGRAFIA,
@@ -170,15 +191,16 @@ impl Dados {
             Err(motivo) if itens.is_empty() => return Err(motivo),
             Err(_) => eprintln!("spotify: a discografia de um artista não veio"),
         }
-        Ok(itens)
+        Ok((itens, detalhe))
     }
 
-    pub fn playlist(&self, id: &str) -> Result<Vec<Item>, String> {
+    pub fn playlist(&self, id: &str) -> Result<ComDetalhe, String> {
         let ate = Self::prazo();
         if id == conversao::CURTIDAS {
             let lista = Lista { op: "fetchLibraryTracks", por_pagina: POR_PAGINA, maximo: MAXIMO };
             let pagina = |de: u32| json!({"offset": de, "limit": POR_PAGINA});
-            return self.em_paginas(&lista, ate, pagina, conversao::curtidas).map(em_itens);
+            let faixas = self.em_paginas(&lista, ate, pagina, conversao::curtidas)?;
+            return Ok((em_itens(faixas), Detalhe::default()));
         }
         conferir(id)?;
         let lista = Lista { op: "fetchPlaylist", por_pagina: POR_PAGINA, maximo: MAXIMO };
@@ -186,7 +208,7 @@ impl Dados {
             json!({"uri": format!("spotify:playlist:{id}"), "offset": de, "limit": POR_PAGINA,
                 "enableWatchFeedEntrypoint": false})
         };
-        self.em_paginas(&lista, ate, pagina, conversao::playlist).map(em_itens)
+        self.com_detalhe(&lista, pagina, conversao::playlist, conversao::detalhe_da_playlist)
     }
 
     /// As playlists, os álbuns e os artistas da conta, na ordem do Spotify, com as Músicas Curtidas primeiro.
@@ -287,7 +309,7 @@ mod testes {
     #[test]
     fn playlist_longa_vem_inteira_e_em_ordem() {
         let (d, _, pedidos) = dados("longa", Falso::default(), |_, v| Ok(pagina_de_playlist(v, 250)));
-        let itens = d.playlist("37abc").expect("playlist");
+        let itens = d.playlist("37abc").expect("playlist").0;
         let ids: Vec<&str> = itens.iter().filter_map(Item::faixa).map(|f| f.id.as_str()).collect();
         assert_eq!(ids.len(), 250);
         assert_eq!((ids[0], ids[100], ids[249]), ("f0", "f100", "f249"));
@@ -299,7 +321,7 @@ mod testes {
     #[test]
     fn playlist_enorme_para_no_teto() {
         let (d, _, _) = dados("enorme", Falso::default(), |_, v| Ok(pagina_de_playlist(v, 9000)));
-        assert_eq!(d.playlist("x").expect("playlist").len(), MAXIMO as usize);
+        assert_eq!(d.playlist("x").expect("playlist").0.len(), MAXIMO as usize);
     }
 
     #[test]
@@ -327,7 +349,7 @@ mod testes {
             v["limit"] = json!(v["limit"].as_u64().unwrap_or(0).min(50));
             Ok(pagina_de_playlist(&v, 170))
         });
-        let itens = d.playlist("x").expect("playlist");
+        let itens = d.playlist("x").expect("playlist").0;
         let ids: Vec<&str> = itens.iter().filter_map(Item::faixa).map(|f| f.id.as_str()).collect();
         assert_eq!((ids.len(), ids[60], ids[169]), (170, "f60", "f169"));
     }
@@ -344,7 +366,7 @@ mod testes {
                 .collect();
             Ok(json!({"artistUnion": {"discography": {"all": {"totalCount": 1900, "items": itens}}}}))
         });
-        assert_eq!(d.artista("a1").expect("artista").len(), 200);
+        assert_eq!(d.artista("a1").expect("artista").0.len(), 200);
         assert_eq!(pedidos.lock().expect("pedidos").len(), 5);
     }
 
@@ -364,7 +386,7 @@ mod testes {
         let (d, _, pedidos) = dados("curtidas", Falso::default(), |_, _| {
             Ok(json!({"me": {"library": {"tracks": {"totalCount": 1, "items": [{"track": {"data": faixa(1)}}]}}}}))
         });
-        assert_eq!(d.playlist(conversao::CURTIDAS).expect("curtidas").len(), 1);
+        assert_eq!(d.playlist(conversao::CURTIDAS).expect("curtidas").0.len(), 1);
         assert_eq!(pedidos.lock().expect("pedidos")[0].0, "fetchLibraryTracks");
     }
 
@@ -388,7 +410,7 @@ mod testes {
                 .collect();
             Ok(json!({"artistUnion": {"discography": {"all": {"totalCount": 70, "items": itens}}}}))
         });
-        let itens = d.artista("a1").expect("artista");
+        let itens = d.artista("a1").expect("artista").0;
         assert_eq!(itens.iter().filter(|i| i.faixa().is_some()).count(), 1);
         assert_eq!(itens.iter().filter(|i| matches!(i, Item::Album(_))).count(), 70);
     }
@@ -401,7 +423,7 @@ mod testes {
             }
             _ => Err(Falha::Codigo),
         });
-        assert_eq!(d.artista("a1").expect("artista").len(), 1);
+        assert_eq!(d.artista("a1").expect("artista").0.len(), 1);
     }
 
     #[test]
@@ -431,7 +453,7 @@ mod testes {
             *n += 1;
             if *n == 1 { Err(Falha::Sessao) } else { Ok(pagina_de_playlist(v, 1)) }
         });
-        assert_eq!(d.playlist("x").expect("playlist").len(), 1);
+        assert_eq!(d.playlist("x").expect("playlist").0.len(), 1);
         if cfg!(windows) {
             assert_eq!(falso.renovacoes.load(Ordering::SeqCst), 1);
         }

@@ -141,8 +141,8 @@ pub fn frase_da_conta(conta: &Conta) -> String {
         SituacaoDaConta::Entrando => "Conectando…".into(),
         SituacaoDaConta::Dentro => {
             let plano = match conta.premium {
-                Some(true) => " · Premium",
-                Some(false) => " · Gratuita",
+                Some(true) => " (Premium)",
+                Some(false) => " (gratuita)",
                 None => "",
             };
             format!("Conectado como {}{plano}", conta.nome.as_deref().unwrap_or_default())
@@ -246,8 +246,8 @@ mod testes {
             premium,
             ..Conta::default()
         };
-        assert_eq!(frase_da_conta(&dentro(Some(true))), "Conectado como Ana · Premium");
-        assert_eq!(frase_da_conta(&dentro(Some(false))), "Conectado como Ana · Gratuita");
+        assert_eq!(frase_da_conta(&dentro(Some(true))), "Conectado como Ana (Premium)");
+        assert_eq!(frase_da_conta(&dentro(Some(false))), "Conectado como Ana (gratuita)");
         assert_eq!(frase_da_conta(&dentro(None)), "Conectado como Ana");
         assert_eq!(botao_da_conta(&dentro(None)), Some("Sair"));
     }

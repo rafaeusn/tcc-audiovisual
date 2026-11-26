@@ -92,6 +92,15 @@ pub fn escolher(alvo: &Faixa, resultados: &[Item], recusados: &[String]) -> Opti
     })
 }
 
+/// O mesmo artista nos resultados da busca pelo nome dele: só quando o primeiro resultado é um artista com o mesmo
+/// nome (sem acento e sem caixa). Um homônimo menos ouvido, ou uma música com o nome do artista, não vira link.
+pub fn mesmo_artista(nome: &str, resultados: &[Item]) -> Option<provedores::Artista> {
+    match resultados.first()? {
+        Item::Artista(a) if crate::detalhes::mesmo_nome(&a.nome, nome) => Some(a.clone()),
+        _ => None,
+    }
+}
+
 /// Os pares guardados, pela chave (`servico:id`) da faixa de origem.
 #[derive(Default)]
 pub struct Pares {
@@ -146,6 +155,18 @@ impl AGravar {
 #[allow(clippy::expect_used)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn o_artista_no_outro_servico_so_com_o_mesmo_nome_primeiro() {
+        let artista = |nome: &str| {
+            Item::Artista(provedores::Artista { nome: nome.into(), id: nome.into(), ..Default::default() })
+        };
+        let faixa = Item::Faixa(Faixa { titulo: "Beyoncé".into(), ..Default::default() });
+        assert_eq!(mesmo_artista("Beyoncé", &[artista("BEYONCE"), artista("x")]).map(|a| a.id), Some("BEYONCE".into()));
+        assert_eq!(mesmo_artista("Beyoncé", &[faixa.clone(), artista("Beyoncé")]), None, "o primeiro é uma música");
+        assert_eq!(mesmo_artista("Lume", &[artista("Lume Tribute")]), None, "outro nome");
+        assert_eq!(mesmo_artista("Lume", &[]), None, "não existe lá");
+    }
 
     fn info(servico: &str, situacao: Situacao, capacidades: &[Capacidade]) -> InfoDoProvedor {
         InfoDoProvedor {

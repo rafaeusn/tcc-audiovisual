@@ -1,4 +1,4 @@
-//! Os campos de texto do app (a busca de músicas e a barra de comandos).
+//! Os campos de texto do app (a busca do topo, o filtro da Biblioteca, a barra de comandos e a janela de playlist).
 //!
 //! As letras chegam pelo caminho de texto do sistema, não pelas teclas: assim funcionam os acentos com tecla
 //! morta (´ + a = á), o teclado de outras línguas e o colar. As teclas de controle (Enter, Esc, setas, apagar)
@@ -6,10 +6,12 @@
 
 use super::texto;
 use crate::app::Player;
+use crate::navegacao::Campo;
 use crate::tema::Cores;
+use crate::ui::medidas::px;
 use gpui::{
     App, Bounds, Context, Div, ElementInputHandler, EntityInputHandler, FontWeight, Pixels, Point, SharedString,
-    UTF16Selection, Window, canvas, div, prelude::*, px,
+    UTF16Selection, Window, canvas, div, prelude::*,
 };
 use std::ops::Range;
 
@@ -52,17 +54,14 @@ impl Player {
     /// O texto do campo que está recebendo o teclado agora.
     fn campo_ativo(&mut self) -> Option<&mut String> {
         // Lido antes: depois dos empréstimos abaixo, `self` não pode mais ser lido inteiro.
-        let na_biblioteca = self.campo_de_busca_ativo();
+        let campo = self.campo_no_teclado();
         if let Some(j) = self.janela_playlist.as_mut() {
             return Some(&mut j.nome);
         }
         if let Some(p) = self.paleta.as_mut() {
             return Some(&mut p.consulta);
         }
-        if self.buscando_musicas && na_biblioteca {
-            return Some(&mut self.busca_musicas);
-        }
-        None
+        campo.map(|c| self.buscas.do_campo_mut(c))
     }
 
     /// O campo ativo mudou de texto: cada campo reage do seu jeito.
@@ -75,16 +74,29 @@ impl Player {
             if !p.letra {
                 self.rolagem_paleta.scroll_to_item(0);
             }
-        } else if self.buscando_musicas {
-            self.local.buscar(&self.busca_musicas);
-            self.local.remoto.buscar(&self.busca_musicas);
+        } else {
+            match self.campo_no_teclado() {
+                Some(Campo::Busca) => self.procurar(),
+                Some(Campo::Biblioteca) => self.local.buscar(&self.buscas.biblioteca),
+                None => {}
+            }
         }
+    }
+
+    /// O texto do campo da página estava todo selecionado? (Deixa de estar.) A barra de comandos e a janela de
+    /// playlist não selecionam.
+    fn soltar_selecao(&mut self) -> bool {
+        std::mem::take(&mut self.campo_selecionado) && self.janela_playlist.is_none() && self.paleta.is_none()
     }
 
     /// Põe `texto` no fim do campo ativo (o colar usa isto).
     pub(crate) fn escrever_no_campo(&mut self, texto: &str) {
         self.marcado = None;
+        let selecionado = self.soltar_selecao();
         let Some(s) = self.campo_ativo() else { return };
+        if selecionado {
+            s.clear();
+        }
         let fim = s.len();
         // Colar texto com quebras de linha: vira uma linha só.
         let texto = texto.replace(['\r', '\n', '\t'], " ");
@@ -95,8 +107,9 @@ impl Player {
     /// Apaga a última letra (ou tudo, com Ctrl).
     pub(crate) fn apagar_no_campo(&mut self, tudo: bool) {
         self.marcado = None;
+        let selecionado = self.soltar_selecao();
         let Some(s) = self.campo_ativo() else { return };
-        if tudo {
+        if tudo || selecionado {
             s.clear();
         } else {
             s.pop();
@@ -130,17 +143,25 @@ impl Player {
 
     /// O texto do campo com o cursor colado nele, ou a frase de exemplo quando vazio. Texto mais largo que o
     /// campo some pela esquerda: o fim, onde se escreve, fica sempre à vista.
-    pub(crate) fn conteudo_do_campo(c: &Cores, valor: &str, exemplo: &'static str, tamanho: f32, ativo: bool) -> Div {
+    pub(crate) fn conteudo_do_campo(
+        c: &Cores,
+        valor: &str,
+        exemplo: &'static str,
+        tamanho: f32,
+        ativo: bool,
+        selecionado: bool,
+    ) -> Div {
         let cursor = div().w(px(2.0)).h(px(tamanho + 4.0)).flex_none().bg(c.texto);
         let corpo = div().flex_1().min_w(px(0.0)).h_full().flex().items_center().overflow_hidden();
         if valor.is_empty() {
             return corpo.when(ativo, |d| d.child(cursor)).child(
                 texto(tamanho)
+                    .flex_1()
+                    .min_w(px(0.0))
                     .pl(px(if ativo { 4.0 } else { 0.0 }))
                     .text_color(c.texto_3)
                     .font_weight(FontWeight::MEDIUM)
-                    .truncate()
-                    .child(exemplo),
+                    .child(super::linha(exemplo)),
             );
         }
         corpo
@@ -150,6 +171,7 @@ impl Player {
                     .flex_none()
                     .font_weight(FontWeight::MEDIUM)
                     .whitespace_nowrap()
+                    .when(selecionado, |d| d.bg(super::com_alfa(c.texto, 0.22)))
                     .child(SharedString::from(valor.to_string())),
             )
             .when(ativo, |d| d.child(cursor.ml(px(1.0))))
@@ -181,9 +203,9 @@ impl EntityInputHandler for Player {
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
         let marcado = self.marcado.clone()?;
         let s = match (self.janela_playlist.as_ref(), self.paleta.as_ref()) {
-            (Some(j), _) => &j.nome,
-            (None, Some(p)) => &p.consulta,
-            (None, None) => &self.busca_musicas,
+            (Some(j), _) => j.nome.as_str(),
+            (None, Some(p)) => p.consulta.as_str(),
+            (None, None) => self.buscas.do_campo(self.campo_no_teclado()?),
         };
         Some(para_utf16(s, marcado.start)..para_utf16(s, marcado.end))
     }
@@ -200,7 +222,11 @@ impl EntityInputHandler for Player {
         cx: &mut Context<Self>,
     ) {
         let marcado = self.marcado.take();
+        let selecionado = self.soltar_selecao() && faixa.is_none() && marcado.is_none();
         let Some(s) = self.campo_ativo() else { return };
+        if selecionado {
+            s.clear();
+        }
         // Sem faixa: troca o que estava marcado (a tecla morta esperando a letra) ou escreve no fim.
         let alvo = match (faixa, marcado) {
             (Some(f), _) => faixa_em_bytes(s, &f),
@@ -221,7 +247,11 @@ impl EntityInputHandler for Player {
         cx: &mut Context<Self>,
     ) {
         let marcado = self.marcado.take();
+        let selecionado = self.soltar_selecao() && faixa.is_none() && marcado.is_none();
         let Some(s) = self.campo_ativo() else { return };
+        if selecionado {
+            s.clear();
+        }
         let alvo = match (faixa, marcado) {
             (Some(f), _) => faixa_em_bytes(s, &f),
             (None, Some(m)) => m,

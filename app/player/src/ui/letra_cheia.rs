@@ -1,12 +1,13 @@
 //! A letra em tela cheia: o visual ocupa a janela inteira, escurecido, e a letra rola grande por cima, a linha de
 //! agora enchendo como num karaokê. Abre pelo módulo Letra, pela barra de comandos ou pela tecla Y; Esc fecha.
 
-use super::{icone, letra_enchendo, linha_da_letra, texto};
+use super::{icone, letra_enchendo, linha_da_letra, medidas};
 use crate::app::{PASSO_DA_LETRA, Player};
 use crate::letrista::Situacao;
+use crate::ui::medidas::px;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, SharedString, WindowControlArea, div, hsla,
-    linear_color_stop, linear_gradient, prelude::*, px,
+    linear_color_stop, linear_gradient, prelude::*,
 };
 use nucleo::Comando;
 
@@ -36,11 +37,11 @@ impl Player {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(999.0))
+                .rounded(px(medidas::PILULA))
                 .cursor_pointer()
                 .bg(hsla(0.0, 0.0, 1.0, 0.08))
                 .hover(|s| s.bg(hsla(0.0, 0.0, 1.0, 0.18)))
-                .child(icone(caminho, 18.0, branco(0.9)))
+                .child(icone(caminho, medidas::ICONE_LINHA, branco(0.9)))
                 .child(self.marca(id))
                 .occlude()
                 .on_hover(self.ao_pairar(id, None, dica, cx))
@@ -52,13 +53,12 @@ impl Player {
             .flex()
             .flex_col()
             .child(
-                texto(16.0)
+                medidas::corpo()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(branco(0.95))
-                    .truncate()
-                    .child(SharedString::from(faixa.titulo.clone())),
+                    .child(super::linha(faixa.titulo.clone())),
             )
-            .child(texto(14.0).text_color(branco(0.6)).truncate().child(SharedString::from(faixa.artista.clone())));
+            .child(medidas::apoio().text_color(branco(0.6)).child(super::linha(faixa.artista.clone())));
         // O topo arrasta a janela (sem a barra de título do Player); os botões ficam fora do arrasto.
         let topo = div()
             .flex_none()
@@ -120,7 +120,7 @@ impl Player {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(texto(22.0).text_color(branco(0.7)).child(frase))
+                .child(medidas::destaque().text_color(branco(0.7)).child(frase))
                 .into_any_element()
         };
         if self.midia.faixa.as_ref().is_none_or(|f| f.titulo.is_empty()) {
@@ -241,7 +241,12 @@ impl Player {
             format!("Letra: {de_onde}")
         };
         let mut rodape = vec![
-            texto(13.0).flex_1().min_w(px(0.0)).truncate().text_color(branco(0.55)).child(fonte).into_any_element(),
+            medidas::apoio()
+                .flex_1()
+                .min_w(px(0.0))
+                .text_color(branco(0.55))
+                .child(super::linha(fonte))
+                .into_any_element(),
         ];
         if destaque {
             let passo = |id: &'static str, caminho: &'static str, s: f32| {
@@ -252,10 +257,10 @@ impl Player {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(999.0))
+                    .rounded(px(medidas::PILULA))
                     .cursor_pointer()
                     .hover(|st| st.bg(hsla(0.0, 0.0, 1.0, 0.14)))
-                    .child(icone(caminho, 16.0, branco(0.8)))
+                    .child(icone(caminho, medidas::ICONE_LINHA, branco(0.8)))
                     .child(self.marca(id))
                     .on_hover(self.ao_pairar(
                         id,

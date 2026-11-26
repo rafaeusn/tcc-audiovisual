@@ -46,8 +46,9 @@ pub struct Destino<'a> {
     /// (x, y, largura, altura) em pixels físicos.
     pub retangulo: (f32, f32, f32, f32),
     pub raio: f32,
-    /// Desenhar o visual neste tamanho (pixels físicos) e esticar no retângulo. Enquanto o retângulo anima (o visual
-    /// da Estante crescendo até a janela), os alvos ficam num tamanho só e nada é recriado a cada quadro.
+    /// Desenhar o visual neste tamanho (pixels físicos) e mostrar o meio dele no retângulo, sem deformar. Enquanto o
+    /// retângulo muda (o visual crescendo até a janela, a divisória arrastada), os alvos ficam num tamanho só e nada é
+    /// recriado a cada quadro.
     pub interno: Option<(f32, f32)>,
 }
 
@@ -57,6 +58,19 @@ pub fn tamanho_dos_alvos(lw: f32, lh: f32, interno: Option<(f32, f32)>) -> (u32,
     let lado = |v: f32| if v.is_finite() { (v.round().max(0.0) as u32).clamp(2, LADO_MAXIMO) } else { 2 };
     (lado(w), lado(h))
 }
+
+/// O pedaço da cena de `iw` x `ih` que cobre um retângulo de `lw` x `lh` sem deformar, em coordenadas de textura:
+/// (u0, v0, largura, altura). Sempre o meio; com números que não servem, a cena inteira.
+pub fn recorte(lw: f32, lh: f32, iw: f32, ih: f32) -> [f32; 4] {
+    if ![lw, lh, iw, ih].iter().all(|v| v.is_finite() && *v >= 1.0) {
+        return INTEIRA;
+    }
+    let escala = (lw / iw).max(lh / ih);
+    let (du, dv) = ((lw / (iw * escala)).min(1.0), (lh / (ih * escala)).min(1.0));
+    [(1.0 - du) / 2.0, (1.0 - dv) / 2.0, du, dv]
+}
+
+const INTEIRA: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
 struct Alvo {
     _textura: wgpu::Texture,
@@ -472,7 +486,7 @@ impl Motor {
 
         match quadro.modelo {
             Modelo::Spectral => {
-                let q = self.spectral.quadro(dt, r, impulso, &p, &luz, w as f32, h as f32);
+                let q = self.spectral.quadro(dt, r, impulso, &p, &luz, (w as f32, h as f32), lw / lh);
                 escrever(
                     &self.p_sim,
                     [[q.offset, q.deriva, q.distorcao, 1.0], zero, zero, zero, zero, zero, zero, zero],
@@ -575,7 +589,7 @@ impl Motor {
                 [lw, lh, destino.raio.max(0.0), self.relogio],
                 [luz.batida, p.aberr * calma, granulacao * calma, vinheta],
                 [luz.exposicao, if quadro.cinza { 1.0 } else { 0.0 }, 0.0, 0.0],
-                zero,
+                if destino.interno.is_some() { recorte(lw, lh, w as f32, h as f32) } else { INTEIRA },
                 zero,
                 zero,
                 zero,
@@ -650,7 +664,20 @@ fn bloco_pontos(q: &QuadroSpectral, luz: &Luz, w: f32, h: f32) -> [f32; 40] {
 
 #[cfg(test)]
 mod testes {
-    use super::tamanho_dos_alvos;
+    use super::{INTEIRA, recorte, tamanho_dos_alvos};
+
+    #[test]
+    fn o_recorte_cobre_o_retangulo_sem_deformar() {
+        assert_eq!(recorte(800.0, 600.0, 800.0, 600.0), INTEIRA);
+        assert_eq!(recorte(400.0, 300.0, 800.0, 600.0), INTEIRA, "a mesma forma, menor");
+        // Mais estreito que a cena: corta os lados.
+        assert_eq!(recorte(400.0, 600.0, 800.0, 600.0), [0.25, 0.0, 0.5, 1.0]);
+        // A tira da página larga: corta em cima e embaixo.
+        assert_eq!(recorte(800.0, 96.0, 800.0, 768.0), [0.0, 0.4375, 1.0, 0.125]);
+        for r in [(f32::NAN, 1.0, 1.0, 1.0), (10.0, 0.0, 10.0, 10.0), (10.0, 10.0, f32::INFINITY, 10.0)] {
+            assert_eq!(recorte(r.0, r.1, r.2, r.3), INTEIRA);
+        }
+    }
 
     #[test]
     fn os_alvos_seguem_o_tamanho_interno_quando_pedido() {
